@@ -1,0 +1,249 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(0.968 0.006 245);
+  --foreground: oklch(0.20 0.035 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.035 245);
+
+  --primary: oklch(0.47 0.16 255);
+  --primary-foreground: oklch(0.99 0.005 250);
+  --primary-glow: oklch(0.62 0.17 255);
+
+  --secondary: oklch(0.948 0.010 245);
+  --secondary-foreground: oklch(0.28 0.045 250);
+  --muted: oklch(0.960 0.009 245);
+  --muted-foreground: oklch(0.48 0.028 235);
+  --accent: oklch(0.925 0.052 255);
+  --accent-foreground: oklch(0.30 0.105 255);
+
+  --destructive: oklch(0.6 0.20 25);
+  --destructive-foreground: oklch(0.99 0.005 250);
+  --warning: oklch(0.72 0.15 75);
+  --warning-foreground: oklch(0.32 0.09 70);
+  --warning-bg: oklch(0.97 0.05 90);
+  --success: oklch(0.62 0.14 160);
+  --success-foreground: oklch(0.99 0.005 250);
+  --info: oklch(0.55 0.15 240);
+  --info-foreground: oklch(0.99 0.005 250);
+  --info-bg: oklch(0.96 0.03 240);
+
+  --border: oklch(0.885 0.012 245);
+  --input: oklch(0.875 0.012 245);
+  --ring: oklch(0.56 0.15 255);
+  --editable: oklch(0.975 0.045 95);
+  --editable-border: oklch(0.85 0.10 90);
+
+  --sidebar: oklch(0.22 0.042 255);
+  --sidebar-foreground: oklch(0.88 0.018 245);
+  --sidebar-primary: oklch(0.68 0.17 255);
+  --sidebar-primary-foreground: oklch(0.99 0.005 250);
+  --sidebar-accent: oklch(0.31 0.055 255);
+  --sidebar-accent-foreground: oklch(0.99 0.005 250);
+  --sidebar-border: oklch(0.32 0.040 255);
+
+  --gradient-brand: linear-gradient(135deg, var(--primary), var(--primary-glow));
+  --gradient-subtle: linear-gradient(180deg, oklch(0.965 0.008 245), var(--background));
+  --shadow-elegant: 0 8px 18px -16px color-mix(in oklab, var(--primary) 42%, transparent);
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 10px 22px -20px rgb(15 23 42 / 0.18);
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--border);
+}
+
+html,
+body {
+  min-height: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+table,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.brand-gradient {
+  background: var(--primary);
+}
+
+.subtle-gradient {
+  background-image: var(--gradient-subtle);
+}
+
+.shadow-elegant {
+  box-shadow: var(--shadow-elegant);
+}
+
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--sidebar-foreground) 25%, transparent) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--sidebar-foreground) 25%, transparent);
+  border-radius: 9999px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--card);
+  box-shadow: var(--shadow-soft);
+}
+
+.section-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.section-caption {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.field {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--input);
+  border-radius: 0.5rem;
+  background: var(--card);
+  padding: 0.55rem 0.7rem;
+  outline: none;
+}
+
+.field:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 16%, transparent);
+}
+
+.table-field {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  padding: 0.45rem 0.55rem;
+  outline: none;
+}
+
+.table-field:hover,
+.table-field:focus {
+  background: var(--card);
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 16%, transparent);
+}
+
+.manual-field,
+.cell-editable {
+  background: var(--editable);
+  box-shadow: inset 0 0 0 1px var(--editable-border);
+}
+
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-table tbody tr:hover {
+  background: color-mix(in oklab, var(--accent) 25%, transparent);
+}
+
+.invoice-grid {
+  table-layout: fixed;
+}
+
+.invoice-grid th,
+.invoice-grid td {
+  overflow: hidden;
+}
+
+.invoice-grid th {
+  white-space: nowrap;
+}
+
+.resizable-th {
+  user-select: none;
+}
+
+.column-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: -4px;
+  top: 0;
+  z-index: 30;
+  width: 8px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.column-resize-handle::after {
+  position: absolute;
+  bottom: 8px;
+  right: 3px;
+  top: 8px;
+  width: 1px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--border) 90%, var(--foreground));
+  content: "";
+  opacity: 0.38;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.resizable-th:hover .column-resize-handle::after,
+.column-resize-handle:focus-visible::after {
+  background: var(--primary);
+  opacity: 1;
+}
