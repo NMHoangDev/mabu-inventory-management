@@ -5,6 +5,11 @@ import {
   BarChart3,
   Bell,
   Boxes,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
   ChevronsLeft,
   ChevronsRight,
   Download,
@@ -34,7 +39,7 @@ import {
   type InvoiceDocument,
   type InvoiceRow
 } from "@/lib/schema";
-import { normalizeDateForInput, normalizeFinancials, normalizeNumberText, parseNumeric } from "@/lib/format";
+import { calculateVatFields, normalizeDateForInput, normalizeFinancials, normalizeNumberText, parseNumeric } from "@/lib/format";
 
 type Tab =
   | "dashboard"
@@ -49,12 +54,19 @@ type Tab =
   | "blueprint";
 
 type Filters = {
+  file: string;
   supplier: string;
   product: string;
+  invoiceNumber: string;
   sku: string;
   dateFrom: string;
   dateTo: string;
 };
+
+type SummarySort = {
+  key: SummaryColumnKey;
+  direction: "asc" | "desc";
+} | null;
 
 type Lookups = {
   suppliers: string[];
@@ -109,7 +121,7 @@ const defaultSummaryColumnWidths: Record<SummaryColumnKey, number> = {
   quantity: 130,
   unitPrice: 150,
   amountBeforeTax: 210,
-  vatRate: 100,
+  vatRate: 118,
   vatAmount: 160,
   totalAfterTax: 210,
   unitPriceAfterTax: 190,
@@ -139,7 +151,6 @@ const numericKeys = new Set<ExcelColumnKey>([
 ]);
 const internalKeys = new Set<ExcelColumnKey>(["internalProductCode", "adjustedInvoiceName", "retailName"]);
 const vatOptions = ["0", "5", "8", "10"];
-const unitOptions = ["Cái", "Bộ", "Cuốn", "Quyển", "Gói", "Hộp", "Sợi", "Kg", "Mét"];
 
 function fileSizeLabel(size: number) {
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
@@ -279,20 +290,31 @@ export default function InvoiceManager() {
   const [files, setFiles] = useState<File[]>([]);
   const [fileHashes, setFileHashes] = useState<Record<string, string>>({});
   const [filters, setFilters] = useState<Filters>({
+    file: "",
     supplier: "",
     product: "",
+    invoiceNumber: "",
     sku: "",
     dateFrom: "",
     dateTo: ""
   });
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
-  const [savingRowId, setSavingRowId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [filePanelOpen, setFilePanelOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [summaryColumnWidths, setSummaryColumnWidths] = useState(defaultSummaryColumnWidths);
+  const [summarySort, setSummarySort] = useState<SummarySort>(null);
+  const [vatDrafts, setVatDrafts] = useState<Record<string, string>>({});
+  const [vatConfirm, setVatConfirm] = useState<{
+    rowId: string;
+    previousRate: string;
+    nextRate: string;
+    preview: InvoiceRow;
+  } | null>(null);
 
   const navItems: Array<{ key: Tab; label: string; group: string; icon: typeof LayoutDashboard }> = [
     { key: "dashboard", label: "Dashboard", group: "Tổng quan", icon: LayoutDashboard },
@@ -308,15 +330,18 @@ export default function InvoiceManager() {
 
   const loadState = async () => {
     const [stateResponse, lookupResponse] = await Promise.all([fetch("/api/state"), fetch("/api/lookups")]);
-    const data = (await stateResponse.json()) as AppStore;
-    const lookupData = (await lookupResponse.json()) as Lookups;
+    const data = await readJsonResponse<AppStore & { error?: string }>(stateResponse);
+    const lookupData = await readJsonResponse<Lookups & { error?: string }>(lookupResponse);
+    if (!stateResponse.ok) throw new Error(data.error ?? "Không tải được dữ liệu hóa đơn.");
+    if (!lookupResponse.ok) throw new Error(lookupData.error ?? "Không tải được danh sách gợi ý.");
     setStore(data);
     setLookups({ ...emptyLookups, ...lookupData });
   };
 
   const refreshLookups = async () => {
     const response = await fetch("/api/lookups");
-    const data = (await response.json()) as Lookups;
+    const data = await readJsonResponse<Lookups & { error?: string }>(response);
+    if (!response.ok) throw new Error(data.error ?? "Không tải được danh sách gợi ý.");
     setLookups({ ...emptyLookups, ...data });
   };
 
@@ -325,6 +350,18 @@ export default function InvoiceManager() {
       .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Không tải được dữ liệu."))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(""), 5200);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timeout = window.setTimeout(() => setError(""), 7600);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
 
   useEffect(() => {
     let cancelled = false;
@@ -355,14 +392,43 @@ export default function InvoiceManager() {
 
   const filteredRows = useMemo(() => {
     return store.rows.filter((row) => {
+      if (filters.file && !includesText(row.sourceFileName, filters.file)) return false;
       if (filters.supplier && !includesText(row.supplierName, filters.supplier)) return false;
       if (filters.product && !includesText(row.inputProductName, filters.product) && !includesText(row.adjustedInvoiceName, filters.product)) {
         return false;
       }
+      if (filters.invoiceNumber && !includesText(row.invoiceNumber, filters.invoiceNumber)) return false;
       if (filters.sku && !includesText(row.internalProductCode, filters.sku)) return false;
       return isDateWithin(row.invoiceDate, filters.dateFrom, filters.dateTo);
     });
   }, [filters, store.rows]);
+
+  const displayedRows = useMemo(() => {
+    if (!summarySort || summarySort.key === "__delete" || summarySort.key === "__index") return filteredRows;
+
+    const valueForSort = (row: InvoiceRow) => {
+      if (summarySort.key === "__file") return row.sourceFileName;
+      return row[summarySort.key as ExcelColumnKey] ?? "";
+    };
+
+    return [...filteredRows].sort((first, second) => {
+      const firstValue = valueForSort(first);
+      const secondValue = valueForSort(second);
+      const firstNumber = parseNumeric(firstValue as number | string);
+      const secondNumber = parseNumeric(secondValue as number | string);
+      const multiplier = summarySort.direction === "asc" ? 1 : -1;
+
+      if (summarySort.key === "invoiceDate") {
+        return normalizeDateForInput(firstValue as string).localeCompare(normalizeDateForInput(secondValue as string)) * multiplier;
+      }
+
+      if (firstNumber !== undefined && secondNumber !== undefined) {
+        return (firstNumber - secondNumber) * multiplier;
+      }
+
+      return String(firstValue ?? "").localeCompare(String(secondValue ?? ""), "vi", { numeric: true, sensitivity: "base" }) * multiplier;
+    });
+  }, [filteredRows, summarySort]);
 
   const queuedFiles = useMemo(
     () => files.map((file) => getQueuedFileStatus(file, fileHashes[fileSignature(file)] ?? "", store)),
@@ -378,6 +444,23 @@ export default function InvoiceManager() {
     }),
     [queuedFiles]
   );
+  const recentDocuments = useMemo(
+    () => [...store.documents].sort((first, second) => new Date(second.uploadedAt).getTime() - new Date(first.uploadedAt).getTime()).slice(0, 8),
+    [store.documents]
+  );
+  const documentById = useMemo(() => new Map(store.documents.map((document) => [document.id, document])), [store.documents]);
+  const visibleDocuments = useMemo(() => {
+    const rowCountByDocument = new Map<string, number>();
+    for (const row of displayedRows) rowCountByDocument.set(row.documentId, (rowCountByDocument.get(row.documentId) ?? 0) + 1);
+
+    return Array.from(rowCountByDocument.entries())
+      .map(([documentId, rowCount]) => {
+        const document = documentById.get(documentId);
+        return document ? { document, rowCount } : null;
+      })
+      .filter((item): item is { document: InvoiceDocument; rowCount: number } => Boolean(item))
+      .sort((first, second) => new Date(second.document.uploadedAt).getTime() - new Date(first.document.uploadedAt).getTime());
+  }, [displayedRows, documentById]);
 
   const totalDocuments = store.documents.length;
   const errorDocuments = store.documents.filter((document) => document.status === "error").length;
@@ -393,6 +476,13 @@ export default function InvoiceManager() {
   const summaryTableWidth = useMemo(
     () => Object.values(summaryColumnWidths).reduce((total, width) => total + width, 0),
     [summaryColumnWidths]
+  );
+  const vatSelectOptions = useMemo(
+    () =>
+      Array.from(new Set([...vatOptions, ...lookups.vatRates].map((vat) => normalizeNumberText(vat)).filter(Boolean))).sort(
+        (first, second) => (parseNumeric(first) ?? 0) - (parseNumeric(second) ?? 0)
+      ),
+    [lookups.vatRates]
   );
 
   const minWidthForSummaryColumn = (key: SummaryColumnKey) => {
@@ -425,6 +515,15 @@ export default function InvoiceManager() {
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+  };
+
+  const toggleSummarySort = (key: SummaryColumnKey) => {
+    if (key === "__delete" || key === "__index") return;
+    setSummarySort((current) => {
+      if (!current || current.key !== key) return { key, direction: "asc" };
+      if (current.direction === "asc") return { key, direction: "desc" };
+      return null;
+    });
   };
 
   const addFiles = (fileList: FileList | File[]) => {
@@ -489,50 +588,107 @@ export default function InvoiceManager() {
     }));
   };
 
-  const saveRow = async (row: InvoiceRow) => {
-    setSavingRowId(row.id);
+  const saveRowPatch = async (rowId: string, patch: Partial<InvoiceRow>) => {
     try {
-      const response = await fetch(`/api/rows/${row.id}`, {
+      const response = await fetch(`/api/rows/${rowId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(row)
+        body: JSON.stringify(patch)
       });
-      const data = (await response.json()) as AppStore;
-      if (!response.ok) throw new Error("Không lưu được dòng.");
-      setStore(data);
-      await refreshLookups();
+      const data = await readJsonResponse<AppStore & { error?: string }>(response);
+      if (!response.ok) throw new Error(data.error ?? "Không lưu được dòng.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Không lưu được dòng.");
-    } finally {
-      setSavingRowId("");
     }
+  };
+
+  const requestVatRateChange = (row: InvoiceRow, nextRateValue: string) => {
+    if (vatConfirm) return;
+    const nextRate = normalizeNumberText(nextRateValue);
+    if (nextRate === normalizeNumberText(row.vatRate)) return;
+
+    setVatConfirm({
+      rowId: row.id,
+      previousRate: String(row.vatRate ?? ""),
+      nextRate,
+      preview: calculateVatFields(row, nextRate)
+    });
+  };
+
+  const cancelVatRateChange = () => {
+    if (vatConfirm) {
+      setVatDrafts((current) => {
+        const next = { ...current };
+        delete next[vatConfirm.rowId];
+        return next;
+      });
+    }
+    setVatConfirm(null);
+  };
+
+  const applyVatRateChange = async () => {
+    if (!vatConfirm) return;
+
+    const nextRow = vatConfirm.preview;
+    setVatConfirm(null);
+    setStore((current) => ({
+      ...current,
+      rows: current.rows.map((row) => (row.id === nextRow.id ? nextRow : row))
+    }));
+    setNotice(
+      `Đã cập nhật % thuế ${vatConfirm.nextRate || "0"} và tính lại giá trị thuế, thành tiền sau thuế, đơn giá sau thuế.`
+    );
+    setVatDrafts((current) => {
+      const next = { ...current };
+      delete next[nextRow.id];
+      return next;
+    });
+    await saveRowPatch(nextRow.id, {
+      vatRate: nextRow.vatRate,
+      vatAmount: nextRow.vatAmount,
+      totalAfterTax: nextRow.totalAfterTax,
+      unitPriceAfterTax: nextRow.unitPriceAfterTax
+    });
   };
 
   const deleteRow = async (rowId: string) => {
     const row = store.rows.find((item) => item.id === rowId);
     if (!window.confirm("Xóa dòng scan nhầm này? Tài liệu sẽ ghi nhận dòng đã bị xóa thủ công.")) return;
     const response = await fetch(`/api/rows/${rowId}`, { method: "DELETE" });
-    const data = (await response.json()) as AppStore;
+    const data = await readJsonResponse<AppStore & { error?: string }>(response);
+    if (!response.ok) throw new Error(data.error ?? "Không xóa được dòng.");
     setStore(data);
     setNotice(row ? `Đã xóa 1 dòng thuộc file ${row.sourceFileName}. Upload lại file này nếu cần khôi phục dòng đã xóa.` : "Đã xóa dòng.");
   };
 
   const deleteDocument = async (documentId: string) => {
     const document = store.documents.find((item) => item.id === documentId);
-    if (!window.confirm("Xóa tài liệu này? Toàn bộ dòng hàng thuộc file cũng sẽ bị xóa khỏi tổng hợp.")) return;
+    const activeRows = store.rows.filter((row) => row.documentId === documentId).length;
+    const deletedRows = document?.deletedRowCount ?? 0;
+    const fileName = document?.fileName ?? "tài liệu này";
+    const confirmMessage = [
+      `Xóa file "${fileName}"?`,
+      `Toàn bộ ${activeRows} dòng đang có trong bảng tổng hợp sẽ bị xóa theo file này.`,
+      deletedRows ? `File này trước đó đã xóa thủ công ${deletedRows} dòng.` : "",
+      "Hành động này chỉ nên dùng khi scan nhầm hoặc không cần giữ file."
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (!window.confirm(confirmMessage)) return;
     const response = await fetch(`/api/documents/${documentId}`, { method: "DELETE" });
-    const data = (await response.json()) as AppStore;
+    const data = await readJsonResponse<AppStore & { error?: string }>(response);
+    if (!response.ok) throw new Error(data.error ?? "Không xóa được tài liệu.");
     setStore(data);
     setNotice(document ? `Đã xóa tài liệu ${document.fileName} và các dòng thuộc file.` : "Đã xóa tài liệu.");
   };
 
   const exportExcel = async () => {
-    if (filteredRows.length === 0) return;
+    if (displayedRows.length === 0) return;
 
     const response = await fetch("/api/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: filteredRows })
+      body: JSON.stringify({ rows: displayedRows })
     });
     if (!response.ok) {
       setError("Không xuất được Excel.");
@@ -552,13 +708,6 @@ export default function InvoiceManager() {
 
   const renderCell = (row: InvoiceRow, key: ExcelColumnKey) => {
     const value = row[key] ?? "";
-    const listIdByKey: Partial<Record<ExcelColumnKey, string>> = {
-      supplierName: "supplier-options",
-      inputProductName: "input-product-options",
-      internalProductCode: "sku-options",
-      adjustedInvoiceName: "adjusted-name-options",
-      retailName: "retail-name-options"
-    };
     const className = `table-field ${internalKeys.has(key) ? "manual-field" : ""} ${
       numericKeys.has(key) ? "text-right tabular-nums" : ""
     }`;
@@ -570,7 +719,7 @@ export default function InvoiceManager() {
           type="date"
           value={normalizeDateForInput(value)}
           onChange={(event) => updateRowLocal(row.id, key, event.target.value)}
-          onBlur={() => saveRow(row)}
+          onBlur={(event) => saveRowPatch(row.id, { invoiceDate: event.currentTarget.value })}
         />
       );
     }
@@ -579,27 +728,56 @@ export default function InvoiceManager() {
       return (
         <input
           className={className}
-          list="unit-options"
           value={String(value)}
           onChange={(event) => updateRowLocal(row.id, key, event.target.value)}
-          onBlur={() => saveRow(row)}
+          onBlur={(event) => saveRowPatch(row.id, { unit: event.currentTarget.value })}
         />
       );
     }
 
     if (key === "vatRate") {
+      const currentVatRate = normalizeNumberText(value);
+      const draftVatRate = vatDrafts[row.id] ?? currentVatRate;
+
+      const requestDraftVatRateChange = (nextValue: string) => {
+        const nextRate = normalizeNumberText(nextValue);
+        setVatDrafts((current) => {
+          const next = { ...current };
+          if (nextRate === currentVatRate) delete next[row.id];
+          else next[row.id] = nextRate;
+          return next;
+        });
+        if (nextRate !== currentVatRate) requestVatRateChange(row, nextRate);
+      };
+
       return (
-        <input
-          className={className}
-          list="vat-options"
-          inputMode="decimal"
-          value={String(value)}
-          onChange={(event) => updateRowLocal(row.id, key, event.target.value.replace(/[^\d.,%-]/g, ""))}
-          onBlur={(event) => {
-            updateRowLocal(row.id, key, normalizeNumberText(event.target.value));
-            saveRow({ ...row, [key]: normalizeNumberText(event.target.value) });
-          }}
-        />
+        <div className="vat-combo">
+          <input
+            className={`${className} vat-input`}
+            inputMode="decimal"
+            value={draftVatRate}
+            placeholder="0"
+            onChange={(event) => setVatDrafts((current) => ({ ...current, [row.id]: event.target.value.replace(/[^\d.,-]/g, "") }))}
+            onBlur={(event) => requestDraftVatRateChange(event.target.value)}
+            title="Nhập % thuế. Gõ 0 nếu hóa đơn không có thuế."
+          />
+          <select
+            className="vat-preset"
+            value=""
+            onChange={(event) => {
+              requestDraftVatRateChange(event.target.value);
+              event.currentTarget.value = "";
+            }}
+            title="Chọn nhanh % thuế"
+          >
+            <option value="" disabled hidden></option>
+            {vatSelectOptions.map((vat) => (
+              <option key={vat} value={vat}>
+                {vat}%
+              </option>
+            ))}
+          </select>
+        </div>
       );
     }
 
@@ -611,8 +789,12 @@ export default function InvoiceManager() {
           value={String(value)}
           onChange={(event) => updateRowLocal(row.id, key, event.target.value.replace(/[^\d.,-]/g, ""))}
           onBlur={(event) => {
-            updateRowLocal(row.id, key, normalizeNumberText(event.target.value));
-            saveRow({ ...row, [key]: normalizeNumberText(event.target.value) });
+            const nextRow = normalizeFinancials({ ...row, [key]: normalizeNumberText(event.target.value) });
+            setStore((current) => ({
+              ...current,
+              rows: current.rows.map((item) => (item.id === row.id ? nextRow : item))
+            }));
+            saveRowPatch(row.id, { [key]: nextRow[key] } as Partial<InvoiceRow>);
           }}
         />
       );
@@ -621,33 +803,50 @@ export default function InvoiceManager() {
     return (
       <input
         className={className}
-        list={listIdByKey[key]}
         value={String(value)}
         title={String(value)}
         onChange={(event) => updateRowLocal(row.id, key, event.target.value)}
-        onBlur={() => saveRow(row)}
+        onBlur={(event) => saveRowPatch(row.id, { [key]: event.currentTarget.value } as Partial<InvoiceRow>)}
       />
     );
   };
 
-  const renderSummaryHeader = (key: SummaryColumnKey, label: string, className = "") => (
-    <th
-      key={key}
-      className={`resizable-th border-b border-r border-slate-200 px-3 py-2.5 text-left ${className}`}
-      style={{ width: summaryColumnWidths[key] }}
-      title={label}
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate">{label}</span>
-      </div>
-      <button
-        type="button"
-        className="column-resize-handle"
-        aria-label={`Kéo chỉnh độ rộng cột ${label}`}
-        onMouseDown={(event) => startColumnResize(key, event)}
-      />
-    </th>
-  );
+  const renderSummaryHeader = (key: SummaryColumnKey, label: string, className = "") => {
+    const isSortable = key !== "__delete" && key !== "__index";
+    const activeSort = summarySort?.key === key ? summarySort.direction : "";
+    const SortIcon = activeSort === "asc" ? ArrowUp : activeSort === "desc" ? ArrowDown : ArrowUpDown;
+
+    return (
+      <th
+        key={key}
+        className={`resizable-th border-b border-r border-slate-200 px-3 py-2.5 text-left ${isSortable ? "cursor-pointer select-none hover:bg-slate-100" : ""} ${className}`}
+        style={{ width: summaryColumnWidths[key] }}
+        title={label}
+        onClick={() => {
+          if (isSortable) toggleSummarySort(key);
+        }}
+        onKeyDown={(event) => {
+          if (!isSortable || (event.key !== "Enter" && event.key !== " ")) return;
+          event.preventDefault();
+          toggleSummarySort(key);
+        }}
+        tabIndex={isSortable ? 0 : undefined}
+      >
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{label}</span>
+          {isSortable ? <span className={`summary-sort-button ${activeSort ? "text-primary" : "text-slate-400"}`}>
+              <SortIcon className="h-3.5 w-3.5" />
+            </span> : null}
+        </div>
+        <button
+          type="button"
+          className="column-resize-handle"
+          aria-label={`Kéo chỉnh độ rộng cột ${label}`}
+          onMouseDown={(event) => startColumnResize(key, event)}
+        />
+      </th>
+    );
+  };
 
   const renderSidebar = (isCollapsed = false) => (
     <div className="flex h-full w-full min-w-0 flex-col overflow-hidden text-sidebar-foreground">
@@ -721,31 +920,118 @@ export default function InvoiceManager() {
 
   return (
     <main className="min-h-screen bg-background">
-      <datalist id="unit-options">
-        {Array.from(new Set([...unitOptions, ...lookups.units])).map((unit) => (
-          <option key={unit} value={unit} />
-        ))}
-      </datalist>
-      <datalist id="vat-options">
-        {Array.from(new Set([...vatOptions, ...lookups.vatRates])).map((vat) => (
-          <option key={vat} value={vat} />
-        ))}
-      </datalist>
-      <datalist id="supplier-options">
-        {lookups.suppliers.map((value) => <option key={value} value={value} />)}
-      </datalist>
-      <datalist id="input-product-options">
-        {lookups.inputProductNames.map((value) => <option key={value} value={value} />)}
-      </datalist>
-      <datalist id="sku-options">
-        {lookups.internalProductCodes.map((value) => <option key={value} value={value} />)}
-      </datalist>
-      <datalist id="adjusted-name-options">
-        {lookups.adjustedInvoiceNames.map((value) => <option key={value} value={value} />)}
-      </datalist>
-      <datalist id="retail-name-options">
-        {lookups.retailNames.map((value) => <option key={value} value={value} />)}
-      </datalist>
+      {error || notice ? (
+        <div className="fixed right-4 top-16 z-[80] flex w-[min(460px,calc(100vw-2rem))] flex-col gap-2">
+          {error ? (
+            <div role="alert" className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-xl">
+              <div className="min-w-0 flex-1">{error}</div>
+              <button type="button" className="-mr-1 rounded p-1 hover:bg-red-100" onClick={() => setError("")} aria-label="Đóng thông báo lỗi">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+          {notice ? (
+            <div role="status" className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-xl">
+              <div className="min-w-0 flex-1">{notice}</div>
+              <button type="button" className="-mr-1 rounded p-1 hover:bg-emerald-100" onClick={() => setNotice("")} aria-label="Đóng thông báo">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {vatConfirm ? (
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/35 px-4">
+          <div className="w-[min(420px,calc(100vw-2rem))] rounded-lg border border-blue-200 bg-white shadow-xl">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <div className="font-semibold text-slate-950">Xác nhận cập nhật thuế</div>
+              <div className="mt-1 text-xs text-slate-500">
+                Đổi từ {vatConfirm.previousRate ? `${normalizeNumberText(vatConfirm.previousRate)}%` : "trống"} sang {vatConfirm.nextRate || "0"}%.
+              </div>
+            </div>
+            <div className="space-y-2 px-4 py-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-500">Giá trị thuế</span>
+                <span className="font-semibold tabular-nums">{fmtCurrency(parseNumeric(vatConfirm.preview.vatAmount) ?? 0)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-500">Thành tiền sau thuế</span>
+                <span className="font-semibold tabular-nums">{fmtCurrency(parseNumeric(vatConfirm.preview.totalAfterTax) ?? 0)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-500">Đơn giá sau thuế</span>
+                <span className="font-semibold tabular-nums">{fmtNumber(parseNumeric(vatConfirm.preview.unitPriceAfterTax) ?? 0)}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              <button
+                type="button"
+                className="inline-flex h-9 items-center rounded-md border bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                onClick={cancelVatRateChange}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-semibold text-white hover:opacity-90"
+                onClick={applyVatRateChange}
+              >
+                Cập nhật tiền thuế
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {filePanelOpen ? (
+        <div className="fixed inset-0 z-[85] flex justify-end bg-slate-950/35">
+          <button className="absolute inset-0" aria-label="Đóng danh sách file" onClick={() => setFilePanelOpen(false)} />
+          <div className="relative z-10 flex h-full w-[min(560px,100vw)] flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <div className="text-base font-semibold text-slate-950">File trong bảng</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  {visibleDocuments.length} file · {fmtNumber(displayedRows.length)} dòng đang hiển thị
+                </div>
+              </div>
+              <button className="rounded-md p-2 text-slate-500 hover:bg-slate-100" onClick={() => setFilePanelOpen(false)} aria-label="Đóng">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {visibleDocuments.map(({ document, rowCount }) => (
+                <div key={document.id} className="border-b border-slate-200 px-5 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold" title={document.fileName}>{document.fileName}</div>
+                      <div className="mt-1 text-sm text-slate-500">
+                        {fileSizeLabel(document.fileSize)} · {rowCount} dòng đang hiển thị · {documentProgressText(document)}
+                      </div>
+                      <div className="mt-1 font-mono text-xs text-slate-400">{document.id.slice(0, 10)}</div>
+                      {document.deletedRowCount > 0 ? (
+                        <div className="mt-2 inline-flex rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                          Đã xóa thủ công {document.deletedRowCount} dòng
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+                      onClick={() => deleteDocument(document.id)}
+                    >
+                      Xóa file
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {visibleDocuments.length === 0 ? (
+                <div className="px-5 py-12 text-center text-slate-500">Không có file nào trong bảng hiện tại.</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <aside className={`fixed inset-y-0 left-0 z-40 hidden h-screen shrink-0 overflow-hidden border-r border-sidebar-border/50 bg-sidebar transition-[width] duration-200 ease-out lg:flex ${collapsed ? "w-[60px]" : "w-[216px]"}`}>
         {renderSidebar(collapsed)}
@@ -808,13 +1094,6 @@ export default function InvoiceManager() {
         </header>
 
         <div className="subtle-gradient flex-1 space-y-4 px-4 pb-24 pt-[4.5rem] lg:px-6 lg:pb-7 lg:pt-20">
-        {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-        )}
-        {notice && (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{notice}</div>
-        )}
-
         {loading ? (
           <div className="panel flex min-h-[320px] items-center justify-center gap-2 text-slate-500">
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -915,13 +1194,25 @@ export default function InvoiceManager() {
 
         {!loading && tab === "summary" ? (
           <section className="space-y-3">
-            <div className="panel px-3 py-2.5">
-              <div className="mb-2 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="panel overflow-hidden px-3 py-2.5">
+              <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-2 pr-2 font-semibold">
-                    <Filter className="h-4 w-4 text-primary" />
+                  <button
+                    type="button"
+                    className={`inline-flex h-8 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition-colors ${
+                      filtersOpen
+                        ? "border-primary bg-primary text-white shadow-sm hover:bg-primary/95"
+                        : "border-primary/20 bg-primary/5 text-slate-900 hover:bg-primary/10"
+                    }`}
+                    onClick={() => setFiltersOpen((value) => !value)}
+                    aria-expanded={filtersOpen}
+                    aria-controls="summary-filter-tray"
+                    title={filtersOpen ? "Ẩn bộ lọc" : "Hiện bộ lọc"}
+                  >
+                    <Filter className={`h-4 w-4 ${filtersOpen ? "text-white" : "text-primary"}`} />
                     Bộ lọc tổng hợp
-                  </div>
+                    {filtersOpen ? <ChevronUp className="h-4 w-4 text-white" /> : <ChevronDown className="h-4 w-4 text-primary" />}
+                  </button>
                   {[
                     ["Tài liệu", totalDocuments],
                     ["Dòng", store.rows.length],
@@ -934,36 +1225,67 @@ export default function InvoiceManager() {
                     </div>
                   ))}
                 </div>
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
-                  onClick={exportExcel}
-                  disabled={filteredRows.length === 0}
-                >
-                  <Download className="h-4 w-4" />
-                  Xuất Excel
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-9 items-center gap-2 rounded-md border bg-white px-3.5 text-sm font-semibold text-slate-700 hover:bg-secondary disabled:opacity-50"
+                    onClick={() => setFilePanelOpen(true)}
+                    disabled={displayedRows.length === 0}
+                  >
+                    <FileText className="h-4 w-4" />
+                    File trong bảng
+                  </button>
+                  <button
+                    className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                    onClick={exportExcel}
+                    disabled={displayedRows.length === 0}
+                  >
+                    <Download className="h-4 w-4" />
+                    Xuất Excel
+                  </button>
+                </div>
               </div>
-              <div className="grid gap-2 md:grid-cols-5">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Nhà cung cấp</span>
-                  <input className="field h-9 py-1.5" value={filters.supplier} onChange={(event) => setFilters({ ...filters, supplier: event.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Tên sản phẩm</span>
-                  <input className="field h-9 py-1.5" value={filters.product} onChange={(event) => setFilters({ ...filters, product: event.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">SKU / mã sản phẩm</span>
-                  <input className="field h-9 py-1.5" value={filters.sku} onChange={(event) => setFilters({ ...filters, sku: event.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Từ ngày</span>
-                  <input className="field h-9 py-1.5" type="date" value={filters.dateFrom} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Đến ngày</span>
-                  <input className="field h-9 py-1.5" type="date" value={filters.dateTo} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} />
-                </label>
+              <div id="summary-filter-tray" className="filter-tray -mx-3 mt-2" data-open={filtersOpen ? "true" : "false"}>
+                <div>
+                  <div className="grid gap-2 bg-slate-50/80 px-3 py-3 md:grid-cols-3 xl:grid-cols-7">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Nhà cung cấp</span>
+                      <input className="field h-9 py-1.5" value={filters.supplier} onChange={(event) => setFilters({ ...filters, supplier: event.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Tên sản phẩm</span>
+                      <input className="field h-9 py-1.5" value={filters.product} onChange={(event) => setFilters({ ...filters, product: event.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">SKU / mã sản phẩm</span>
+                      <input className="field h-9 py-1.5" value={filters.sku} onChange={(event) => setFilters({ ...filters, sku: event.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Số hóa đơn</span>
+                      <input className="field h-9 py-1.5" value={filters.invoiceNumber} onChange={(event) => setFilters({ ...filters, invoiceNumber: event.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Từ ngày</span>
+                      <input className="field h-9 py-1.5" type="date" value={filters.dateFrom} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">Đến ngày</span>
+                      <input className="field h-9 py-1.5" type="date" value={filters.dateTo} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} />
+                    </label>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        className="h-9 w-full rounded-md border bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-secondary"
+                        onClick={() => {
+                          setFilters({ file: "", supplier: "", product: "", invoiceNumber: "", sku: "", dateFrom: "", dateTo: "" });
+                          setSummarySort(null);
+                        }}
+                      >
+                        Xóa lọc
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -974,7 +1296,7 @@ export default function InvoiceManager() {
                   Tổng hợp hóa đơn đã scan
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  {savingRowId ? <span>Đang lưu...</span> : <span>Tự lưu khi rời ô</span>}
+                  <span>Tự lưu nền khi rời ô</span>
                   <button
                     type="button"
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-white px-2.5 font-medium text-slate-600 hover:bg-secondary"
@@ -985,7 +1307,7 @@ export default function InvoiceManager() {
                   </button>
                 </div>
               </div>
-              <div className="max-h-[calc(100vh-285px)] overflow-auto">
+              <div className="summary-table-scroll max-h-[calc(100vh-250px)] overflow-auto">
                 <table
                   className="data-table invoice-grid border-collapse text-sm"
                   style={{ width: summaryTableWidth, minWidth: summaryTableWidth }}
@@ -1009,12 +1331,22 @@ export default function InvoiceManager() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredRows.map((row, index) => (
+                    {displayedRows.map((row, index) => {
+                      const document = documentById.get(row.documentId);
+
+                      return (
                       <tr key={row.id} className={`${isNoTaxRow(row) ? "no-tax-row" : "odd:bg-white even:bg-slate-50/40"} hover:bg-accent/40`}>
                         <td className="border-b border-r border-slate-200 px-3 py-2 text-slate-500">{index + 1}</td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 text-xs text-slate-500">
-                          <div className="truncate" title={row.sourceFileName}>
-                            {row.sourceFileName}
+                          <div className="min-w-0">
+                            <div className="truncate" title={row.sourceFileName}>
+                              {row.sourceFileName}
+                            </div>
+                            {document?.deletedRowCount ? (
+                              <div className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                                Đã xóa {document.deletedRowCount} dòng
+                              </div>
+                            ) : null}
                           </div>
                         </td>
                         {excelColumns.map((column) => (
@@ -1028,8 +1360,9 @@ export default function InvoiceManager() {
                           </button>
                         </td>
                       </tr>
-                    ))}
-                    {filteredRows.length === 0 ? (
+                      );
+                    })}
+                    {displayedRows.length === 0 ? (
                       <tr>
                         <td colSpan={excelColumns.length + 3} className="px-4 py-12 text-center text-slate-500">
                           Chưa có dòng phù hợp bộ lọc.
@@ -1097,7 +1430,7 @@ export default function InvoiceManager() {
         ) : null}
 
         {!loading && tab === "scan" ? (
-          <section className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_420px]">
             <div
               className="flex min-h-[390px] flex-col items-center justify-center border-b border-slate-200 p-8 text-center lg:border-b-0 lg:border-r"
               onDragOver={(event) => event.preventDefault()}
@@ -1139,7 +1472,7 @@ export default function InvoiceManager() {
 
             <aside className="overflow-hidden">
               <div className="border-b border-slate-200 px-5 py-4">
-                <div className="font-semibold">File chờ scan</div>
+                <div className="font-semibold">File chờ / đang scan</div>
                 {queuedFiles.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                     <span className="rounded-full bg-blue-50 px-2 py-1 font-medium text-blue-700">{queuedStats.newCount} mới</span>
@@ -1166,6 +1499,22 @@ export default function InvoiceManager() {
                         {info.hash ? <span className="font-mono text-[10px] text-slate-400">{info.hash.slice(0, 10)}</span> : null}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">{queuedFileHint(info)}</div>
+                      {scanning ? (
+                        <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                          info.status === "duplicate"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : info.status === "checking"
+                              ? "bg-slate-100 text-slate-600"
+                              : "bg-blue-50 text-blue-700"
+                        }`}>
+                          {info.status === "duplicate" ? <ShieldCheck className="h-3.5 w-3.5" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                          {info.status === "duplicate"
+                            ? "Đã có trong hệ thống, bỏ qua OCR"
+                            : info.status === "checking"
+                              ? "Đang kiểm tra file"
+                              : "Đang OCR và lưu vào tổng hợp"}
+                        </div>
+                      ) : null}
                     </div>
                     <button
                       className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
@@ -1185,6 +1534,48 @@ export default function InvoiceManager() {
                   );
                 })}
                 {files.length === 0 ? <div className="px-5 py-12 text-center text-slate-500">Chưa chọn file.</div> : null}
+              </div>
+              <div className="border-t border-slate-200">
+                <div className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div>
+                    <div className="font-semibold">Đã có trong hệ thống</div>
+                    <div className="mt-0.5 text-xs text-slate-500">File nằm trong bảng tổng hợp, upload trùng sẽ bỏ qua OCR.</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md border bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-secondary"
+                    onClick={() => setTab("documents")}
+                  >
+                    Xem tất cả
+                  </button>
+                </div>
+                <div className="max-h-[280px] overflow-auto">
+                  {recentDocuments.map((document) => (
+                    <div key={document.id} className="flex items-start gap-3 border-t border-slate-100 px-5 py-3">
+                      <FileText className={`mt-0.5 h-4 w-4 shrink-0 ${document.status === "error" ? "text-red-600" : "text-primary"}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold" title={document.fileName}>{document.fileName}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {fileSizeLabel(document.fileSize)} · {documentProgressText(document)} · {new Date(document.uploadedAt).toLocaleString("vi-VN")}
+                        </div>
+                        {documentDuplicateText(document) ? (
+                          <div className="mt-1 text-xs font-medium text-emerald-700">{documentDuplicateText(document)}</div>
+                        ) : null}
+                        {document.deletedRowCount > 0 ? (
+                          <div className="mt-1 text-xs font-medium text-amber-700">Có dòng đã xóa, upload lại đúng file để scan khôi phục.</div>
+                        ) : null}
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                        document.status === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+                      }`}>
+                        {documentStatusLabel(document)}
+                      </span>
+                    </div>
+                  ))}
+                  {recentDocuments.length === 0 ? (
+                    <div className="px-5 py-8 text-center text-sm text-slate-500">Chưa có file nào trong hệ thống.</div>
+                  ) : null}
+                </div>
               </div>
               <div className="border-t border-slate-200 p-5">
                 <button

@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type pg from "pg";
 import { ensureDatabase, getPool, isDatabaseConfigured, logActivity } from "./db";
@@ -11,7 +12,7 @@ import {
   type InvoiceRow
 } from "./schema";
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = process.env.INVOICEFLOW_DATA_DIR ?? (process.env.VERCEL ? path.join(os.tmpdir(), "invoiceflow") : path.join(process.cwd(), "data"));
 const storePath = path.join(dataDir, "invoiceflow-store.json");
 export const uploadDir = path.join(dataDir, "uploads");
 
@@ -98,7 +99,6 @@ async function writeJsonStoreNow(store: AppStore) {
 }
 
 export async function readStore(): Promise<AppStore> {
-  await ensureDataDir();
   if (!isDatabaseConfigured) return readJsonStore();
 
   await ensureDatabase();

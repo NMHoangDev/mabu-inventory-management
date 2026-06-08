@@ -44,6 +44,10 @@ export function normalizeNumberText(value: number | string | undefined) {
   return numeric === undefined ? String(value ?? "") : String(numeric);
 }
 
+function roundCurrencyNumber(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 export function normalizeFinancials<T extends Pick<InvoiceRow, "quantity" | "unitPrice" | "amountBeforeTax" | "vatRate" | "vatAmount" | "totalAfterTax" | "unitPriceAfterTax">>(
   row: T
 ) {
@@ -58,11 +62,46 @@ export function normalizeFinancials<T extends Pick<InvoiceRow, "quantity" | "uni
     amount !== undefined && vat === 0 && vatRate === 0 && unitPrice !== undefined
       ? unitPrice
       : typeof totalAfterTax === "number" && quantity && quantity !== 0
-        ? totalAfterTax / quantity
+        ? roundCurrencyNumber(totalAfterTax / quantity)
         : row.unitPriceAfterTax;
 
   return {
     ...row,
+    totalAfterTax,
+    unitPriceAfterTax
+  };
+}
+
+export function calculateVatFields<T extends Pick<InvoiceRow, "quantity" | "unitPrice" | "amountBeforeTax" | "vatRate" | "vatAmount" | "totalAfterTax" | "unitPriceAfterTax">>(
+  row: T,
+  vatRateValue: number | string
+) {
+  const amount = parseNumeric(row.amountBeforeTax);
+  const quantity = parseNumeric(row.quantity);
+  const unitPrice = parseNumeric(row.unitPrice);
+  const vatRate = parseNumeric(vatRateValue) ?? 0;
+  const nextRate = normalizeNumberText(vatRateValue);
+
+  if (amount === undefined) {
+    return normalizeFinancials({
+      ...row,
+      vatRate: nextRate
+    });
+  }
+
+  const vatAmount = Math.round((amount * vatRate) / 100);
+  const totalAfterTax = amount + vatAmount;
+  const unitPriceAfterTax =
+    vatRate === 0 && unitPrice !== undefined
+      ? unitPrice
+      : quantity && quantity !== 0
+        ? roundCurrencyNumber(totalAfterTax / quantity)
+        : row.unitPriceAfterTax;
+
+  return {
+    ...row,
+    vatRate: nextRate,
+    vatAmount,
     totalAfterTax,
     unitPriceAfterTax
   };
