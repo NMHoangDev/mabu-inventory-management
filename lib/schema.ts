@@ -53,6 +53,10 @@ export const documentSchema = z.object({
   uploadedAt: z.string(),
   status: z.enum(["scanned", "error"]),
   rowCount: z.number(),
+  originalRowCount: z.number().default(0),
+  deletedRowCount: z.number().default(0),
+  duplicateCount: z.number().default(0),
+  lastDuplicateAt: z.string().default(""),
   warnings: z.array(z.string()).default([])
 });
 

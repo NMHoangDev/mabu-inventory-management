@@ -44,6 +44,10 @@ function invoiceDocumentFromDb(row: Record<string, unknown>): InvoiceDocument {
     uploadedAt: asIso(row.uploaded_at),
     status: row.status === "error" ? "error" : "scanned",
     rowCount: Number(row.row_count ?? 0),
+    originalRowCount: Number(row.original_row_count ?? row.row_count ?? 0),
+    deletedRowCount: Number(row.deleted_row_count ?? 0),
+    duplicateCount: Number(row.duplicate_count ?? 0),
+    lastDuplicateAt: asIso(row.last_duplicate_at),
     warnings: asArray<string>(row.warnings)
   };
 }
@@ -234,9 +238,21 @@ export async function upsertDocumentWithRows(document: InvoiceDocument, rows: In
   if (!isDatabaseConfigured) {
     await updateStore((store) => ({
       ...store,
-      documents: [...store.documents.filter((item) => item.id !== document.id), document].sort((a, b) =>
-        b.uploadedAt.localeCompare(a.uploadedAt)
-      ),
+      documents: [
+        ...store.documents.filter((item) => item.id !== document.id),
+        {
+          ...document,
+          rowCount: rows.length,
+          originalRowCount: Math.max(
+            document.originalRowCount ?? 0,
+            rows.length,
+            store.documents.find((item) => item.id === document.id)?.originalRowCount ?? 0
+          ),
+          deletedRowCount: 0,
+          duplicateCount: store.documents.find((item) => item.id === document.id)?.duplicateCount ?? document.duplicateCount ?? 0,
+          lastDuplicateAt: store.documents.find((item) => item.id === document.id)?.lastDuplicateAt ?? document.lastDuplicateAt ?? ""
+        }
+      ].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
       rows: [...store.rows.filter((row) => row.documentId !== document.id), ...rows].sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt)
       )
@@ -251,8 +267,9 @@ export async function upsertDocumentWithRows(document: InvoiceDocument, rows: In
     await client.query(
       `
         insert into invoice_documents
-          (id, file_name, file_size, mime_type, stored_path, uploaded_at, status, row_count, warnings, updated_at)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now())
+          (id, file_name, file_size, mime_type, stored_path, uploaded_at, status, row_count,
+           original_row_count, deleted_row_count, duplicate_count, last_duplicate_at, warnings, updated_at)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, null, $11::jsonb, now())
         on conflict (id)
         do update set
           file_name = excluded.file_name,
@@ -262,6 +279,8 @@ export async function upsertDocumentWithRows(document: InvoiceDocument, rows: In
           uploaded_at = excluded.uploaded_at,
           status = excluded.status,
           row_count = excluded.row_count,
+          original_row_count = greatest(invoice_documents.original_row_count, excluded.original_row_count),
+          deleted_row_count = 0,
           warnings = excluded.warnings,
           updated_at = now()
       `,
@@ -274,6 +293,8 @@ export async function upsertDocumentWithRows(document: InvoiceDocument, rows: In
         document.uploadedAt,
         document.status,
         rows.length,
+        Math.max(document.originalRowCount ?? 0, rows.length),
+        document.duplicateCount ?? 0,
         JSON.stringify(document.warnings)
       ]
     );
@@ -353,6 +374,40 @@ export async function deleteDocument(documentId: string) {
   return readStore();
 }
 
+export async function markDuplicateDocument(documentId: string) {
+  const now = new Date().toISOString();
+
+  if (!isDatabaseConfigured) {
+    await updateStore((store) => ({
+      ...store,
+      documents: store.documents.map((document) =>
+        document.id === documentId
+          ? {
+              ...document,
+              duplicateCount: (document.duplicateCount ?? 0) + 1,
+              lastDuplicateAt: now
+            }
+          : document
+      )
+    }));
+    return readJsonStore();
+  }
+
+  await ensureDatabase();
+  await getPool().query(
+    `
+      update invoice_documents
+      set duplicate_count = duplicate_count + 1,
+          last_duplicate_at = $2,
+          updated_at = now()
+      where id = $1
+    `,
+    [documentId, now]
+  );
+  await logActivity("duplicate", `File hóa đơn đã có trong hệ thống ${documentId}`);
+  return readStore();
+}
+
 export async function deleteRow(rowId: string) {
   if (!isDatabaseConfigured) {
     await updateStore((store) => {
@@ -363,7 +418,16 @@ export async function deleteRow(rowId: string) {
           ? { ...document, rowCount: Math.max(0, document.rowCount - 1) }
           : document
       );
-      return { ...store, documents, rows };
+      const trackedDocuments = documents.map((document) =>
+        removed && document.id === removed.documentId
+          ? {
+              ...document,
+              originalRowCount: Math.max(document.originalRowCount ?? 0, document.rowCount + 1),
+              deletedRowCount: (document.deletedRowCount ?? 0) + 1
+            }
+          : document
+      );
+      return { ...store, documents: trackedDocuments, rows };
     });
     return readJsonStore();
   }
@@ -375,7 +439,14 @@ export async function deleteRow(rowId: string) {
   await pool.query("delete from invoice_rows where id = $1", [rowId]);
   if (documentId) {
     await pool.query(
-      "update invoice_documents set row_count = greatest(row_count - 1, 0), updated_at = now() where id = $1",
+      `
+        update invoice_documents
+        set row_count = greatest(row_count - 1, 0),
+            original_row_count = greatest(original_row_count, row_count),
+            deleted_row_count = deleted_row_count + 1,
+            updated_at = now()
+        where id = $1
+      `,
       [documentId]
     );
   }

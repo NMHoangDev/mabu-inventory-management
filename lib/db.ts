@@ -103,6 +103,11 @@ async function migrate() {
       created_at timestamptz not null default now()
     );
 
+    alter table invoice_documents add column if not exists original_row_count integer not null default 0;
+    alter table invoice_documents add column if not exists deleted_row_count integer not null default 0;
+    alter table invoice_documents add column if not exists duplicate_count integer not null default 0;
+    alter table invoice_documents add column if not exists last_duplicate_at timestamptz;
+
     create index if not exists invoice_rows_document_id_idx on invoice_rows(document_id);
     create index if not exists invoice_rows_supplier_idx on invoice_rows(supplier_name);
     create index if not exists invoice_rows_sku_idx on invoice_rows(internal_product_code);

@@ -104,7 +104,12 @@ async function generateInvoiceJson(ai: GoogleGenAI, fileUri: string, mimeType: s
 
 function normalizeExtract(data: unknown): InvoiceExtractResult {
   const parsed = invoiceExtractResultSchema.safeParse(data);
-  if (parsed.success) return parsed.data;
+  if (parsed.success) {
+    return {
+      ...parsed.data,
+      warnings: parsed.data.warnings.map(normalizeWarningText).filter(Boolean)
+    };
+  }
   return {
     invoiceDate: "",
     supplierName: "",
@@ -113,6 +118,14 @@ function normalizeExtract(data: unknown): InvoiceExtractResult {
     items: [],
     warnings: ["Gemini returned JSON that did not match the expected schema."]
   };
+}
+
+function normalizeWarningText(value: string) {
+  const fixed = fixMojibakeText(String(value ?? "").trim());
+  const lower = fixed.toLowerCase();
+  if (!fixed) return "";
+  if (lower.includes("signature valid") || lower.includes("valid signature")) return "Chữ ký số hợp lệ";
+  return fixed;
 }
 
 function extensionFor(fileName: string) {
@@ -189,6 +202,10 @@ export async function scanUploadedFile(file: File) {
       ...documentBase,
       status: "scanned",
       rowCount: result.items.length,
+      originalRowCount: result.items.length,
+      deletedRowCount: 0,
+      duplicateCount: 0,
+      lastDuplicateAt: "",
       warnings: result.warnings
     };
     const rows = toStoredRows(result, document);
@@ -202,6 +219,10 @@ export async function scanUploadedFile(file: File) {
       ...documentBase,
       status: "error",
       rowCount: 0,
+      originalRowCount: 0,
+      deletedRowCount: 0,
+      duplicateCount: 0,
+      lastDuplicateAt: "",
       warnings: [message]
     };
     if (storedPath !== localPath) await fs.unlink(localPath).catch(() => undefined);

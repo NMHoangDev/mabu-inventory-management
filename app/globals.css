@@ -214,6 +214,22 @@ table,
   white-space: nowrap;
 }
 
+.no-tax-row {
+  background: color-mix(in oklab, var(--muted) 72%, white);
+}
+
+.no-tax-row td {
+  border-color: color-mix(in oklab, var(--border) 82%, var(--foreground));
+}
+
+.no-tax-row .table-field:not(.manual-field) {
+  color: color-mix(in oklab, var(--foreground) 82%, var(--muted-foreground));
+}
+
+.no-tax-row:hover {
+  background: color-mix(in oklab, var(--accent) 24%, var(--muted));
+}
+
 .resizable-th {
   user-select: none;
 }
