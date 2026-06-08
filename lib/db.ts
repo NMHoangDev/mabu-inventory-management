@@ -7,7 +7,11 @@ declare global {
   var invoiceflowPool: pg.Pool | undefined;
   // eslint-disable-next-line no-var
   var invoiceflowMigration: Promise<void> | undefined;
+  // eslint-disable-next-line no-var
+  var invoiceflowMigrationVersion: number | undefined;
 }
+
+const SCHEMA_VERSION = 2;
 
 export const isDatabaseConfigured = Boolean(process.env.DATABASE_URL);
 
@@ -31,8 +35,16 @@ export function getPool() {
 
 export async function ensureDatabase() {
   if (!isDatabaseConfigured) return;
-  if (!globalThis.invoiceflowMigration) {
-    globalThis.invoiceflowMigration = migrate();
+  if (!globalThis.invoiceflowMigration || globalThis.invoiceflowMigrationVersion !== SCHEMA_VERSION) {
+    globalThis.invoiceflowMigration = migrate()
+      .then(() => {
+        globalThis.invoiceflowMigrationVersion = SCHEMA_VERSION;
+      })
+      .catch((error) => {
+        globalThis.invoiceflowMigration = undefined;
+        globalThis.invoiceflowMigrationVersion = undefined;
+        throw error;
+      });
   }
   await globalThis.invoiceflowMigration;
 }
@@ -107,6 +119,8 @@ async function migrate() {
     alter table invoice_documents add column if not exists deleted_row_count integer not null default 0;
     alter table invoice_documents add column if not exists duplicate_count integer not null default 0;
     alter table invoice_documents add column if not exists last_duplicate_at timestamptz;
+    alter table catalog_products add column if not exists sale_price text not null default '';
+    alter table catalog_products add column if not exists image_url text not null default '';
 
     create index if not exists invoice_rows_document_id_idx on invoice_rows(document_id);
     create index if not exists invoice_rows_supplier_idx on invoice_rows(supplier_name);

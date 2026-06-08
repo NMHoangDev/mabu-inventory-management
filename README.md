@@ -38,7 +38,7 @@ PORT=3000
 - `Scan hóa đơn`: upload invoice PDFs/images and scan with Gemini document understanding.
 - `Tổng hợp hóa đơn`: persistent invoice rows, editable Excel-like grid, filters by supplier/date/product/SKU, delete mistaken rows, and export Excel.
 - `Tài liệu hóa đơn`: invoice document history, OCR status, warnings, and delete document with cascading row delete.
-- `Sản phẩm / SKU`, `Tồn kho`, `Bán hàng`, `Báo cáo`, `Cài đặt`: management frame for the next sales/inventory demo phase.
+- `Sản phẩm / SKU`, `Tồn kho`, `Lên đơn hàng`, `Báo cáo`, `Cài đặt`: management frame for the next sales/inventory demo phase.
 - `Mẫu thiết kế`: UI blueprint for design handoff.
 
 ## Supabase Storage

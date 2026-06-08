@@ -193,6 +193,13 @@ async function addInvoiceQuickOptions(client: pg.PoolClient | pg.Pool, rows: Inv
   await addQuickOptions(client, pairs);
 }
 
+async function ensureCatalogProductMetaColumns(client: pg.PoolClient | pg.Pool) {
+  await client.query(`
+    alter table catalog_products add column if not exists sale_price text not null default '';
+    alter table catalog_products add column if not exists image_url text not null default '';
+  `);
+}
+
 export async function readLookups() {
   if (!isDatabaseConfigured) {
     const store = await readJsonStore();
@@ -211,10 +218,17 @@ export async function readLookups() {
 
   await ensureDatabase();
   const pool = getPool();
-  const [options, products] = await Promise.all([
-    pool.query("select field, value from quick_options order by usage_count desc, value asc limit 500"),
-    pool.query("select sku, input_product_name, adjusted_invoice_name, retail_name, unit from catalog_products order by updated_at desc limit 500")
-  ]);
+  await ensureCatalogProductMetaColumns(pool);
+  const options = await pool.query("select field, value from quick_options order by usage_count desc, value asc limit 500");
+  let products = await pool
+    .query("select sku, input_product_name, adjusted_invoice_name, retail_name, unit, sale_price, image_url from catalog_products order by updated_at desc limit 500")
+    .catch(async (error: unknown) => {
+      if (error instanceof Error && error.message.includes("sale_price")) {
+        await ensureDatabase();
+        return pool.query("select sku, input_product_name, adjusted_invoice_name, retail_name, unit, sale_price, image_url from catalog_products order by updated_at desc limit 500");
+      }
+      throw error;
+    });
   const byField = (field: string) => options.rows.filter((row) => row.field === field).map((row) => String(row.value));
   return {
     suppliers: byField("supplierName"),
@@ -229,9 +243,57 @@ export async function readLookups() {
       inputProductName: String(row.input_product_name ?? ""),
       adjustedInvoiceName: String(row.adjusted_invoice_name ?? ""),
       retailName: String(row.retail_name ?? ""),
-      unit: String(row.unit ?? "")
+      unit: String(row.unit ?? ""),
+      salePrice: String(row.sale_price ?? ""),
+      imageUrl: String(row.image_url ?? "")
     }))
   };
+}
+
+export async function upsertCatalogProductMeta(input: {
+  sku: string;
+  inputProductName?: string;
+  adjustedInvoiceName?: string;
+  retailName?: string;
+  unit?: string;
+  salePrice?: string;
+  imageUrl?: string;
+}) {
+  const sku = cell(input.sku).trim();
+  if (!sku) return readLookups();
+
+  if (!isDatabaseConfigured) return readLookups();
+
+  await ensureDatabase();
+  const pool = getPool();
+  await ensureCatalogProductMetaColumns(pool);
+  await pool.query(
+    `
+      insert into catalog_products
+        (sku, input_product_name, adjusted_invoice_name, retail_name, unit, sale_price, image_url, updated_at)
+      values ($1, $2, $3, $4, $5, $6, $7, now())
+      on conflict (sku)
+      do update set
+        input_product_name = coalesce(nullif(excluded.input_product_name, ''), catalog_products.input_product_name),
+        adjusted_invoice_name = coalesce(nullif(excluded.adjusted_invoice_name, ''), catalog_products.adjusted_invoice_name),
+        retail_name = coalesce(nullif(excluded.retail_name, ''), catalog_products.retail_name),
+        unit = coalesce(nullif(excluded.unit, ''), catalog_products.unit),
+        sale_price = excluded.sale_price,
+        image_url = excluded.image_url,
+        updated_at = now()
+    `,
+    [
+      sku,
+      cell(input.inputProductName),
+      cell(input.adjustedInvoiceName),
+      cell(input.retailName),
+      cell(input.unit),
+      cell(input.salePrice),
+      cell(input.imageUrl)
+    ]
+  );
+  await logActivity("product", `Cập nhật sản phẩm ${sku}`);
+  return readLookups();
 }
 
 export async function upsertDocumentWithRows(document: InvoiceDocument, rows: InvoiceRow[]) {

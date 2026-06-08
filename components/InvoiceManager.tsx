@@ -82,6 +82,8 @@ type Lookups = {
     adjustedInvoiceName: string;
     retailName: string;
     unit: string;
+    salePrice?: string;
+    imageUrl?: string;
   }>;
 };
 
@@ -105,6 +107,42 @@ type QueuedFileInfo = {
 };
 
 type SummaryColumnKey = ExcelColumnKey | "__index" | "__file" | "__delete";
+
+type ProductCandidate = {
+  id: string;
+  rowIds: string[];
+  sku: string;
+  retailName: string;
+  inputProductName: string;
+  adjustedInvoiceName: string;
+  unit: string;
+  purchasePrice: string;
+  rowCount: number;
+  missing: string[];
+};
+
+type ProductDraft = {
+  sku: string;
+  adjustedInvoiceName: string;
+  retailName: string;
+  unit: string;
+  salePrice: string;
+  imageUrl: string;
+};
+
+type StockReceiptDraft = {
+  id: string;
+  documentId: string;
+  receiptNumber: string;
+  sourceFileName: string;
+  supplierName: string;
+  invoiceDate: string;
+  invoiceNumber: string;
+  itemCount: number;
+  totalQuantity: number;
+  totalAmount: number;
+  missingSkuCount: number;
+};
 
 const defaultSummaryColumnWidths: Record<SummaryColumnKey, number> = {
   __index: 52,
@@ -167,6 +205,10 @@ function fmtCurrency(value: number) {
 
 function includesText(value: unknown, query: string) {
   return String(value ?? "").toLowerCase().includes(query.trim().toLowerCase());
+}
+
+function cleanText(value: unknown) {
+  return String(value ?? "").trim();
 }
 
 function isDateWithin(date: string, from: string, to: string) {
@@ -309,6 +351,9 @@ export default function InvoiceManager() {
   const [summaryColumnWidths, setSummaryColumnWidths] = useState(defaultSummaryColumnWidths);
   const [summarySort, setSummarySort] = useState<SummarySort>(null);
   const [vatDrafts, setVatDrafts] = useState<Record<string, string>>({});
+  const [productEditMode, setProductEditMode] = useState(false);
+  const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
+  const [productMeta, setProductMeta] = useState<Record<string, Pick<ProductDraft, "salePrice" | "imageUrl">>>({});
   const [vatConfirm, setVatConfirm] = useState<{
     rowId: string;
     previousRate: string;
@@ -323,7 +368,7 @@ export default function InvoiceManager() {
     { key: "documents", label: "Tài liệu hóa đơn", group: "Hóa đơn", icon: FileText },
     { key: "products", label: "Sản phẩm / SKU", group: "Vận hành", icon: Package },
     { key: "inventory", label: "Tồn kho", group: "Vận hành", icon: Boxes },
-    { key: "sales", label: "Bán hàng", group: "Vận hành", icon: ShoppingCart },
+    { key: "sales", label: "Lên đơn hàng", group: "Vận hành", icon: ShoppingCart },
     { key: "reports", label: "Báo cáo", group: "Vận hành", icon: BarChart3 },
     { key: "settings", label: "Cài đặt", group: "Hệ thống", icon: Settings }
   ];
@@ -350,6 +395,38 @@ export default function InvoiceManager() {
       .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Không tải được dữ liệu."))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("invoiceflow-product-meta");
+      if (raw) setProductMeta(JSON.parse(raw));
+    } catch {
+      setProductMeta({});
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("invoiceflow-product-meta", JSON.stringify(productMeta));
+    } catch {
+      // Browser storage can be unavailable in private mode.
+    }
+  }, [productMeta]);
+
+  useEffect(() => {
+    if (lookups.products.length === 0) return;
+    setProductMeta((current) => {
+      const next = { ...current };
+      for (const product of lookups.products) {
+        if (!product.sku) continue;
+        next[`sku:${product.sku}`] = {
+          salePrice: product.salePrice ?? "",
+          imageUrl: product.imageUrl ?? ""
+        };
+      }
+      return next;
+    });
+  }, [lookups.products]);
 
   useEffect(() => {
     if (!notice) return;
@@ -426,9 +503,97 @@ export default function InvoiceManager() {
         return (firstNumber - secondNumber) * multiplier;
       }
 
-      return String(firstValue ?? "").localeCompare(String(secondValue ?? ""), "vi", { numeric: true, sensitivity: "base" }) * multiplier;
-    });
+    return String(firstValue ?? "").localeCompare(String(secondValue ?? ""), "vi", { numeric: true, sensitivity: "base" }) * multiplier;
+  });
   }, [filteredRows, summarySort]);
+
+  const productCandidates = useMemo<ProductCandidate[]>(() => {
+    const grouped = new Map<string, ProductCandidate>();
+
+    for (const row of store.rows) {
+      const sku = cleanText(row.internalProductCode);
+      const inputProductName = cleanText(row.inputProductName);
+      const adjustedInvoiceName = cleanText(row.adjustedInvoiceName);
+      const retailName = cleanText(row.retailName);
+      const unit = cleanText(row.unit);
+      const purchasePrice = cleanText(row.unitPrice);
+      const key = sku ? `sku:${sku}` : `raw:${inputProductName.toLowerCase()}|${unit.toLowerCase()}`;
+      const existing = grouped.get(key);
+      const missing = [
+        sku ? "" : "SKU",
+        adjustedInvoiceName ? "" : "tên chỉnh lại",
+        retailName ? "" : "tên bán lẻ"
+      ].filter(Boolean);
+
+      if (existing) {
+        grouped.set(key, {
+          ...existing,
+          rowIds: [...existing.rowIds, row.id],
+          sku: existing.sku || sku,
+          inputProductName: existing.inputProductName || inputProductName,
+          adjustedInvoiceName: existing.adjustedInvoiceName || adjustedInvoiceName,
+          retailName: existing.retailName || retailName,
+          unit: existing.unit || unit,
+          purchasePrice: existing.purchasePrice || purchasePrice,
+          rowCount: existing.rowCount + 1,
+          missing: Array.from(new Set([...existing.missing, ...missing]))
+        });
+      } else {
+        grouped.set(key, {
+          id: key,
+          rowIds: [row.id],
+          sku,
+          inputProductName,
+          adjustedInvoiceName,
+          retailName,
+          unit,
+          purchasePrice,
+          rowCount: 1,
+          missing
+        });
+      }
+    }
+
+    return Array.from(grouped.values()).sort((first, second) => {
+      const firstReady = first.sku && first.adjustedInvoiceName && first.retailName ? 0 : 1;
+      const secondReady = second.sku && second.adjustedInvoiceName && second.retailName ? 0 : 1;
+      if (firstReady !== secondReady) return firstReady - secondReady;
+      return (first.retailName || first.inputProductName).localeCompare(second.retailName || second.inputProductName, "vi", {
+        sensitivity: "base"
+      });
+    });
+  }, [store.rows]);
+
+  const stockReceiptDrafts = useMemo<StockReceiptDraft[]>(() => {
+    const rowsByDocument = new Map<string, InvoiceRow[]>();
+    for (const row of store.rows) {
+      rowsByDocument.set(row.documentId, [...(rowsByDocument.get(row.documentId) ?? []), row]);
+    }
+
+    return store.documents
+      .filter((document) => document.status === "scanned")
+      .map((document) => {
+        const rows = rowsByDocument.get(document.id) ?? [];
+        const firstRow = rows[0];
+        const invoiceNumber = cleanText(firstRow?.invoiceNumber);
+        const receiptNumber = `PNK-${invoiceNumber || document.id.slice(0, 8).toUpperCase()}`;
+        return {
+          id: receiptNumber,
+          documentId: document.id,
+          receiptNumber,
+          sourceFileName: document.fileName,
+          supplierName: cleanText(firstRow?.supplierName),
+          invoiceDate: cleanText(firstRow?.invoiceDate),
+          invoiceNumber,
+          itemCount: rows.length,
+          totalQuantity: rows.reduce((total, row) => total + (parseNumeric(row.quantity) ?? 0), 0),
+          totalAmount: rows.reduce((total, row) => total + (parseNumeric(row.amountBeforeTax) ?? 0), 0),
+          missingSkuCount: rows.filter((row) => !cleanText(row.internalProductCode)).length
+        };
+      })
+      .filter((receipt) => receipt.itemCount > 0)
+      .sort((first, second) => second.invoiceDate.localeCompare(first.invoiceDate));
+  }, [store.documents, store.rows]);
 
   const queuedFiles = useMemo(
     () => files.map((file) => getQueuedFileStatus(file, fileHashes[fileSignature(file)] ?? "", store)),
@@ -581,11 +746,12 @@ export default function InvoiceManager() {
     }
   };
 
-  const updateRowLocal = (rowId: string, key: ExcelColumnKey, value: string) => {
+  const commitRowPatch = (rowId: string, patch: Partial<InvoiceRow>) => {
     setStore((current) => ({
       ...current,
-      rows: current.rows.map((row) => (row.id === rowId ? normalizeFinancials({ ...row, [key]: value }) : row))
+      rows: current.rows.map((row) => (row.id === rowId ? normalizeFinancials({ ...row, ...patch }) : row))
     }));
+    void saveRowPatch(rowId, patch);
   };
 
   const saveRowPatch = async (rowId: string, patch: Partial<InvoiceRow>) => {
@@ -682,6 +848,89 @@ export default function InvoiceManager() {
     setNotice(document ? `Đã xóa tài liệu ${document.fileName} và các dòng thuộc file.` : "Đã xóa tài liệu.");
   };
 
+  const getProductDraft = (product: ProductCandidate): ProductDraft => {
+    const meta = productMeta[product.id];
+    return (
+      productDrafts[product.id] ?? {
+        sku: product.sku,
+        adjustedInvoiceName: product.adjustedInvoiceName,
+        retailName: product.retailName,
+        unit: product.unit,
+        salePrice: meta?.salePrice ?? "",
+        imageUrl: meta?.imageUrl ?? ""
+      }
+    );
+  };
+
+  const updateProductDraft = (product: ProductCandidate, patch: Partial<ProductDraft>) => {
+    setProductDrafts((current) => ({
+      ...current,
+      [product.id]: {
+        ...getProductDraft(product),
+        ...patch
+      }
+    }));
+  };
+
+  const saveProductDraft = async (product: ProductCandidate) => {
+    const draft = getProductDraft(product);
+    const patch: Partial<InvoiceRow> = {
+      internalProductCode: draft.sku.trim(),
+      adjustedInvoiceName: draft.adjustedInvoiceName.trim(),
+      retailName: draft.retailName.trim(),
+      unit: draft.unit.trim()
+    };
+
+    setStore((current) => ({
+      ...current,
+      rows: current.rows.map((row) => (product.rowIds.includes(row.id) ? normalizeFinancials({ ...row, ...patch }) : row))
+    }));
+
+    await Promise.all(product.rowIds.map((rowId) => saveRowPatch(rowId, patch)));
+    const nextProductId = patch.internalProductCode ? `sku:${patch.internalProductCode}` : product.id;
+    setProductMeta((current) => ({
+      ...current,
+      [product.id]: {
+        salePrice: normalizeNumberText(draft.salePrice),
+        imageUrl: draft.imageUrl.trim()
+      },
+      [nextProductId]: {
+        salePrice: normalizeNumberText(draft.salePrice),
+        imageUrl: draft.imageUrl.trim()
+      }
+    }));
+    setProductDrafts((current) => {
+      const next = { ...current };
+      delete next[product.id];
+      return next;
+    });
+    if (patch.internalProductCode) {
+      await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: patch.internalProductCode,
+          inputProductName: product.inputProductName,
+          adjustedInvoiceName: patch.adjustedInvoiceName ?? "",
+          retailName: patch.retailName ?? "",
+          unit: patch.unit ?? "",
+          salePrice: normalizeNumberText(draft.salePrice),
+          imageUrl: draft.imageUrl.trim()
+        })
+      }).catch(() => undefined);
+    }
+    setNotice(`ÄĂ£ lÆ°u thĂ´ng tin sáº£n pháº©m cho ${product.rowIds.length} dĂ²ng hĂ³a Ä‘Æ¡n.`);
+    await refreshLookups().catch(() => undefined);
+  };
+
+  const editProductImage = (product: ProductCandidate) => {
+    const draft = getProductDraft(product);
+    const nextUrl = window.prompt("DĂ¡n link áº£nh sáº£n pháº©m. Äá»ƒ trá»‘ng náº¿u muá»‘n xĂ³a áº£nh.", draft.imageUrl);
+    if (nextUrl === null) return;
+    updateProductDraft(product, { imageUrl: nextUrl.trim() });
+    if (nextUrl.trim()) window.open(nextUrl.trim(), "_blank", "noopener,noreferrer");
+  };
+
   const exportExcel = async () => {
     if (displayedRows.length === 0) return;
 
@@ -713,24 +962,32 @@ export default function InvoiceManager() {
     }`;
 
     if (key === "invoiceDate") {
+      const currentValue = normalizeDateForInput(value);
       return (
         <input
+          key={`${row.id}-${key}-${currentValue}`}
           className={className}
           type="date"
-          value={normalizeDateForInput(value)}
-          onChange={(event) => updateRowLocal(row.id, key, event.target.value)}
-          onBlur={(event) => saveRowPatch(row.id, { invoiceDate: event.currentTarget.value })}
+          defaultValue={currentValue}
+          onBlur={(event) => {
+            const nextValue = event.currentTarget.value;
+            if (nextValue !== currentValue) commitRowPatch(row.id, { invoiceDate: nextValue });
+          }}
         />
       );
     }
 
     if (key === "unit") {
+      const currentValue = String(value);
       return (
         <input
+          key={`${row.id}-${key}-${currentValue}`}
           className={className}
-          value={String(value)}
-          onChange={(event) => updateRowLocal(row.id, key, event.target.value)}
-          onBlur={(event) => saveRowPatch(row.id, { unit: event.currentTarget.value })}
+          defaultValue={currentValue}
+          onBlur={(event) => {
+            const nextValue = event.currentTarget.value;
+            if (nextValue !== currentValue) commitRowPatch(row.id, { unit: nextValue });
+          }}
         />
       );
     }
@@ -782,31 +1039,37 @@ export default function InvoiceManager() {
     }
 
     if (numericKeys.has(key)) {
+      const currentValue = String(value);
       return (
         <input
+          key={`${row.id}-${key}-${currentValue}`}
           className={className}
           inputMode="decimal"
-          value={String(value)}
-          onChange={(event) => updateRowLocal(row.id, key, event.target.value.replace(/[^\d.,-]/g, ""))}
+          defaultValue={currentValue}
+          onChange={(event) => {
+            event.currentTarget.value = event.currentTarget.value.replace(/[^\d.,-]/g, "");
+          }}
           onBlur={(event) => {
-            const nextRow = normalizeFinancials({ ...row, [key]: normalizeNumberText(event.target.value) });
-            setStore((current) => ({
-              ...current,
-              rows: current.rows.map((item) => (item.id === row.id ? nextRow : item))
-            }));
-            saveRowPatch(row.id, { [key]: nextRow[key] } as Partial<InvoiceRow>);
+            const nextValue = normalizeNumberText(event.target.value);
+            if (nextValue === currentValue) return;
+            const nextRow = normalizeFinancials({ ...row, [key]: nextValue });
+            commitRowPatch(row.id, { [key]: nextRow[key] } as Partial<InvoiceRow>);
           }}
         />
       );
     }
 
+    const currentValue = String(value);
     return (
       <input
+        key={`${row.id}-${key}-${currentValue}`}
         className={className}
-        value={String(value)}
-        title={String(value)}
-        onChange={(event) => updateRowLocal(row.id, key, event.target.value)}
-        onBlur={(event) => saveRowPatch(row.id, { [key]: event.currentTarget.value } as Partial<InvoiceRow>)}
+        defaultValue={currentValue}
+        title={currentValue}
+        onBlur={(event) => {
+          const nextValue = event.currentTarget.value;
+          if (nextValue !== currentValue) commitRowPatch(row.id, { [key]: nextValue } as Partial<InvoiceRow>);
+        }}
       />
     );
   };
@@ -1468,6 +1731,24 @@ export default function InvoiceManager() {
                   </div>
                 ))}
               </div>
+              <div className="mt-4 grid w-full max-w-2xl gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  className="rounded-md border bg-white px-3 py-2 text-left text-sm hover:bg-secondary"
+                  onClick={() => setTab("sales")}
+                >
+                  <div className="font-semibold">Tạo sản phẩm nhanh</div>
+                  <div className="mt-1 text-xs text-muted-foreground">SKU, tên bán lẻ, đơn vị và giá nhập lấy từ hóa đơn.</div>
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border bg-white px-3 py-2 text-left text-sm hover:bg-secondary"
+                  onClick={() => setTab("inventory")}
+                >
+                  <div className="font-semibold">Sinh phiếu nhập kho</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Mỗi file scan tạo một phiếu nhập nháp.</div>
+                </button>
+              </div>
             </div>
 
             <aside className="overflow-hidden">
@@ -1595,13 +1876,14 @@ export default function InvoiceManager() {
 
         {!loading && ["products", "inventory", "sales", "reports", "settings"].includes(tab) ? (
           <section className="space-y-5">
+            {tab !== "products" ? (
             <div className="panel p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">{currentNav.group}</div>
                   <h2 className="mt-1 text-2xl font-semibold">{currentNav.label}</h2>
                   <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                    Khung demo theo hướng phần mềm bán hàng dạng web: lấy SKU từ hóa đơn, hỗ trợ mapping sản phẩm, tồn kho và báo cáo định kỳ.
+                    Dữ liệu vận hành lấy từ hóa đơn đã scan: tạo nhanh sản phẩm, sinh phiếu nhập kho nháp và chuẩn bị đồng bộ bán hàng.
                   </p>
                 </div>
                 <button className="rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted" onClick={() => setTab("blueprint")}>
@@ -1609,37 +1891,105 @@ export default function InvoiceManager() {
                 </button>
               </div>
             </div>
+            ) : null}
 
             {tab === "products" ? (
               <div className="panel overflow-hidden">
-                <div className="border-b px-4 py-3 text-sm font-semibold">Sản phẩm / SKU gợi ý từ dữ liệu hóa đơn</div>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+                  <div>
+                    <div className="text-sm font-semibold">Tạo sản phẩm nhanh từ hóa đơn scan</div>
+                    <div className="text-xs text-muted-foreground">
+                      {productEditMode
+                        ? "Nhập các trường nội bộ không có trên hóa đơn mua, rồi bấm Lưu để áp dụng cho các dòng hóa đơn cùng nhóm sản phẩm."
+                        : "Lấy gợi ý từ bảng tổng hợp. Bật Hoàn thiện dữ liệu để nhập SKU, tên bán lẻ, giá bán và ảnh sản phẩm."}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                      productEditMode ? "border bg-white hover:bg-muted" : "bg-primary text-primary-foreground hover:opacity-90"
+                    }`}
+                    onClick={() => setProductEditMode((value) => !value)}
+                  >
+                    {productEditMode ? "Xem danh sách" : "Hoàn thiện dữ liệu"}
+                  </button>
+                </div>
                 <div className="overflow-x-auto">
-                  <table className="data-table w-full min-w-[900px] text-sm">
+                  <table className="data-table w-full min-w-[1360px] text-sm">
                     <thead>
                       <tr>
-                        {["SKU", "Tên hàng đầu vào", "Tên xuất hóa đơn", "Tên bán lẻ", "ĐVT", "Trạng thái"].map((header) => (
+                        {["Trạng thái", "SKU", "Tên bán lẻ", "Tên chỉnh lại xuất HĐ", "Tên hàng đầu vào", "ĐVT", "Giá nhập", "Giá bán", "Ảnh SP", "Nguồn"].map((header) => (
                           <th key={header} className="px-3 py-2 text-left">{header}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {store.rows.slice(0, 8).map((row) => (
-                        <tr key={row.id} className="border-t">
-                          <td className="px-3 py-2 font-semibold">{row.internalProductCode || <span className="text-warning-foreground">Cần nhập</span>}</td>
-                          <td className="px-3 py-2">{row.inputProductName}</td>
-                          <td className="px-3 py-2">{row.adjustedInvoiceName || "-"}</td>
-                          <td className="px-3 py-2">{row.retailName || "-"}</td>
-                          <td className="px-3 py-2">{row.unit}</td>
+                      {productCandidates.slice(0, 80).map((product) => {
+                        const draft = getProductDraft(product);
+                        const imageLabel = draft.imageUrl ? "Sửa và xem" : "Thêm";
+                        return (
+                        <tr key={product.id} className="border-t">
                           <td className="px-3 py-2">
-                            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${row.internalProductCode ? "bg-emerald-50 text-emerald-700" : "bg-warning-bg text-warning-foreground"}`}>
-                              {row.internalProductCode ? "Đã map" : "Thiếu SKU"}
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${product.missing.length === 0 ? "bg-emerald-50 text-emerald-700" : "bg-warning-bg text-warning-foreground"}`}>
+                              {product.missing.length === 0 ? "Sẵn sàng tạo" : `Thiếu ${product.missing.join(", ")}`}
                             </span>
                           </td>
+                          <td className="px-3 py-2 font-semibold">
+                            {productEditMode ? (
+                              <input className="table-field manual-field font-semibold" value={draft.sku} onChange={(event) => updateProductDraft(product, { sku: event.target.value })} placeholder="Nhập SKU" />
+                            ) : (
+                              product.sku || <span className="text-warning-foreground">Cần nhập</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            {productEditMode ? (
+                              <input className="table-field manual-field" value={draft.retailName} onChange={(event) => updateProductDraft(product, { retailName: event.target.value })} placeholder="Tên bán lẻ" />
+                            ) : (
+                              product.retailName || <span className="text-muted-foreground">Nhập sau</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            {productEditMode ? (
+                              <input className="table-field manual-field" value={draft.adjustedInvoiceName} onChange={(event) => updateProductDraft(product, { adjustedInvoiceName: event.target.value })} placeholder="Tên chỉnh lại" />
+                            ) : (
+                              product.adjustedInvoiceName || <span className="text-muted-foreground">Nhập sau</span>
+                            )}
+                          </td>
+                          <td className="max-w-[360px] truncate px-3 py-2" title={product.inputProductName}>{product.inputProductName || "-"}</td>
+                          <td className="px-3 py-2">
+                            {productEditMode ? (
+                              <input className="table-field" value={draft.unit} onChange={(event) => updateProductDraft(product, { unit: event.target.value })} placeholder="ĐVT" />
+                            ) : (
+                              product.unit || "-"
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{product.purchasePrice ? fmtCurrency(parseNumeric(product.purchasePrice) ?? 0) : "-"}</td>
+                          <td className="px-3 py-2">
+                            {productEditMode ? (
+                              <input className="table-field manual-field text-right tabular-nums" inputMode="decimal" value={draft.salePrice} onChange={(event) => updateProductDraft(product, { salePrice: event.target.value.replace(/[^\d.,-]/g, "") })} placeholder="Giá bán" />
+                            ) : (
+                              productMeta[product.id]?.salePrice ? fmtCurrency(parseNumeric(productMeta[product.id]?.salePrice) ?? 0) : <span className="text-muted-foreground">Nhập tay</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold hover:bg-muted" onClick={() => editProductImage(product)}>
+                              {imageLabel}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">
+                            <div>{fmtNumber(product.rowCount)} dòng HĐ</div>
+                            {productEditMode ? (
+                              <button type="button" className="mt-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" onClick={() => saveProductDraft(product)}>
+                                Lưu
+                              </button>
+                            ) : null}
+                          </td>
                         </tr>
-                      ))}
-                      {store.rows.length === 0 ? (
+                        );
+                      })}
+                      {productCandidates.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">Chưa có dữ liệu sản phẩm. Scan hóa đơn để tạo gợi ý SKU.</td>
+                          <td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">Chưa có dữ liệu sản phẩm. Scan hóa đơn để tạo gợi ý SKU.</td>
                         </tr>
                       ) : null}
                     </tbody>
@@ -1649,42 +1999,140 @@ export default function InvoiceManager() {
             ) : null}
 
             {tab === "inventory" ? (
-              <div className="grid gap-4 lg:grid-cols-3">
-                {[
-                  ["Tổng SKU", fmtNumber(new Set(store.rows.map((row) => row.internalProductCode).filter(Boolean)).size)],
-                  ["SL nhập từ HĐ", fmtNumber(store.rows.reduce((total, row) => total + (parseNumeric(row.quantity) ?? 0), 0))],
-                  ["Dòng chưa map kho", fmtNumber(missingSku)]
-                ].map(([label, value]) => (
-                  <div key={label} className="panel p-5">
-                    <div className="text-sm text-muted-foreground">{label}</div>
-                    <div className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
+              <div className="panel overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+                  <div>
+                    <div className="text-sm font-semibold">Phiếu nhập kho nháp từ hóa đơn scan</div>
+                    <div className="text-xs text-muted-foreground">Mỗi file hóa đơn tạo một phiếu nhập nháp, lấy tên hàng, số lượng, đơn vị và đơn giá nhập từ OCR.</div>
                   </div>
-                ))}
-                <div className="panel p-5 lg:col-span-3">
-                  <h3 className="text-sm font-semibold">Mock tồn kho</h3>
-                  <div className="mt-3 grid gap-3 md:grid-cols-3">
-                    {["Kho HCM", "Kho Hà Nội", "Web bán hàng"].map((item, index) => (
-                      <div key={item} className="rounded-lg border bg-card p-4">
-                        <div className="font-semibold">{item}</div>
-                        <div className="mt-2 text-sm text-muted-foreground">{index === 2 ? "Chuẩn bị đồng bộ sản phẩm/SKU lên website." : "Chờ nối dữ liệu tồn kho thực tế."}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <button type="button" className="rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted" onClick={() => setTab("scan")}>
+                    Scan thêm hóa đơn
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="data-table w-full min-w-[1040px] text-sm">
+                    <thead>
+                      <tr>
+                        {["Số phiếu", "File hóa đơn", "Nhà cung cấp", "Ngày HĐ", "Số HĐ", "Dòng hàng", "Tổng SL", "Tổng nhập", "Trạng thái"].map((header) => (
+                          <th key={header} className="px-3 py-2 text-left">{header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockReceiptDrafts.map((receipt) => (
+                        <tr key={receipt.id} className="border-t">
+                          <td className="px-3 py-2 font-semibold">{receipt.receiptNumber}</td>
+                          <td className="max-w-[260px] truncate px-3 py-2 text-xs text-muted-foreground" title={receipt.sourceFileName}>{receipt.sourceFileName}</td>
+                          <td className="max-w-[280px] truncate px-3 py-2" title={receipt.supplierName}>{receipt.supplierName || "-"}</td>
+                          <td className="px-3 py-2 tabular-nums">{receipt.invoiceDate || "-"}</td>
+                          <td className="px-3 py-2 tabular-nums">{receipt.invoiceNumber || "-"}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{fmtNumber(receipt.itemCount)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{fmtNumber(receipt.totalQuantity)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{fmtCurrency(receipt.totalAmount)}</td>
+                          <td className="px-3 py-2">
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${receipt.missingSkuCount === 0 ? "bg-emerald-50 text-emerald-700" : "bg-warning-bg text-warning-foreground"}`}>
+                              {receipt.missingSkuCount === 0 ? "Sẵn sàng nhập kho" : `Cần map ${receipt.missingSkuCount} SKU`}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {stockReceiptDrafts.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Chưa có phiếu nhập nháp. Scan hóa đơn để tự tạo.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             ) : null}
 
             {tab === "sales" ? (
-              <div className="panel overflow-hidden">
-                <div className="border-b px-4 py-3 text-sm font-semibold">Đơn hàng mẫu</div>
-                <div className="grid gap-3 p-4 md:grid-cols-3">
-                  {["Sapo POS", "Website", "Facebook/Zalo"].map((channel, index) => (
-                    <div key={channel} className="rounded-lg border p-4">
-                      <div className="text-sm text-muted-foreground">Kênh bán</div>
-                      <div className="mt-1 font-semibold">{channel}</div>
-                      <div className="mt-3 text-2xl font-semibold tabular-nums">{fmtCurrency((index + 1) * 12_500_000)}</div>
+              <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr]">
+                <div className="panel overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+                    <div>
+                      <div className="text-sm font-semibold">Tạo sản phẩm nhanh</div>
+                      <div className="text-xs text-muted-foreground">Ưu tiên các dòng đã có SKU và tên bán lẻ.</div>
                     </div>
-                  ))}
+                    <button type="button" className="rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted" onClick={() => setTab("products")}>
+                      Mở sản phẩm
+                    </button>
+                  </div>
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="data-table w-full min-w-[760px] text-sm">
+                      <thead>
+                        <tr>
+                          {["SKU", "Tên bán lẻ", "ĐVT", "Giá nhập", "Trạng thái"].map((header) => (
+                            <th key={header} className="px-3 py-2 text-left">{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {productCandidates.slice(0, 12).map((product) => (
+                          <tr key={product.id} className="border-t">
+                            <td className="px-3 py-2 font-semibold">{product.sku || <span className="text-warning-foreground">Cần nhập</span>}</td>
+                            <td className="max-w-[280px] truncate px-3 py-2" title={product.retailName || product.inputProductName}>{product.retailName || product.inputProductName || "-"}</td>
+                            <td className="px-3 py-2">{product.unit || "-"}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{product.purchasePrice ? fmtCurrency(parseNumeric(product.purchasePrice) ?? 0) : "-"}</td>
+                            <td className="px-3 py-2">
+                              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${product.missing.length === 0 ? "bg-emerald-50 text-emerald-700" : "bg-warning-bg text-warning-foreground"}`}>
+                                {product.missing.length === 0 ? "Tạo được" : `Thiếu ${product.missing.join(", ")}`}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {productCandidates.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">Chưa có sản phẩm từ hóa đơn scan.</td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="panel overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+                    <div>
+                      <div className="text-sm font-semibold">Phiếu nhập kho tự động</div>
+                      <div className="text-xs text-muted-foreground">Sinh nháp theo từng hóa đơn đã scan.</div>
+                    </div>
+                    <button type="button" className="rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted" onClick={() => setTab("inventory")}>
+                      Mở tồn kho
+                    </button>
+                  </div>
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="data-table w-full min-w-[760px] text-sm">
+                      <thead>
+                        <tr>
+                          {["Số phiếu", "File", "Dòng", "Tổng nhập", "Trạng thái"].map((header) => (
+                            <th key={header} className="px-3 py-2 text-left">{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockReceiptDrafts.slice(0, 12).map((receipt) => (
+                          <tr key={receipt.id} className="border-t">
+                            <td className="px-3 py-2 font-semibold">{receipt.receiptNumber}</td>
+                            <td className="max-w-[260px] truncate px-3 py-2 text-xs text-muted-foreground" title={receipt.sourceFileName}>{receipt.sourceFileName}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{fmtNumber(receipt.itemCount)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{fmtCurrency(receipt.totalAmount)}</td>
+                            <td className="px-3 py-2">
+                              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${receipt.missingSkuCount === 0 ? "bg-emerald-50 text-emerald-700" : "bg-warning-bg text-warning-foreground"}`}>
+                                {receipt.missingSkuCount === 0 ? "Nháp hợp lệ" : `Thiếu ${receipt.missingSkuCount} SKU`}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {stockReceiptDrafts.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">Chưa có phiếu nhập kho nháp.</td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -1789,7 +2237,7 @@ export default function InvoiceManager() {
               <div className="panel overflow-hidden">
                 <div className="border-b border-slate-200 px-5 py-4 font-semibold">Navigation mẫu</div>
                 <div className="space-y-2 p-4">
-                  {["Dashboard", "Scan hóa đơn", "Tổng hợp hóa đơn", "Tài liệu", "Sản phẩm", "Tồn kho", "Bán hàng", "Báo cáo", "Cài đặt"].map((item, index) => (
+                  {["Dashboard", "Scan hóa đơn", "Tổng hợp hóa đơn", "Tài liệu", "Sản phẩm", "Tồn kho", "Lên đơn hàng", "Báo cáo", "Cài đặt"].map((item, index) => (
                     <div key={item} className={`rounded-xl px-4 py-3 text-sm font-semibold ${index === 2 ? "bg-primary text-white" : "bg-slate-50 text-slate-600"}`}>
                       {item}
                     </div>
