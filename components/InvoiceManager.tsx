@@ -354,6 +354,7 @@ export default function InvoiceManager() {
   const [productEditMode, setProductEditMode] = useState(false);
   const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
   const [productMeta, setProductMeta] = useState<Record<string, Pick<ProductDraft, "salePrice" | "imageUrl">>>({});
+  const [imageEditor, setImageEditor] = useState<{ productId: string; imageUrl: string } | null>(null);
   const [vatConfirm, setVatConfirm] = useState<{
     rowId: string;
     previousRate: string;
@@ -919,16 +920,13 @@ export default function InvoiceManager() {
         })
       }).catch(() => undefined);
     }
-    setNotice(`ÄĂ£ lÆ°u thĂ´ng tin sáº£n pháº©m cho ${product.rowIds.length} dĂ²ng hĂ³a Ä‘Æ¡n.`);
+    setNotice(`Đã lưu thông tin sản phẩm cho ${product.rowIds.length} dòng hóa đơn.`);
     await refreshLookups().catch(() => undefined);
   };
 
   const editProductImage = (product: ProductCandidate) => {
     const draft = getProductDraft(product);
-    const nextUrl = window.prompt("DĂ¡n link áº£nh sáº£n pháº©m. Äá»ƒ trá»‘ng náº¿u muá»‘n xĂ³a áº£nh.", draft.imageUrl);
-    if (nextUrl === null) return;
-    updateProductDraft(product, { imageUrl: nextUrl.trim() });
-    if (nextUrl.trim()) window.open(nextUrl.trim(), "_blank", "noopener,noreferrer");
+    setImageEditor({ productId: product.id, imageUrl: draft.imageUrl });
   };
 
   const exportExcel = async () => {
