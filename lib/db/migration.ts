@@ -8,6 +8,7 @@ declare global {
 }
 
 const SCHEMA_VERSION = 4; // Bump version for scan apply state and product catalog compatibility
+const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
   if (!isDatabaseConfigured) return;
@@ -26,13 +27,16 @@ export async function ensureDatabase() {
 }
 
 async function migrate() {
-  const pool = getPool();
-  
-  // 1. Core extensions
-  await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
+  const client = await getPool().connect();
 
-  // 2. Invoice Flow tables
-  await pool.query(`
+  try {
+    await client.query("select pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
+
+    // 1. Core extensions
+    await client.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
+
+    // 2. Invoice Flow tables
+    await client.query(`
     create table if not exists invoice_documents (
       id text primary key,
       file_name text not null,
@@ -99,7 +103,7 @@ async function migrate() {
   `);
 
   // 3. SAPO Product Management tables (Standardized from product_sql.md)
-  await pool.query(`
+    await client.query(`
     create table if not exists categories (
       id               uuid primary key default gen_random_uuid(),
       parent_id        uuid references categories(id) on delete set null,
@@ -271,12 +275,16 @@ async function migrate() {
   `);
 
   // Add foreign key constraint to variants if product_images table is ready, avoiding cycle constraints on creation
-  await pool.query(`
+    await client.query(`
     alter table product_variants
       add constraint fk_variant_image
       foreign key (image_id) references product_images(id) on delete set null
       not valid;
     alter table product_variants
       validate constraint fk_variant_image;
-  `).catch(() => undefined); // Catch if it already exists
+    `).catch(() => undefined); // Catch if it already exists
+  } finally {
+    await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);
+    client.release();
+  }
 }
