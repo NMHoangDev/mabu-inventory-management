@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { rowPatchSchema } from "@/lib/schema";
-import { deleteRow, patchRow } from "@/lib/store";
+import { rowPatchSchema } from "@/lib/shared/schema";
+import { deleteRow, patchRow } from "@/lib/invoices/repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

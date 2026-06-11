@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readLookups } from "@/lib/store";
+import { readLookups } from "@/lib/products/lookups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

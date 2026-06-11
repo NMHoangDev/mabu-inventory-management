@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getUploadedFileId, scanUploadedFile } from "@/lib/ocr";
-import { markDuplicateDocument, readStore, upsertDocumentWithRows } from "@/lib/store";
+import { getUploadedFileId, scanUploadedFile } from "@/lib/invoices/ocr";
+import { markDuplicateDocument, readStore, upsertDocumentWithRows } from "@/lib/invoices/repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

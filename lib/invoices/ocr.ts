@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { GoogleGenAI, createPartFromUri, createUserContent } from "@google/genai";
-import { fixMojibakeText, normalizeFinancials, parseNumeric } from "./format";
-import { invoiceExtractResultSchema, type InvoiceDocument, type InvoiceExtractResult, type InvoiceRow } from "./schema";
-import { uploadDir } from "./store";
-import { persistUploadedBuffer } from "./supabase-storage";
+import { fixMojibakeText, normalizeFinancials, parseNumeric } from "../shared/format";
+import { invoiceExtractResultSchema, type InvoiceDocument, type InvoiceExtractResult, type InvoiceRow } from "../shared/schema";
+import { persistUploadedBuffer } from "./storage";
+
+const dataDir = process.env.INVOICEFLOW_DATA_DIR ?? (process.env.VERCEL ? path.join(os.tmpdir(), "invoiceflow") : path.join(process.cwd(), "data"));
+export const uploadDir = path.join(dataDir, "uploads");
 
 const prompt = `You are an invoice extraction engine for Vietnamese invoices.
 Extract data from the uploaded invoice PDF/image.

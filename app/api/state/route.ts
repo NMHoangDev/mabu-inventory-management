@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readStore } from "@/lib/store";
+import { readStore } from "@/lib/invoices/repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
-import { normalizeDateForInput, normalizeFinancials, parseNumeric } from "@/lib/format";
-import { excelColumns, exportRequestSchema, type ExcelColumnKey, type InvoiceRow } from "@/lib/schema";
+import { normalizeDateForInput, normalizeFinancials, parseNumeric } from "@/lib/shared/format";
+import { excelColumns, exportRequestSchema, type ExcelColumnKey, type InvoiceRow } from "@/lib/shared/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteDocument } from "@/lib/store";
+import { deleteDocument } from "@/lib/invoices/repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

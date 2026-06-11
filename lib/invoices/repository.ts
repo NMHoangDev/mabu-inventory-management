@@ -1,26 +1,13 @@
-import { promises as fs } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import type pg from "pg";
-import { ensureDatabase, getPool, isDatabaseConfigured, logActivity } from "./db";
-import { normalizeFinancials } from "./format";
-import { removeStoredObject } from "./supabase-storage";
-import {
-  appStoreSchema,
-  type AppStore,
-  type InvoiceDocument,
-  type InvoiceRow
-} from "./schema";
-
-const dataDir = process.env.INVOICEFLOW_DATA_DIR ?? (process.env.VERCEL ? path.join(os.tmpdir(), "invoiceflow") : path.join(process.cwd(), "data"));
-const storePath = path.join(dataDir, "invoiceflow-store.json");
-export const uploadDir = path.join(dataDir, "uploads");
+import { getPool, isDatabaseConfigured, logActivity } from "../db/connection";
+import { ensureDatabase } from "../db/migration";
+import { normalizeFinancials } from "../shared/format";
+import { readJsonStore, writeJsonStoreNow } from "../shared/json-store";
+import { addInvoiceQuickOptions } from "../products/lookups";
+import { removeStoredObject } from "./storage";
+import type { AppStore, InvoiceDocument, InvoiceRow } from "../shared/schema";
 
 let writeQueue = Promise.resolve();
-
-async function ensureDataDir() {
-  await fs.mkdir(uploadDir, { recursive: true });
-}
 
 function asIso(value: unknown) {
   if (value instanceof Date) return value.toISOString();
@@ -80,24 +67,6 @@ function invoiceRowFromDb(row: Record<string, unknown>): InvoiceRow {
   };
 }
 
-async function readJsonStore(): Promise<AppStore> {
-  await ensureDataDir();
-  try {
-    const raw = await fs.readFile(storePath, "utf8");
-    return appStoreSchema.parse(JSON.parse(raw));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.warn("Could not read store, using empty store:", error);
-    }
-    return { documents: [], rows: [] };
-  }
-}
-
-async function writeJsonStoreNow(store: AppStore) {
-  await ensureDataDir();
-  await fs.writeFile(storePath, JSON.stringify(store, null, 2), "utf8");
-}
-
 export async function readStore(): Promise<AppStore> {
   if (!isDatabaseConfigured) return readJsonStore();
 
@@ -132,168 +101,6 @@ export function updateStore(updater: (store: AppStore) => AppStore | Promise<App
     return undefined;
   });
   return writeQueue;
-}
-
-async function addQuickOptions(client: pg.PoolClient | pg.Pool, pairs: Array<[string, unknown]>) {
-  const normalized = pairs
-    .map(([field, value]) => [field, cell(value).trim()] as const)
-    .filter(([, value]) => value.length > 0);
-
-  for (const [field, value] of normalized) {
-    await client.query(
-      `
-        insert into quick_options (field, value, usage_count, last_used_at)
-        values ($1, $2, 1, now())
-        on conflict (field, value)
-        do update set usage_count = quick_options.usage_count + 1, last_used_at = now()
-      `,
-      [field, value]
-    );
-  }
-}
-
-async function addInvoiceQuickOptions(client: pg.PoolClient | pg.Pool, rows: InvoiceRow[]) {
-  const pairs: Array<[string, unknown]> = [];
-  for (const row of rows) {
-    pairs.push(
-      ["supplierName", row.supplierName],
-      ["invoiceSymbol", row.invoiceSymbol],
-      ["inputProductName", row.inputProductName],
-      ["internalProductCode", row.internalProductCode],
-      ["adjustedInvoiceName", row.adjustedInvoiceName],
-      ["retailName", row.retailName],
-      ["unit", row.unit],
-      ["vatRate", row.vatRate]
-    );
-
-    if (cell(row.internalProductCode).trim()) {
-      await client.query(
-        `
-          insert into catalog_products (sku, input_product_name, adjusted_invoice_name, retail_name, unit, updated_at)
-          values ($1, $2, $3, $4, $5, now())
-          on conflict (sku)
-          do update set
-            input_product_name = coalesce(nullif(excluded.input_product_name, ''), catalog_products.input_product_name),
-            adjusted_invoice_name = coalesce(nullif(excluded.adjusted_invoice_name, ''), catalog_products.adjusted_invoice_name),
-            retail_name = coalesce(nullif(excluded.retail_name, ''), catalog_products.retail_name),
-            unit = coalesce(nullif(excluded.unit, ''), catalog_products.unit),
-            updated_at = now()
-        `,
-        [
-          cell(row.internalProductCode),
-          cell(row.inputProductName),
-          cell(row.adjustedInvoiceName),
-          cell(row.retailName),
-          cell(row.unit)
-        ]
-      );
-    }
-  }
-
-  await addQuickOptions(client, pairs);
-}
-
-async function ensureCatalogProductMetaColumns(client: pg.PoolClient | pg.Pool) {
-  await client.query(`
-    alter table catalog_products add column if not exists sale_price text not null default '';
-    alter table catalog_products add column if not exists image_url text not null default '';
-  `);
-}
-
-export async function readLookups() {
-  if (!isDatabaseConfigured) {
-    const store = await readJsonStore();
-    const unique = (values: unknown[]) => Array.from(new Set(values.map((value) => cell(value).trim()).filter(Boolean))).sort();
-    return {
-      suppliers: unique(store.rows.map((row) => row.supplierName)),
-      inputProductNames: unique(store.rows.map((row) => row.inputProductName)),
-      internalProductCodes: unique(store.rows.map((row) => row.internalProductCode)),
-      adjustedInvoiceNames: unique(store.rows.map((row) => row.adjustedInvoiceName)),
-      retailNames: unique(store.rows.map((row) => row.retailName)),
-      units: unique(store.rows.map((row) => row.unit)),
-      vatRates: unique(store.rows.map((row) => row.vatRate)),
-      products: []
-    };
-  }
-
-  await ensureDatabase();
-  const pool = getPool();
-  await ensureCatalogProductMetaColumns(pool);
-  const options = await pool.query("select field, value from quick_options order by usage_count desc, value asc limit 500");
-  let products = await pool
-    .query("select sku, input_product_name, adjusted_invoice_name, retail_name, unit, sale_price, image_url from catalog_products order by updated_at desc limit 500")
-    .catch(async (error: unknown) => {
-      if (error instanceof Error && error.message.includes("sale_price")) {
-        await ensureDatabase();
-        return pool.query("select sku, input_product_name, adjusted_invoice_name, retail_name, unit, sale_price, image_url from catalog_products order by updated_at desc limit 500");
-      }
-      throw error;
-    });
-  const byField = (field: string) => options.rows.filter((row) => row.field === field).map((row) => String(row.value));
-  return {
-    suppliers: byField("supplierName"),
-    inputProductNames: byField("inputProductName"),
-    internalProductCodes: byField("internalProductCode"),
-    adjustedInvoiceNames: byField("adjustedInvoiceName"),
-    retailNames: byField("retailName"),
-    units: byField("unit"),
-    vatRates: byField("vatRate"),
-    products: products.rows.map((row) => ({
-      sku: String(row.sku ?? ""),
-      inputProductName: String(row.input_product_name ?? ""),
-      adjustedInvoiceName: String(row.adjusted_invoice_name ?? ""),
-      retailName: String(row.retail_name ?? ""),
-      unit: String(row.unit ?? ""),
-      salePrice: String(row.sale_price ?? ""),
-      imageUrl: String(row.image_url ?? "")
-    }))
-  };
-}
-
-export async function upsertCatalogProductMeta(input: {
-  sku: string;
-  inputProductName?: string;
-  adjustedInvoiceName?: string;
-  retailName?: string;
-  unit?: string;
-  salePrice?: string;
-  imageUrl?: string;
-}) {
-  const sku = cell(input.sku).trim();
-  if (!sku) return readLookups();
-
-  if (!isDatabaseConfigured) return readLookups();
-
-  await ensureDatabase();
-  const pool = getPool();
-  await ensureCatalogProductMetaColumns(pool);
-  await pool.query(
-    `
-      insert into catalog_products
-        (sku, input_product_name, adjusted_invoice_name, retail_name, unit, sale_price, image_url, updated_at)
-      values ($1, $2, $3, $4, $5, $6, $7, now())
-      on conflict (sku)
-      do update set
-        input_product_name = coalesce(nullif(excluded.input_product_name, ''), catalog_products.input_product_name),
-        adjusted_invoice_name = coalesce(nullif(excluded.adjusted_invoice_name, ''), catalog_products.adjusted_invoice_name),
-        retail_name = coalesce(nullif(excluded.retail_name, ''), catalog_products.retail_name),
-        unit = coalesce(nullif(excluded.unit, ''), catalog_products.unit),
-        sale_price = excluded.sale_price,
-        image_url = excluded.image_url,
-        updated_at = now()
-    `,
-    [
-      sku,
-      cell(input.inputProductName),
-      cell(input.adjustedInvoiceName),
-      cell(input.retailName),
-      cell(input.unit),
-      cell(input.salePrice),
-      cell(input.imageUrl)
-    ]
-  );
-  await logActivity("product", `Cập nhật sản phẩm ${sku}`);
-  return readLookups();
 }
 
 export async function upsertDocumentWithRows(document: InvoiceDocument, rows: InvoiceRow[]) {
