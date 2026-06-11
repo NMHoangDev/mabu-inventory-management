@@ -209,6 +209,8 @@ export async function scanUploadedFile(file: File) {
       deletedRowCount: 0,
       duplicateCount: 0,
       lastDuplicateAt: "",
+      appliedToSummary: false,
+      appliedAt: "",
       warnings: result.warnings
     };
     const rows = toStoredRows(result, document);
@@ -226,6 +228,8 @@ export async function scanUploadedFile(file: File) {
       deletedRowCount: 0,
       duplicateCount: 0,
       lastDuplicateAt: "",
+      appliedToSummary: false,
+      appliedAt: "",
       warnings: [message]
     };
     if (storedPath !== localPath) await fs.unlink(localPath).catch(() => undefined);

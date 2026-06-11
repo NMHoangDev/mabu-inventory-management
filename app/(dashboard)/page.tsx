@@ -16,19 +16,21 @@ function documentStatusLabel(document: InvoiceDocument) {
 export default function DashboardPage() {
   const { store, loading, setError } = useApp();
 
-  const invoiceCount = new Set(store.rows.map((row) => `${row.supplierName}-${row.invoiceNumber}`)).size;
+  const appliedDocumentIds = new Set(store.documents.filter((document) => document.appliedToSummary).map((document) => document.id));
+  const summaryRows = store.rows.filter((row) => appliedDocumentIds.has(row.documentId));
+  const invoiceCount = new Set(summaryRows.map((row) => `${row.supplierName}-${row.invoiceNumber}`)).size;
   const errorDocuments = store.documents.filter((document) => document.status === "error").length;
-  const missingSku = store.rows.filter((row) => !String(row.internalProductCode).trim()).length;
-  const missingAdjustedName = store.rows.filter((row) => !String(row.adjustedInvoiceName).trim()).length;
+  const missingSku = summaryRows.filter((row) => !String(row.internalProductCode).trim()).length;
+  const missingAdjustedName = summaryRows.filter((row) => !String(row.adjustedInvoiceName).trim()).length;
 
   const exportExcel = async () => {
-    if (store.rows.length === 0) return;
+    if (summaryRows.length === 0) return;
 
     try {
       const response = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: store.rows })
+        body: JSON.stringify({ rows: summaryRows })
       });
       if (!response.ok) throw new Error("Không xuất được Excel.");
 
@@ -61,7 +63,7 @@ export default function DashboardPage() {
         <div className="min-w-0">
           <div className="section-title">Hóa đơn</div>
           <div className="section-caption mt-0.5">
-            {fmtNumber(invoiceCount)} hóa đơn · {fmtNumber(store.rows.length)} dòng · {fmtNumber(errorDocuments)} lỗi OCR
+            {fmtNumber(invoiceCount)} hóa đơn · {fmtNumber(summaryRows.length)} dòng · {fmtNumber(errorDocuments)} lỗi OCR
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -74,7 +76,7 @@ export default function DashboardPage() {
           <button 
             className="rounded-md border bg-white px-3.5 py-2 text-sm font-semibold hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50" 
             onClick={exportExcel} 
-            disabled={store.rows.length === 0}
+            disabled={summaryRows.length === 0}
           >
             Xuất Excel
           </button>
@@ -134,7 +136,7 @@ export default function DashboardPage() {
               ["Dòng thiếu MÃ SẢN PHẨM", missingSku],
               ["Dòng thiếu TÊN CHỈNH LẠI", missingAdjustedName],
               ["Tài liệu OCR lỗi", errorDocuments],
-              ["Dòng thiếu tên bán lẻ", store.rows.filter((row) => !String(row.retailName).trim()).length]
+              ["Dòng thiếu tên bán lẻ", summaryRows.filter((row) => !String(row.retailName).trim()).length]
             ].map(([label, count]) => (
               <div key={String(label)} className="flex items-center justify-between bg-warning-bg/55 px-4 py-3">
                 <div className="text-sm">{label}</div>

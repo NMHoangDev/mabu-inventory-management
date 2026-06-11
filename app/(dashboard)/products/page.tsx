@@ -90,6 +90,7 @@ export default function ProductsPage() {
   const [mappingOption, setMappingOption] = useState<"existing" | "new">("existing");
   const [selectedProductId, setSelectedProductId] = useState("");
   const [modalProductSearch, setModalProductSearch] = useState("");
+  const [imageEditor, setImageEditor] = useState<{ product: ProductCandidate; value: string } | null>(null);
   const [modalDraft, setModalDraft] = useState<ProductDraft>({
     sku: "",
     adjustedInvoiceName: "",
@@ -231,10 +232,17 @@ export default function ProductsPage() {
   }, [products, searchQuery, channelFilter, categoryFilter]);
 
   // Candidate grouping from scanned rows
+  const appliedDocumentIds = useMemo(
+    () => new Set(store.documents.filter((document) => document.appliedToSummary).map((document) => document.id)),
+    [store.documents]
+  );
+
   const productCandidates = useMemo<ProductCandidate[]>(() => {
     const grouped = new Map<string, ProductCandidate>();
 
     for (const row of store.rows) {
+      if (!appliedDocumentIds.has(row.documentId)) continue;
+
       const sku = cleanText(row.internalProductCode);
       const inputProductName = cleanText(row.inputProductName);
       const adjustedInvoiceName = cleanText(row.adjustedInvoiceName);
@@ -286,7 +294,7 @@ export default function ProductsPage() {
         sensitivity: "base"
       });
     });
-  }, [store.rows]);
+  }, [appliedDocumentIds, store.rows]);
 
   const getProductDraft = (product: ProductCandidate): ProductDraft => {
     const meta = productMeta[product.id];
@@ -1442,12 +1450,9 @@ export default function ProductsPage() {
                           <button 
                             type="button" 
                             className="text-xs text-primary hover:underline font-semibold"
-                            onClick={() => {
-                              const url = window.prompt("Nhập đường dẫn URL ảnh sản phẩm:", draft.imageUrl);
-                              if (url !== null) updateProductDraft(product, { imageUrl: url });
-                            }}
+                            onClick={() => setImageEditor({ product, value: draft.imageUrl })}
                           >
-                            {draft.imageUrl ? "Sửa ảnh" : "Thêm ảnh"}
+                            {draft.imageUrl ? "Sửa / xem" : "Thêm / xem"}
                           </button>
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -1475,6 +1480,72 @@ export default function ProductsPage() {
           </>
         )}
       </div>
+
+      {imageEditor ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-800">Ảnh sản phẩm</h3>
+                <p className="mt-1 text-xs text-slate-500">Dán link ảnh để xem trước và lưu cùng dữ liệu sản phẩm.</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                onClick={() => setImageEditor(null)}
+                aria-label="Đóng"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-3 p-5">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-slate-600">Link ảnh</span>
+                <input
+                  className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  value={imageEditor.value}
+                  onChange={(event) => setImageEditor({ ...imageEditor, value: event.target.value })}
+                  placeholder="https://..."
+                />
+              </label>
+              <div className="grid min-h-[180px] place-items-center overflow-hidden rounded-lg border bg-slate-50">
+                {imageEditor.value.trim() ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageEditor.value.trim()}
+                    alt="Xem trước ảnh sản phẩm"
+                    className="max-h-[280px] max-w-full object-contain"
+                    onError={(event) => {
+                      event.currentTarget.style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <div className="text-sm text-slate-500">Chưa có link ảnh để xem trước.</div>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t px-5 py-4">
+              <button
+                type="button"
+                className="rounded-md border bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => setImageEditor(null)}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+                onClick={() => {
+                  updateProductDraft(imageEditor.product, { imageUrl: imageEditor.value.trim() });
+                  setImageEditor(null);
+                }}
+              >
+                Lưu ảnh
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Save Candidate Mapping Modal Dialog */}
       {selectedCandidate && (

@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 3; // Bump version since we added standard tables
+const SCHEMA_VERSION = 4; // Bump version for scan apply state and product catalog compatibility
 
 export async function ensureDatabase() {
   if (!isDatabaseConfigured) return;
@@ -90,6 +90,8 @@ async function migrate() {
     alter table invoice_documents add column if not exists deleted_row_count integer not null default 0;
     alter table invoice_documents add column if not exists duplicate_count integer not null default 0;
     alter table invoice_documents add column if not exists last_duplicate_at timestamptz;
+    alter table invoice_documents add column if not exists applied_to_summary boolean not null default false;
+    alter table invoice_documents add column if not exists applied_at timestamptz;
 
     create index if not exists invoice_rows_document_id_idx on invoice_rows(document_id);
     create index if not exists invoice_rows_supplier_idx on invoice_rows(supplier_name);
@@ -263,6 +265,9 @@ async function migrate() {
     alter table categories add column if not exists seo_description text;
     alter table categories add column if not exists sales_channels text[] default '{}';
     alter table categories add column if not exists theme_template text default 'collection';
+    alter table product_catalog add column if not exists sale_price numeric(18,2);
+    alter table product_catalog add column if not exists image_url text;
+    alter table product_catalog add column if not exists product_id uuid references products(id) on delete set null;
   `);
 
   // Add foreign key constraint to variants if product_images table is ready, avoiding cycle constraints on creation

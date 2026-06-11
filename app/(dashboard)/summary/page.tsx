@@ -10,6 +10,7 @@ import {
   Download,
   FileText,
   Filter,
+  Plus,
   RotateCcw,
   Search,
   Trash2,
@@ -56,7 +57,7 @@ const defaultSummaryColumnWidths: Record<SummaryColumnKey, number> = {
   totalAfterTax: 210,
   unitPriceAfterTax: 190,
   note: 220,
-  __delete: 76
+  __delete: 112
 };
 
 const numericKeys = new Set<ExcelColumnKey>([
@@ -110,7 +111,7 @@ function documentProgressText(document: InvoiceDocument) {
 }
 
 export default function SummaryPage() {
-  const { store, setStore, lookups, setError, setNotice } = useApp();
+  const { store, setStore, lookups, setError, setNotice, refreshLookups } = useApp();
 
   const [filters, setFilters] = useState<Filters>({
     file: "",
@@ -133,8 +134,11 @@ export default function SummaryPage() {
     preview: InvoiceRow;
   } | null>(null);
 
+  const appliedDocuments = useMemo(() => store.documents.filter((document) => document.appliedToSummary), [store.documents]);
+  const appliedDocumentIds = useMemo(() => new Set(appliedDocuments.map((document) => document.id)), [appliedDocuments]);
+  const summaryRows = useMemo(() => store.rows.filter((row) => appliedDocumentIds.has(row.documentId)), [appliedDocumentIds, store.rows]);
   const errorDocuments = store.documents.filter((document) => document.status === "error").length;
-  const totalDocuments = store.documents.length;
+  const totalDocuments = appliedDocuments.length;
   const documentById = useMemo(() => new Map(store.documents.map((document) => [document.id, document])), [store.documents]);
 
   const vatSelectOptions = useMemo(
@@ -146,7 +150,7 @@ export default function SummaryPage() {
   );
 
   const filteredRows = useMemo(() => {
-    return store.rows.filter((row) => {
+    return summaryRows.filter((row) => {
       if (filters.file && !includesText(row.sourceFileName, filters.file)) return false;
       if (filters.supplier && !includesText(row.supplierName, filters.supplier)) return false;
       if (filters.product && !includesText(row.inputProductName, filters.product) && !includesText(row.adjustedInvoiceName, filters.product)) {
@@ -156,7 +160,7 @@ export default function SummaryPage() {
       if (filters.sku && !includesText(row.internalProductCode, filters.sku)) return false;
       return isDateWithin(row.invoiceDate, filters.dateFrom, filters.dateTo);
     });
-  }, [filters, store.rows]);
+  }, [filters, summaryRows]);
 
   const displayedRows = useMemo(() => {
     if (!summarySort || summarySort.key === "__delete" || summarySort.key === "__index") return filteredRows;
@@ -306,6 +310,49 @@ export default function SummaryPage() {
     }
   };
 
+  const cleanText = (value: unknown) => String(value ?? "").trim();
+
+  const missingProductFields = (row: InvoiceRow) => {
+    const fields = [
+      ["MÃ SẢN PHẨM", row.internalProductCode],
+      ["TÊN CHỈNH LẠI XUẤT HÓA ĐƠN", row.adjustedInvoiceName],
+      ["TÊN BÁN LẺ", row.retailName],
+      ["Tên hàng hóa đầu vào", row.inputProductName],
+      ["ĐƠN VỊ TÍNH", row.unit]
+    ] as const;
+    return fields.filter(([, value]) => !cleanText(value)).map(([label]) => label);
+  };
+
+  const addRowToProducts = async (row: InvoiceRow) => {
+    const missing = missingProductFields(row);
+    if (missing.length > 0) {
+      setError(`Chưa thể thêm sản phẩm. Vui lòng nhập đủ: ${missing.join(", ")}.`);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: cleanText(row.internalProductCode),
+          inputProductName: cleanText(row.inputProductName),
+          adjustedInvoiceName: cleanText(row.adjustedInvoiceName),
+          retailName: cleanText(row.retailName),
+          unit: cleanText(row.unit),
+          salePrice: ""
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Không thêm được sản phẩm.");
+
+      await refreshLookups();
+      setNotice(`Đã thêm SKU ${cleanText(row.internalProductCode)} vào Sản phẩm / SKU. Xóa hóa đơn sau này sẽ không xóa sản phẩm này.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Không thêm được sản phẩm.");
+    }
+  };
+
   const requestVatRateChange = (row: InvoiceRow, nextRateValue: string) => {
     if (vatConfirm) return;
     const nextRate = normalizeNumberText(nextRateValue);
@@ -357,7 +404,7 @@ export default function SummaryPage() {
 
   const minWidthForSummaryColumn = (key: SummaryColumnKey) => {
     if (key === "__index") return 44;
-    if (key === "__delete") return 64;
+    if (key === "__delete") return 92;
     if (key === "__file") return 150;
     if (key === "inputProductName" || key === "adjustedInvoiceName") return 190;
     if (key === "supplierName" || key === "retailName" || key === "note") return 160;
@@ -576,7 +623,7 @@ export default function SummaryPage() {
               </button>
               {[
                 ["Tài liệu", totalDocuments],
-                ["Dòng", store.rows.length],
+                ["Dòng", summaryRows.length],
                 ["Đang lọc", filteredRows.length],
                 ["Lỗi OCR", errorDocuments]
               ].map(([label, value]) => (
@@ -688,7 +735,7 @@ export default function SummaryPage() {
                   {excelColumns.map((column) => (
                     renderSummaryHeader(column.key, column.label)
                   ))}
-                  {renderSummaryHeader("__delete", "Xóa", "border-r-0 text-center")}
+                  {renderSummaryHeader("__delete", "Thao tác", "border-r-0 text-center")}
                 </tr>
               </thead>
               <tbody>
@@ -716,9 +763,18 @@ export default function SummaryPage() {
                       </td>
                     ))}
                     <td className="border-b border-slate-200 px-2 py-2 text-center">
-                      <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => deleteRow(row.id)} title="Xóa dòng scan nhầm">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          className="rounded-lg p-2 text-primary hover:bg-blue-50"
+                          onClick={() => addRowToProducts(row)}
+                          title="Thêm dòng này vào Sản phẩm / SKU"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                        <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => deleteRow(row.id)} title="Xóa dòng scan nhầm">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   );

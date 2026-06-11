@@ -2,7 +2,6 @@ import type pg from "pg";
 import { getPool, isDatabaseConfigured } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { readJsonStore } from "../shared/json-store";
-import { ensureStandardProduct } from "./repository";
 
 // Helper function to return a clean string or trimmed value
 function cell(value: unknown) {
@@ -41,44 +40,6 @@ export async function addInvoiceQuickOptions(client: pg.PoolClient | pg.Pool, ro
       ["vatRate", row.vatRate]
     );
 
-    const sku = cell(row.internalProductCode);
-    if (sku) {
-      // 1. Ensure the standard product exists
-      const productId = await ensureStandardProduct(
-        client,
-        sku,
-        cell(row.inputProductName),
-        cell(row.adjustedInvoiceName),
-        cell(row.retailName),
-        cell(row.unit),
-        row.unitPrice
-      );
-
-      // 2. Upsert standard product_catalog mapping
-      await client.query(
-        `
-          insert into product_catalog 
-            (sku, input_name, invoice_name, retail_name, unit, sale_price, product_id, updated_at)
-          values ($1, $2, $3, $4, $5, 0, $6, now())
-          on conflict (sku)
-          do update set
-            input_name = coalesce(nullif(excluded.input_name, ''), product_catalog.input_name),
-            invoice_name = coalesce(nullif(excluded.invoice_name, ''), product_catalog.invoice_name),
-            retail_name = coalesce(nullif(excluded.retail_name, ''), product_catalog.retail_name),
-            unit = coalesce(nullif(excluded.unit, ''), product_catalog.unit),
-            product_id = coalesce(excluded.product_id, product_catalog.product_id),
-            updated_at = now()
-        `,
-        [
-          sku,
-          cell(row.inputProductName),
-          cell(row.adjustedInvoiceName),
-          cell(row.retailName),
-          cell(row.unit),
-          productId
-        ]
-      );
-    }
   }
 
   await addQuickOptions(client, pairs);

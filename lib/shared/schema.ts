@@ -57,6 +57,8 @@ export const documentSchema = z.object({
   deletedRowCount: z.number().default(0),
   duplicateCount: z.number().default(0),
   lastDuplicateAt: z.string().default(""),
+  appliedToSummary: z.boolean().default(false),
+  appliedAt: z.string().default(""),
   warnings: z.array(z.string()).default([])
 });
 

@@ -48,10 +48,16 @@ function fmtCurrency(value: number) {
 export default function SalesPage() {
   const { store } = useApp();
 
+  const appliedDocumentIds = useMemo(
+    () => new Set(store.documents.filter((document) => document.appliedToSummary).map((document) => document.id)),
+    [store.documents]
+  );
+  const summaryRows = useMemo(() => store.rows.filter((row) => appliedDocumentIds.has(row.documentId)), [appliedDocumentIds, store.rows]);
+
   const productCandidates = useMemo<ProductCandidate[]>(() => {
     const grouped = new Map<string, ProductCandidate>();
 
-    for (const row of store.rows) {
+    for (const row of summaryRows) {
       const sku = cleanText(row.internalProductCode);
       const inputProductName = cleanText(row.inputProductName);
       const adjustedInvoiceName = cleanText(row.adjustedInvoiceName);
@@ -103,16 +109,16 @@ export default function SalesPage() {
         sensitivity: "base"
       });
     });
-  }, [store.rows]);
+  }, [summaryRows]);
 
   const stockReceiptDrafts = useMemo<StockReceiptDraft[]>(() => {
     const rowsByDocument = new Map<string, InvoiceRow[]>();
-    for (const row of store.rows) {
+    for (const row of summaryRows) {
       rowsByDocument.set(row.documentId, [...(rowsByDocument.get(row.documentId) ?? []), row]);
     }
 
     return store.documents
-      .filter((document) => document.status === "scanned")
+      .filter((document) => document.status === "scanned" && document.appliedToSummary)
       .map((document) => {
         const rows = rowsByDocument.get(document.id) ?? [];
         const firstRow = rows[0];
@@ -134,7 +140,7 @@ export default function SalesPage() {
       })
       .filter((receipt) => receipt.itemCount > 0)
       .sort((first, second) => second.invoiceDate.localeCompare(first.invoiceDate));
-  }, [store.documents, store.rows]);
+  }, [store.documents, summaryRows]);
 
   return (
     <section className="space-y-5">

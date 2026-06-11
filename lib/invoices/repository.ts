@@ -36,6 +36,8 @@ function invoiceDocumentFromDb(row: Record<string, unknown>): InvoiceDocument {
     deletedRowCount: Number(row.deleted_row_count ?? 0),
     duplicateCount: Number(row.duplicate_count ?? 0),
     lastDuplicateAt: asIso(row.last_duplicate_at),
+    appliedToSummary: Boolean(row.applied_to_summary),
+    appliedAt: asIso(row.applied_at),
     warnings: asArray<string>(row.warnings)
   };
 }
@@ -105,27 +107,28 @@ export function updateStore(updater: (store: AppStore) => AppStore | Promise<App
 
 export async function upsertDocumentWithRows(document: InvoiceDocument, rows: InvoiceRow[]) {
   if (!isDatabaseConfigured) {
-    await updateStore((store) => ({
-      ...store,
-      documents: [
-        ...store.documents.filter((item) => item.id !== document.id),
-        {
-          ...document,
-          rowCount: rows.length,
-          originalRowCount: Math.max(
-            document.originalRowCount ?? 0,
-            rows.length,
-            store.documents.find((item) => item.id === document.id)?.originalRowCount ?? 0
-          ),
-          deletedRowCount: 0,
-          duplicateCount: store.documents.find((item) => item.id === document.id)?.duplicateCount ?? document.duplicateCount ?? 0,
-          lastDuplicateAt: store.documents.find((item) => item.id === document.id)?.lastDuplicateAt ?? document.lastDuplicateAt ?? ""
-        }
-      ].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
-      rows: [...store.rows.filter((row) => row.documentId !== document.id), ...rows].sort((a, b) =>
-        a.createdAt.localeCompare(b.createdAt)
-      )
-    }));
+    await updateStore((store) => {
+      const existing = store.documents.find((item) => item.id === document.id);
+      return {
+        ...store,
+        documents: [
+          ...store.documents.filter((item) => item.id !== document.id),
+          {
+            ...document,
+            rowCount: rows.length,
+            originalRowCount: Math.max(document.originalRowCount ?? 0, rows.length, existing?.originalRowCount ?? 0),
+            deletedRowCount: 0,
+            duplicateCount: existing?.duplicateCount ?? document.duplicateCount ?? 0,
+            lastDuplicateAt: existing?.lastDuplicateAt ?? document.lastDuplicateAt ?? "",
+            appliedToSummary: existing?.appliedToSummary ?? document.appliedToSummary ?? false,
+            appliedAt: existing?.appliedAt ?? document.appliedAt ?? ""
+          }
+        ].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
+        rows: [...store.rows.filter((row) => row.documentId !== document.id), ...rows].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt)
+        )
+      };
+    });
     return readJsonStore();
   }
 
@@ -137,8 +140,8 @@ export async function upsertDocumentWithRows(document: InvoiceDocument, rows: In
       `
         insert into invoice_documents
           (id, file_name, file_size, mime_type, stored_path, uploaded_at, status, row_count,
-           original_row_count, deleted_row_count, duplicate_count, last_duplicate_at, warnings, updated_at)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, null, $11::jsonb, now())
+           original_row_count, deleted_row_count, duplicate_count, last_duplicate_at, applied_to_summary, applied_at, warnings, updated_at)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, null, $11, null, $12::jsonb, now())
         on conflict (id)
         do update set
           file_name = excluded.file_name,
@@ -164,6 +167,7 @@ export async function upsertDocumentWithRows(document: InvoiceDocument, rows: In
         rows.length,
         Math.max(document.originalRowCount ?? 0, rows.length),
         document.duplicateCount ?? 0,
+        document.appliedToSummary ?? false,
         JSON.stringify(document.warnings)
       ]
     );
@@ -274,6 +278,43 @@ export async function markDuplicateDocument(documentId: string) {
     [documentId, now]
   );
   await logActivity("duplicate", `File hóa đơn đã có trong hệ thống ${documentId}`);
+  return readStore();
+}
+
+export async function applyDocumentsToSummary(documentIds: string[]) {
+  const ids = Array.from(new Set(documentIds.map((id) => cell(id)).filter(Boolean)));
+  if (ids.length === 0) return readStore();
+
+  const now = new Date().toISOString();
+
+  if (!isDatabaseConfigured) {
+    await updateStore((store) => ({
+      ...store,
+      documents: store.documents.map((document) =>
+        ids.includes(document.id)
+          ? {
+              ...document,
+              appliedToSummary: true,
+              appliedAt: document.appliedAt || now
+            }
+          : document
+      )
+    }));
+    return readJsonStore();
+  }
+
+  await ensureDatabase();
+  await getPool().query(
+    `
+      update invoice_documents
+      set applied_to_summary = true,
+          applied_at = coalesce(applied_at, now()),
+          updated_at = now()
+      where id = any($1::text[])
+    `,
+    [ids]
+  );
+  await logActivity("apply", `Áp dụng ${ids.length} tài liệu vào tổng hợp hóa đơn`);
   return readStore();
 }
 
