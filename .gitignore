@@ -14,6 +14,8 @@ out/
 data/invoiceflow-store.json
 data/uploads/*
 !data/uploads/.gitkeep
+data/scan-jobs/*
+!data/scan-jobs/.gitkeep
 
 # Generated files
 *.tsbuildinfo

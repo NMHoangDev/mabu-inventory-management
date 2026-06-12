@@ -3,6 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Download, FileText, History, Loader2, Table2, Trash2, UploadCloud, X } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
+import type { ScanJobFileView } from "@/components/providers/AppProvider";
 import type { AppStore, InvoiceDocument, InvoiceRow } from "@/lib/shared/schema";
 
 type QueuedFileStatus = "checking" | "new" | "duplicate" | "restore" | "retry";
@@ -82,6 +83,16 @@ function queuedFileBadge(info: QueuedFileInfo) {
   if (info.status === "restore") return { label: "Đã xóa dòng - scan khôi phục", className: "bg-amber-50 text-amber-700" };
   if (info.status === "retry") return { label: "Lỗi cũ - scan lại", className: "bg-red-50 text-red-700" };
   return { label: "File mới - sẽ OCR", className: "bg-blue-50 text-blue-700" };
+}
+
+function scanJobFileBadge(file: ScanJobFileView) {
+  if (file.status === "queued") return { label: "Chờ OCR", className: "bg-slate-100 text-slate-600", loading: false };
+  if (file.status === "restore") return { label: "Khôi phục dòng", className: "bg-amber-50 text-amber-700", loading: false };
+  if (file.status === "retry") return { label: "Scan lại lỗi", className: "bg-red-50 text-red-700", loading: false };
+  if (file.status === "scanning") return { label: "Đang OCR", className: "bg-blue-50 text-blue-700", loading: true };
+  if (file.status === "duplicate") return { label: "Trùng - bỏ qua", className: "bg-emerald-50 text-emerald-700", loading: false };
+  if (file.status === "scanned") return { label: `${file.rowCount} dòng`, className: "bg-emerald-50 text-emerald-700", loading: false };
+  return { label: "Lỗi OCR", className: "bg-red-50 text-red-700", loading: false };
 }
 
 function queuedFileHint(info: QueuedFileInfo) {
@@ -183,6 +194,14 @@ export default function ScanPage() {
       checkingCount: queuedFiles.filter((item) => item.status === "checking").length
     }),
     [queuedFiles]
+  );
+  const scanJobStats = useMemo(
+    () => ({
+      doneCount: scanJob.files.filter((file) => ["duplicate", "scanned", "error"].includes(file.status)).length,
+      runningCount: scanJob.files.filter((file) => file.status === "scanning").length,
+      errorCount: scanJob.files.filter((file) => file.status === "error").length
+    }),
+    [scanJob.files]
   );
 
   const recentDocuments = useMemo(() => store.documents.slice(0, 8), [store.documents]);
@@ -447,7 +466,7 @@ export default function ScanPage() {
           </div>
           <div className="mt-1 text-xs text-slate-500">
             {scanning
-              ? `${scanJob.fileCount} file đang OCR nền`
+              ? `${scanJobStats.doneCount}/${scanJob.fileCount} xong · ${scanJobStats.runningCount || 1} đang xử lý`
               : queuedFiles.length > 0
               ? `${queuedFiles.length} chờ · ${queuedStats.newCount + queuedStats.restoreCount + queuedStats.retryCount} cần OCR · ${queuedStats.duplicateCount} trùng`
               : store.documents.length > 0
@@ -460,7 +479,7 @@ export default function ScanPage() {
             <div className="m-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-700">
               <div className="flex items-center gap-2 font-semibold">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Đang OCR {queuedFiles.filter((item) => item.status !== "duplicate").length || queuedFiles.length} file
+                Đang OCR {scanJob.fileCount || queuedFiles.length} file
               </div>
               <div className="mt-1 text-xs text-blue-600">Có thể chuyển trang, hệ thống vẫn lưu kết quả khi xong.</div>
             </div>
@@ -515,18 +534,25 @@ export default function ScanPage() {
           })}
 
           {scanning && queuedFiles.length === 0
-            ? scanJob.pendingFileNames.map((fileName) => (
-                <div key={fileName} className="flex items-start gap-3 border-b border-slate-200 px-5 py-3">
+            ? scanJob.files.map((file) => {
+                const badge = scanJobFileBadge(file);
+                return (
+                <div key={file.id} className="flex items-start gap-3 border-b border-slate-200 px-5 py-3">
                   <FileText className="h-5 w-5 shrink-0 text-primary" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold" title={fileName}>{fileName}</div>
-                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Đang OCR nền
+                    <div className="truncate text-sm font-semibold" title={file.fileName}>{file.fileName}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                      <span>{fileSizeLabel(file.fileSize)}</span>
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold ${badge.className}`}>
+                        {badge.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                        {badge.label}
+                      </span>
                     </div>
+                    {file.error ? <div className="mt-1 line-clamp-2 text-xs text-red-600">{file.error}</div> : null}
                   </div>
                 </div>
-              ))
+              );
+              })
             : null}
 
           {scanBatchFiles.length > 0 ? (
