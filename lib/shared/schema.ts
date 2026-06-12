@@ -40,6 +40,9 @@ export const invoiceRowSchema = z.object({
   totalAfterTax: z.union([z.number(), z.string()]).default(""),
   unitPriceAfterTax: z.union([z.number(), z.string()]).default(""),
   note: z.string().default(""),
+  productSyncedAt: z.string().default(""),
+  syncedProductId: z.string().default(""),
+  inventoryAddedQuantity: z.union([z.number(), z.string()]).default(""),
   createdAt: z.string(),
   updatedAt: z.string()
 });

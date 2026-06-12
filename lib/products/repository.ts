@@ -6,6 +6,7 @@ import { getPool, isDatabaseConfigured, logActivity } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { parseNumeric } from "../shared/format";
 import { readJsonStore, writeJsonStoreNow } from "../shared/json-store";
+import { readStore } from "../invoices/repository";
 
 // Helper function to return a clean string or trimmed value
 function cell(value: unknown) {
@@ -598,11 +599,9 @@ export async function updateProduct(id: string, input: ProductInput) {
 }
 
 export async function addInventoryFromScan(productId: string, rowIds: string[]) {
-  const pool = getPool();
-
   if (!isDatabaseConfigured) {
     const store = await readJsonStore();
-    const rows = store.rows.filter((r) => rowIds.includes(r.id));
+    const rows = store.rows.filter((r) => rowIds.includes(r.id) && !r.productSyncedAt);
     const totalQty = rows.reduce((acc, r) => acc + (parseFloat(String(r.quantity)) || 0), 0);
 
     const products = await getOfflineProducts();
@@ -620,6 +619,11 @@ export async function addInventoryFromScan(productId: string, rowIds: string[]) 
           row.retailName = targetProduct.name;
           row.adjustedInvoiceName = targetProduct.name;
           row.unit = targetProduct.unit;
+          if (!row.productSyncedAt) {
+            row.productSyncedAt = new Date().toISOString();
+            row.syncedProductId = targetProduct.id;
+            row.inventoryAddedQuantity = String(row.quantity ?? "");
+          }
         }
       }
       await writeJsonStoreNow(store);
@@ -628,6 +632,7 @@ export async function addInventoryFromScan(productId: string, rowIds: string[]) 
   }
 
   await ensureDatabase();
+  const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -643,7 +648,7 @@ export async function addInventoryFromScan(productId: string, rowIds: string[]) 
 
     // 2. Fetch candidate rows to calculate total quantity
     const rowsRes = await client.query(`
-      select id, quantity from invoice_rows where id = any($1)
+      select id, quantity from invoice_rows where id = any($1) and product_synced_at is null
     `, [rowIds]);
     const totalQty = rowsRes.rows.reduce((acc, row) => acc + (parseFloat(String(row.quantity)) || 0), 0);
 
@@ -695,9 +700,13 @@ export async function addInventoryFromScan(productId: string, rowIds: string[]) 
         retail_name = $2,
         adjusted_invoice_name = $2,
         unit = $3,
+        synced_product_id = $5,
+        product_synced_at = now(),
+        inventory_added_quantity = quantity,
         updated_at = now()
       where id = any($4)
-    `, [product.sku, product.name, product.unit, rowIds]);
+        and product_synced_at is null
+    `, [product.sku, product.name, product.unit, rowIds, productId]);
 
     // 7. Update catalog mapping
     await client.query(`
@@ -715,6 +724,246 @@ export async function addInventoryFromScan(productId: string, rowIds: string[]) 
   } catch (error) {
     await client.query("rollback");
     console.error("Failed to map candidate to existing product:", error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+type InventorySyncResult = {
+  syncedRowCount: number;
+  skippedRowCount: number;
+  createdProductCount: number;
+  updatedProductCount: number;
+  totalQuantity: number;
+};
+
+function rowSku(row: Record<string, unknown>) {
+  return cell(row.internalProductCode ?? row.internal_product_code);
+}
+
+function rowQuantity(row: Record<string, unknown>) {
+  return parseNumeric(cell(row.quantity)) ?? 0;
+}
+
+export async function addInvoiceRowsToInventory(rowIds: string[]) {
+  const ids = Array.from(new Set(rowIds.map((id) => cell(id)).filter(Boolean)));
+  const emptyResult: InventorySyncResult = {
+    syncedRowCount: 0,
+    skippedRowCount: ids.length,
+    createdProductCount: 0,
+    updatedProductCount: 0,
+    totalQuantity: 0
+  };
+
+  if (ids.length === 0) return { store: await readJsonStore(), result: emptyResult };
+
+  if (!isDatabaseConfigured) {
+    const store = await readJsonStore();
+    const candidateRows = store.rows.filter((row) => ids.includes(row.id));
+    const rows = candidateRows.filter((row) => !row.productSyncedAt);
+    if (rows.length === 0) return { store, result: { ...emptyResult, skippedRowCount: candidateRows.length } };
+
+    const products = await getOfflineProducts();
+    const now = new Date().toISOString();
+    const result: InventorySyncResult = {
+      syncedRowCount: 0,
+      skippedRowCount: candidateRows.length - rows.length,
+      createdProductCount: 0,
+      updatedProductCount: 0,
+      totalQuantity: 0
+    };
+
+    for (const row of rows) {
+      const sku = cell(row.internalProductCode);
+      const qty = parseNumeric(row.quantity) ?? 0;
+      if (!sku || qty <= 0) continue;
+
+      let product = products.find((item) => String(item.sku ?? "").trim() === sku);
+      if (!product) {
+        product = {
+          id: crypto.randomUUID(),
+          name: cell(row.retailName) || cell(row.adjustedInvoiceName) || cell(row.inputProductName) || sku,
+          sku,
+          unit: cell(row.unit) || "cái",
+          price: 0,
+          cost_price: parseNumeric(row.unitPrice) ?? 0,
+          status: "active",
+          created_at: now,
+          total_inventory: 0
+        };
+        products.push(product);
+        result.createdProductCount += 1;
+      } else {
+        result.updatedProductCount += 1;
+      }
+
+      product.total_inventory = (Number(product.total_inventory) || 0) + qty;
+      row.productSyncedAt = now;
+      row.syncedProductId = product.id;
+      row.inventoryAddedQuantity = String(row.quantity ?? qty);
+      result.syncedRowCount += 1;
+      result.totalQuantity += qty;
+    }
+
+    await saveOfflineProducts(products);
+    await writeJsonStoreNow(store);
+    return { store, result };
+  }
+
+  await ensureDatabase();
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+
+    const rowsRes = await client.query(
+      `
+        select *
+        from invoice_rows
+        where id = any($1::text[])
+        order by created_at asc
+      `,
+      [ids]
+    );
+    const allRows = rowsRes.rows;
+    const rows = allRows.filter((row) => !row.product_synced_at);
+    const result: InventorySyncResult = {
+      syncedRowCount: 0,
+      skippedRowCount: allRows.length - rows.length,
+      createdProductCount: 0,
+      updatedProductCount: 0,
+      totalQuantity: 0
+    };
+
+    if (rows.length === 0) {
+      await client.query("commit");
+      return { store: await readStore(), result };
+    }
+
+    const rowsBySku = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const sku = rowSku(row);
+      const qty = rowQuantity(row);
+      if (!sku || qty <= 0) continue;
+      rowsBySku.set(sku, [...(rowsBySku.get(sku) ?? []), row]);
+    }
+
+    for (const [sku, groupRows] of rowsBySku) {
+      const sample = groupRows[0];
+      const existingRes = await client.query("select id from products where sku = $1 limit 1", [sku]);
+      const existed = existingRes.rows.length > 0;
+      const productId = await ensureStandardProduct(
+        client,
+        sku,
+        cell(sample.input_product_name),
+        cell(sample.adjusted_invoice_name),
+        cell(sample.retail_name),
+        cell(sample.unit),
+        cell(sample.unit_price)
+      );
+      if (!productId) continue;
+
+      const productRes = await client.query("select id, name, sku, unit, price from products where id = $1 limit 1", [productId]);
+      const product = productRes.rows[0];
+      const totalQty = groupRows.reduce((sum, row) => sum + rowQuantity(row), 0);
+      if (totalQty <= 0) continue;
+
+      let variantId: string;
+      const variantRes = await client.query(
+        "select id from product_variants where product_id = $1 order by position asc limit 1",
+        [productId]
+      );
+      if (variantRes.rows.length > 0) {
+        variantId = variantRes.rows[0].id;
+      } else {
+        const newVariant = await client.query(
+          `
+            insert into product_variants (product_id, title, sku, price, cost_price, position, created_at, updated_at)
+            values ($1, 'Mặc định', $2, $3, $4, 1, now(), now())
+            returning id
+          `,
+          [productId, sku, product.price ?? 0, parseNumeric(sample.unit_price) ?? 0]
+        );
+        variantId = newVariant.rows[0].id;
+      }
+
+      let locationId: string;
+      const locationRes = await client.query("select id from locations order by is_default desc, created_at asc limit 1");
+      if (locationRes.rows.length > 0) {
+        locationId = locationRes.rows[0].id;
+      } else {
+        const newLocation = await client.query(
+          `
+            insert into locations (name, is_default, is_active, created_at, updated_at)
+            values ('Cửa hàng chính', true, true, now(), now())
+            returning id
+          `
+        );
+        locationId = newLocation.rows[0].id;
+      }
+
+      await client.query(
+        `
+          insert into inventory_levels (variant_id, location_id, quantity, updated_at)
+          values ($1, $2, $3, now())
+          on conflict (variant_id, location_id)
+          do update set
+            quantity = inventory_levels.quantity + excluded.quantity,
+            updated_at = now()
+        `,
+        [variantId, locationId, totalQty]
+      );
+
+      const groupIds = groupRows.map((row) => row.id);
+      await client.query(
+        `
+          update invoice_rows
+          set synced_product_id = $1,
+              product_synced_at = now(),
+              inventory_added_quantity = quantity,
+              updated_at = now()
+          where id = any($2::text[])
+            and product_synced_at is null
+        `,
+        [productId, groupIds]
+      );
+
+      await client.query(
+        `
+          insert into product_catalog
+            (sku, input_name, invoice_name, retail_name, unit, sale_price, product_id, updated_at)
+          values ($1, $2, $3, $4, $5, 0, $6, now())
+          on conflict (sku)
+          do update set
+            input_name = coalesce(nullif(excluded.input_name, ''), product_catalog.input_name),
+            invoice_name = coalesce(nullif(excluded.invoice_name, ''), product_catalog.invoice_name),
+            retail_name = coalesce(nullif(excluded.retail_name, ''), product_catalog.retail_name),
+            unit = coalesce(nullif(excluded.unit, ''), product_catalog.unit),
+            product_id = excluded.product_id,
+            updated_at = now()
+        `,
+        [
+          sku,
+          cell(sample.input_product_name),
+          cell(sample.adjusted_invoice_name),
+          cell(sample.retail_name),
+          cell(sample.unit),
+          productId
+        ]
+      );
+
+      result.syncedRowCount += groupRows.length;
+      result.totalQuantity += totalQty;
+      if (existed) result.updatedProductCount += 1;
+      else result.createdProductCount += 1;
+    }
+
+    await client.query("commit");
+    await logActivity("product", `Đưa ${result.syncedRowCount} dòng hóa đơn vào sản phẩm/kho`);
+    return { store: await readStore(), result };
+  } catch (error) {
+    await client.query("rollback");
+    console.error("Failed to add invoice rows to inventory:", error);
     throw error;
   } finally {
     client.release();

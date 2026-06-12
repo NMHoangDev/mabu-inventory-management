@@ -162,6 +162,9 @@ function toStoredRows(result: InvoiceExtractResult, document: InvoiceDocument) {
       totalAfterTax: "",
       unitPriceAfterTax: "",
       note: "",
+      productSyncedAt: "",
+      syncedProductId: "",
+      inventoryAddedQuantity: "",
       createdAt: now,
       updatedAt: now
     });

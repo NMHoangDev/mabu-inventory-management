@@ -64,6 +64,9 @@ function invoiceRowFromDb(row: Record<string, unknown>): InvoiceRow {
     totalAfterTax: String(row.total_after_tax ?? ""),
     unitPriceAfterTax: String(row.unit_price_after_tax ?? ""),
     note: String(row.note ?? ""),
+    productSyncedAt: asIso(row.product_synced_at),
+    syncedProductId: String(row.synced_product_id ?? ""),
+    inventoryAddedQuantity: String(row.inventory_added_quantity ?? ""),
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at)
   };
@@ -181,10 +184,10 @@ export async function upsertDocumentWithRows(document: InvoiceDocument, rows: In
             (id, document_id, source_file_name, invoice_date, supplier_name, invoice_symbol, invoice_number,
              input_product_name, internal_product_code, adjusted_invoice_name, retail_name, unit, quantity,
              unit_price, amount_before_tax, vat_rate, vat_amount, total_after_tax, unit_price_after_tax,
-             note, created_at, updated_at)
+             note, product_synced_at, synced_product_id, inventory_added_quantity, created_at, updated_at)
           values
             ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-             $18, $19, $20, $21, $22)
+             $18, $19, $20, null, '', '', $21, $22)
         `,
         [
           normalized.id,

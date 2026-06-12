@@ -96,6 +96,9 @@ async function migrate() {
     alter table invoice_documents add column if not exists last_duplicate_at timestamptz;
     alter table invoice_documents add column if not exists applied_to_summary boolean not null default false;
     alter table invoice_documents add column if not exists applied_at timestamptz;
+    alter table invoice_rows add column if not exists product_synced_at timestamptz;
+    alter table invoice_rows add column if not exists synced_product_id text not null default '';
+    alter table invoice_rows add column if not exists inventory_added_quantity text not null default '';
 
     create index if not exists invoice_rows_document_id_idx on invoice_rows(document_id);
     create index if not exists invoice_rows_supplier_idx on invoice_rows(supplier_name);

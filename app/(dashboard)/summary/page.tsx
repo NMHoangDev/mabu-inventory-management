@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Download,
@@ -99,6 +100,10 @@ function isNoTaxRow(row: InvoiceRow) {
   return vatRate === 0 && vatAmount === 0 && Boolean(hasTaxValue || row.totalAfterTax || row.unitPriceAfterTax);
 }
 
+function isProductSyncedRow(row: InvoiceRow) {
+  return Boolean(String(row.productSyncedAt ?? "").trim());
+}
+
 function fileSizeLabel(size: number) {
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
@@ -127,6 +132,7 @@ export default function SummaryPage() {
   const [summaryColumnWidths, setSummaryColumnWidths] = useState(defaultSummaryColumnWidths);
   const [summarySort, setSummarySort] = useState<SummarySort>(null);
   const [vatDrafts, setVatDrafts] = useState<Record<string, string>>({});
+  const [syncingProductRowIds, setSyncingProductRowIds] = useState<string[]>([]);
   const [vatConfirm, setVatConfirm] = useState<{
     rowId: string;
     previousRate: string;
@@ -330,38 +336,55 @@ export default function SummaryPage() {
       ["TÊN CHỈNH LẠI XUẤT HÓA ĐƠN", row.adjustedInvoiceName],
       ["TÊN BÁN LẺ", row.retailName],
       ["Tên hàng hóa đầu vào", row.inputProductName],
-      ["ĐƠN VỊ TÍNH", row.unit]
+      ["ĐƠN VỊ TÍNH", row.unit],
+      ["SỐ LƯỢNG", parseNumeric(row.quantity) && (parseNumeric(row.quantity) ?? 0) > 0 ? row.quantity : ""]
     ] as const;
     return fields.filter(([, value]) => !cleanText(value)).map(([label]) => label);
   };
 
   const addRowToProducts = async (row: InvoiceRow) => {
+    if (isProductSyncedRow(row)) {
+      setNotice(`Dòng này đã được thêm vào sản phẩm/kho trước đó. Không cộng tồn kho lại để tránh trùng.`);
+      return;
+    }
+
     const missing = missingProductFields(row);
     if (missing.length > 0) {
       setError(`Chưa thể thêm sản phẩm. Vui lòng nhập đủ: ${missing.join(", ")}.`);
       return;
     }
 
+    const sku = cleanText(row.internalProductCode);
+    const quantity = parseNumeric(row.quantity) ?? 0;
+    const unit = cleanText(row.unit);
+    const existingProduct = lookups.products.find((product) => cleanText(product.sku).toLowerCase() === sku.toLowerCase());
+    const confirmed = await confirmAction({
+      title: existingProduct ? `Cộng tồn kho cho SKU ${sku}?` : `Tạo sản phẩm mới từ SKU ${sku}?`,
+      description: existingProduct
+        ? `Sản phẩm này đã có trong Sản phẩm / SKU.\nHệ thống sẽ cộng thêm ${fmtNumber(quantity)} ${unit} vào tồn kho, không tạo sản phẩm mới.`
+        : `Hệ thống sẽ tạo sản phẩm mới và nhập kho ${fmtNumber(quantity)} ${unit} từ dòng hóa đơn này.`,
+      confirmLabel: existingProduct ? "Cộng tồn kho" : "Tạo và nhập kho",
+      tone: "primary"
+    });
+    if (!confirmed) return;
+
+    setSyncingProductRowIds((current) => [...current, row.id]);
     try {
-      const response = await fetch("/api/products", {
+      const response = await fetch("/api/products/from-invoice-row", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sku: cleanText(row.internalProductCode),
-          inputProductName: cleanText(row.inputProductName),
-          adjustedInvoiceName: cleanText(row.adjustedInvoiceName),
-          retailName: cleanText(row.retailName),
-          unit: cleanText(row.unit),
-          salePrice: ""
-        })
+        body: JSON.stringify({ rowIds: [row.id] })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Không thêm được sản phẩm.");
 
+      if (data.store) setStore(data.store);
       await refreshLookups();
-      setNotice(`Đã thêm SKU ${cleanText(row.internalProductCode)} vào Sản phẩm / SKU. Xóa hóa đơn sau này sẽ không xóa sản phẩm này.`);
+      setNotice(data.message ?? `Đã đưa SKU ${sku} vào sản phẩm/kho.`);
     } catch (error) {
       setError(error instanceof Error ? error.message : "Không thêm được sản phẩm.");
+    } finally {
+      setSyncingProductRowIds((current) => current.filter((id) => id !== row.id));
     }
   };
 
@@ -457,7 +480,8 @@ export default function SummaryPage() {
 
   const renderCell = (row: InvoiceRow, key: ExcelColumnKey) => {
     const value = row[key] ?? "";
-    const className = `table-field ${internalKeys.has(key) ? "manual-field" : ""} ${
+    const shouldHighlightManualField = internalKeys.has(key) && !cleanText(value);
+    const className = `table-field ${shouldHighlightManualField ? "manual-field" : ""} ${
       numericKeys.has(key) ? "text-right tabular-nums" : ""
     }`;
 
@@ -753,9 +777,16 @@ export default function SummaryPage() {
               <tbody>
                 {displayedRows.map((row, index) => {
                   const document = documentById.get(row.documentId);
+                  const productSynced = isProductSyncedRow(row);
+                  const rowClassName = productSynced
+                    ? "product-synced-row"
+                    : isNoTaxRow(row)
+                      ? "no-tax-row"
+                      : "odd:bg-white even:bg-slate-50/40";
+                  const syncingProduct = syncingProductRowIds.includes(row.id);
 
                   return (
-                  <tr key={row.id} className={`${isNoTaxRow(row) ? "no-tax-row" : "odd:bg-white even:bg-slate-50/40"} hover:bg-accent/40`}>
+                  <tr key={row.id} className={`${rowClassName} hover:bg-accent/40`}>
                     <td className="border-b border-r border-slate-200 px-3 py-2 text-slate-500">{index + 1}</td>
                     <td className="border-b border-r border-slate-200 px-3 py-2 text-xs text-slate-500">
                       <div className="min-w-0">
@@ -777,11 +808,16 @@ export default function SummaryPage() {
                     <td className="border-b border-slate-200 px-2 py-2 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button
-                          className="rounded-lg p-2 text-primary hover:bg-blue-50"
+                          className={`rounded-lg p-2 ${
+                            productSynced
+                              ? "text-emerald-700 hover:bg-emerald-50"
+                              : "text-primary hover:bg-blue-50"
+                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                          disabled={syncingProduct}
                           onClick={() => addRowToProducts(row)}
-                          title="Thêm dòng này vào Sản phẩm / SKU"
+                          title={productSynced ? "Dòng này đã thêm vào sản phẩm/kho" : "Thêm dòng này vào Sản phẩm / SKU và cộng tồn kho"}
                         >
-                          <Plus className="h-4 w-4" />
+                          {productSynced ? <CheckCircle2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                         </button>
                         <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => deleteRow(row.id)} title="Xóa dòng scan nhầm">
                           <Trash2 className="h-4 w-4" />

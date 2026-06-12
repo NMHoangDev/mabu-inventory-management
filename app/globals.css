@@ -334,6 +334,18 @@ table,
   background: color-mix(in oklab, var(--accent) 24%, var(--muted));
 }
 
+.product-synced-row {
+  background: color-mix(in oklab, #22c55e 10%, white);
+}
+
+.product-synced-row td {
+  border-color: color-mix(in oklab, #16a34a 18%, var(--border));
+}
+
+.product-synced-row:hover {
+  background: color-mix(in oklab, #22c55e 15%, white);
+}
+
 .resizable-th {
   user-select: none;
 }
