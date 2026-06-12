@@ -222,7 +222,6 @@ export default function ScanPage() {
     if (scanning || !batchSelectionKey || lastBatchSelectionRef.current === batchSelectionKey) return;
     const scannedDocumentIds = scanBatchFiles.filter((item) => item.document.status === "scanned").map((item) => item.document.id);
     setSelectedPanelDocumentIds(scannedDocumentIds);
-    setDocumentPanelOpen(true);
     lastBatchSelectionRef.current = batchSelectionKey;
   }, [batchSelectionKey, scanBatchFiles, scanning]);
 
