@@ -63,7 +63,7 @@ function fmtCurrency(value: number) {
 }
 
 export default function ProductsPage() {
-  const { store, setStore, productMeta, setProductMeta, setNotice, setError, refreshLookups } = useApp();
+  const { store, setStore, productMeta, setProductMeta, setNotice, setError, confirmAction, refreshLookups } = useApp();
 
   // Mode: list vs form view
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -528,9 +528,13 @@ export default function ProductsPage() {
 
   // Delete product
   const handleDeleteProduct = async (id: string, prodName: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa sản phẩm "${prodName}"?`)) {
-      return;
-    }
+    const confirmed = await confirmAction({
+      title: `Xóa sản phẩm "${prodName}"?`,
+      description: "Sản phẩm sẽ bị xóa khỏi danh sách quản lý kho. Hành động này không xóa dữ liệu hóa đơn đã scan.",
+      confirmLabel: "Xóa sản phẩm",
+      tone: "danger"
+    });
+    if (!confirmed) return;
 
     try {
       const res = await fetch(`/api/products/${id}`, { method: "DELETE" });

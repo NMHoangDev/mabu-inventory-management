@@ -170,7 +170,7 @@ function documentMessageClass(message: string) {
 }
 
 export default function ScanPage() {
-  const { store, setStore, setError, setNotice, refreshLookups } = useApp();
+  const { store, setStore, setError, setNotice, confirmAction, refreshLookups } = useApp();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [files, setFiles] = useState<File[]>([]);
@@ -342,7 +342,6 @@ export default function ScanPage() {
     const deletedRows = document?.deletedRowCount ?? 0;
     const fileName = document?.fileName ?? "tài liệu này";
     const confirmMessage = [
-      `Xóa file "${fileName}"?`,
       document?.appliedToSummary
         ? `Toàn bộ ${activeRows} dòng đang có trong bảng tổng hợp sẽ bị xóa theo file này.`
         : `Toàn bộ ${activeRows} dòng scan đang lưu tạm của file này sẽ bị xóa.`,
@@ -351,7 +350,13 @@ export default function ScanPage() {
     ]
       .filter(Boolean)
       .join("\n");
-    if (!window.confirm(confirmMessage)) return;
+    const confirmed = await confirmAction({
+      title: `Xóa file "${fileName}"?`,
+      description: confirmMessage,
+      confirmLabel: "Xóa file",
+      tone: "danger"
+    });
+    if (!confirmed) return;
 
     try {
       const response = await fetch(`/api/documents/${documentId}`, { method: "DELETE" });

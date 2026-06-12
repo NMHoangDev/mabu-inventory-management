@@ -19,7 +19,7 @@ import {
 import type { Category } from "@/lib/products/categories";
 
 export default function ProductCategoriesPage() {
-  const { setError, setNotice } = useApp();
+  const { setError, setNotice, confirmAction } = useApp();
 
   // Mode: list vs create
   const [isCreating, setIsCreating] = useState(false);
@@ -122,9 +122,13 @@ export default function ProductCategoriesPage() {
 
   // Handle Delete category
   const handleDelete = async (id: string, catName: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa danh mục "${catName}"? Hành động này không ảnh hưởng đến các sản phẩm trực thuộc nhưng sẽ xóa liên kết danh mục.`)) {
-      return;
-    }
+    const confirmed = await confirmAction({
+      title: `Xóa danh mục "${catName}"?`,
+      description: "Hành động này không ảnh hưởng đến các sản phẩm trực thuộc nhưng sẽ xóa liên kết danh mục.",
+      confirmLabel: "Xóa danh mục",
+      tone: "danger"
+    });
+    if (!confirmed) return;
 
     try {
       const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });

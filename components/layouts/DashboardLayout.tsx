@@ -160,7 +160,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
       {error || notice ? (
-        <div className="fixed right-4 top-16 z-[80] flex w-[min(460px,calc(100vw-2rem))] flex-col gap-2">
+        <div className="fixed right-4 top-16 z-[180] flex w-[min(460px,calc(100vw-2rem))] flex-col gap-2">
           {error ? (
             <div role="alert" className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-xl">
               <div className="min-w-0 flex-1">{error}</div>

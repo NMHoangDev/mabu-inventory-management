@@ -111,7 +111,7 @@ function documentProgressText(document: InvoiceDocument) {
 }
 
 export default function SummaryPage() {
-  const { store, setStore, lookups, setError, setNotice, refreshLookups } = useApp();
+  const { store, setStore, lookups, setError, setNotice, confirmAction, refreshLookups } = useApp();
 
   const [filters, setFilters] = useState<Filters>({
     file: "",
@@ -262,7 +262,13 @@ export default function SummaryPage() {
 
   const deleteRow = async (rowId: string) => {
     const row = store.rows.find((item) => item.id === rowId);
-    if (!window.confirm("Xóa dòng scan nhầm này? Tài liệu sẽ ghi nhận dòng đã bị xóa thủ công.")) return;
+    const confirmed = await confirmAction({
+      title: "Xóa dòng scan nhầm?",
+      description: "Tài liệu sẽ ghi nhận dòng đã bị xóa thủ công. Upload lại đúng file này nếu cần khôi phục dòng đã xóa.",
+      confirmLabel: "Xóa dòng",
+      tone: "danger"
+    });
+    if (!confirmed) return;
     try {
       const response = await fetch(`/api/rows/${rowId}`, { method: "DELETE" });
       const text = await response.text();
@@ -292,7 +298,13 @@ export default function SummaryPage() {
       "Hành động này chỉ nên dùng khi scan nhầm hoặc không cần giữ file."
     ].filter(Boolean).join("\n");
     
-    if (!window.confirm(confirmMessage)) return;
+    const confirmed = await confirmAction({
+      title: `Xóa file "${fileName}"?`,
+      description: confirmMessage.replace(`Xóa file "${fileName}"?\n`, ""),
+      confirmLabel: "Xóa file",
+      tone: "danger"
+    });
+    if (!confirmed) return;
     try {
       const response = await fetch(`/api/documents/${documentId}`, { method: "DELETE" });
       const text = await response.text();
