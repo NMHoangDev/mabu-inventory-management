@@ -176,6 +176,7 @@ export default function ScanPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [fileHashes, setFileHashes] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
+  const [applyingDocuments, setApplyingDocuments] = useState(false);
   const [scanBatchFiles, setScanBatchFiles] = useState<ScanBatchFile[]>([]);
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false);
   const [selectedPanelDocumentIds, setSelectedPanelDocumentIds] = useState<string[]>([]);
@@ -229,6 +230,10 @@ export default function ScanPage() {
     [scanBatchFiles]
   );
   const selectedDocumentIds = useMemo(() => selectedBatchFiles.map((item) => item.document.id), [selectedBatchFiles]);
+  const selectedApplyDocumentIds = useMemo(
+    () => selectedBatchFiles.filter((item) => !item.document.appliedToSummary).map((item) => item.document.id),
+    [selectedBatchFiles]
+  );
   const selectedRows = useMemo(() => {
     const selectedIds = new Set(selectedDocumentIds);
     return store.rows.filter((row) => selectedIds.has(row.documentId));
@@ -242,6 +247,10 @@ export default function ScanPage() {
     () => store.documents.filter((document) => selectedPanelDocumentIdSet.has(document.id)),
     [selectedPanelDocumentIdSet, store.documents]
   );
+  const selectedPanelApplyDocumentIds = useMemo(
+    () => selectedPanelDocuments.filter((document) => document.status === "scanned" && !document.appliedToSummary).map((document) => document.id),
+    [selectedPanelDocuments]
+  );
   const selectedPanelRows = useMemo(
     () => store.rows.filter((row) => selectedPanelDocumentIdSet.has(row.documentId)),
     [selectedPanelDocumentIdSet, store.rows]
@@ -252,6 +261,12 @@ export default function ScanPage() {
       if (checked) return Array.from(new Set([...current, documentId]));
       return current.filter((id) => id !== documentId);
     });
+  };
+
+  const togglePanelDocumentSelection = (documentId: string) => {
+    setSelectedPanelDocumentIds((current) =>
+      current.includes(documentId) ? current.filter((id) => id !== documentId) : [...current, documentId]
+    );
   };
 
   const toggleAllPanelDocuments = () => {
@@ -282,16 +297,24 @@ export default function ScanPage() {
   };
 
   const applyDocumentsToSummary = async (documentIds: string[]) => {
-    if (documentIds.length === 0) {
-      setError("Chọn ít nhất một file đã scan để áp dụng vào Tổng hợp hóa đơn.");
+    const ids = Array.from(new Set(documentIds));
+    const validIds = ids.filter((id) => {
+      const document = store.documents.find((item) => item.id === id);
+      return document?.status === "scanned" && !document.appliedToSummary;
+    });
+
+    if (validIds.length === 0) {
+      setError("Chọn ít nhất một file đã scan và chưa áp dụng vào Tổng hợp hóa đơn.");
       return;
     }
 
+    setApplyingDocuments(true);
+    setError("");
     try {
       const response = await fetch("/api/documents/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentIds })
+        body: JSON.stringify({ documentIds: validIds })
       });
       const data = await readJsonResponse<AppStore & { error?: string }>(response);
       if (!response.ok) throw new Error(data.error ?? "Không áp dụng được tài liệu.");
@@ -304,10 +327,12 @@ export default function ScanPage() {
           document: nextDocuments.get(item.document.id) ?? item.document
         }))
       );
-      setNotice(`Đã áp dụng ${documentIds.length} file vào Tổng hợp hóa đơn.`);
+      setNotice(`Đã áp dụng ${validIds.length} file vào Tổng hợp hóa đơn.`);
       await refreshLookups();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Không áp dụng được tài liệu.");
+    } finally {
+      setApplyingDocuments(false);
     }
   };
 
@@ -373,9 +398,9 @@ export default function ScanPage() {
 
   const exportSelectedPanelExcel = async () => exportRowsToExcel(selectedPanelRows, "hoa-don-da-scan-da-chon.xlsx");
 
-  const applySelectedScanBatch = async () => applyDocumentsToSummary(selectedDocumentIds);
+  const applySelectedScanBatch = async () => applyDocumentsToSummary(selectedApplyDocumentIds);
 
-  const applySelectedPanelDocuments = async () => applyDocumentsToSummary(selectedPanelDocumentIds);
+  const applySelectedPanelDocuments = async () => applyDocumentsToSummary(selectedPanelApplyDocumentIds);
 
   const scanFiles = async () => {
     if (files.length === 0) {
@@ -571,7 +596,14 @@ export default function ScanPage() {
                 {scanBatchFiles.map((item) => {
                   const badge = documentApplyBadge(item.document);
                   return (
-                    <label key={item.document.id} className="flex cursor-pointer items-start gap-3 rounded-md border bg-white p-3 hover:bg-slate-50">
+                    <label
+                      key={item.document.id}
+                      className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition ${
+                        item.selected
+                          ? "border-primary/50 bg-blue-50 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]"
+                          : "bg-white hover:bg-slate-50"
+                      }`}
+                    >
                       <input
                         type="checkbox"
                         className="mt-1 h-4 w-4 accent-primary"
@@ -611,11 +643,11 @@ export default function ScanPage() {
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
-                  disabled={selectedDocumentIds.length === 0}
+                  disabled={selectedApplyDocumentIds.length === 0 || applyingDocuments}
                   onClick={applySelectedScanBatch}
                 >
-                  <Table2 className="h-4 w-4" />
-                  Áp dụng vào tổng hợp
+                  {applyingDocuments ? <Loader2 className="h-4 w-4 animate-spin" /> : <Table2 className="h-4 w-4" />}
+                  {selectedApplyDocumentIds.length ? `Áp dụng ${selectedApplyDocumentIds.length} file` : "Áp dụng vào tổng hợp"}
                 </button>
               </div>
             </div>
@@ -732,11 +764,11 @@ export default function ScanPage() {
                   <button
                     type="button"
                     className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={selectedPanelDocumentIds.length === 0}
+                    disabled={selectedPanelApplyDocumentIds.length === 0 || applyingDocuments}
                     onClick={applySelectedPanelDocuments}
                   >
-                    <Table2 className="h-4 w-4" />
-                    Áp dụng vào tổng hợp
+                    {applyingDocuments ? <Loader2 className="h-4 w-4 animate-spin" /> : <Table2 className="h-4 w-4" />}
+                    {selectedPanelApplyDocumentIds.length ? `Áp dụng ${selectedPanelApplyDocumentIds.length} file` : "Áp dụng vào tổng hợp"}
                   </button>
                 </div>
               </div>
@@ -751,7 +783,28 @@ export default function ScanPage() {
                 const canSelect = document.status === "scanned";
                 const selected = selectedPanelDocumentIdSet.has(document.id);
                 return (
-                  <div key={document.id} className={`border-b border-slate-200 px-5 py-4 ${selected ? "bg-blue-50/35" : ""}`}>
+                  <div
+                    key={document.id}
+                    role={canSelect ? "button" : undefined}
+                    tabIndex={canSelect ? 0 : undefined}
+                    className={`border-b border-slate-200 px-5 py-4 transition ${
+                      selected
+                        ? "border-l-4 border-l-primary bg-blue-50/80 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.16)]"
+                        : canSelect
+                          ? "cursor-pointer hover:bg-slate-50"
+                          : "opacity-70"
+                    }`}
+                    onClick={() => {
+                      if (canSelect) togglePanelDocumentSelection(document.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if (!canSelect) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        togglePanelDocumentSelection(document.id);
+                      }
+                    }}
+                  >
                     <div className="grid gap-3 md:grid-cols-[28px_minmax(0,1fr)_128px_86px] md:items-start">
                       <div className="pt-1">
                         <input
@@ -759,6 +812,7 @@ export default function ScanPage() {
                           className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                           checked={selected}
                           disabled={!canSelect}
+                          onClick={(event) => event.stopPropagation()}
                           onChange={(event) => setPanelDocumentSelected(document.id, event.target.checked)}
                           aria-label={`Chọn file ${document.fileName}`}
                         />
@@ -804,7 +858,10 @@ export default function ScanPage() {
                       <div className="flex items-center justify-end gap-2">
                         <button
                           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100"
-                          onClick={() => deleteDocument(document.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deleteDocument(document.id);
+                          }}
                           title="Xóa tài liệu và các dòng thuộc tài liệu"
                         >
                           <Trash2 className="h-4 w-4" />
