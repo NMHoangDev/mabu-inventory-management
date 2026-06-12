@@ -935,10 +935,10 @@ export async function addInvoiceRowsToInventory(rowIds: string[]) {
           values ($1, $2, $3, $4, $5, 0, $6, now())
           on conflict (sku)
           do update set
-            input_name = coalesce(nullif(excluded.input_name, ''), product_catalog.input_name),
-            invoice_name = coalesce(nullif(excluded.invoice_name, ''), product_catalog.invoice_name),
-            retail_name = coalesce(nullif(excluded.retail_name, ''), product_catalog.retail_name),
-            unit = coalesce(nullif(excluded.unit, ''), product_catalog.unit),
+            input_name = coalesce(nullif(product_catalog.input_name, ''), excluded.input_name),
+            invoice_name = coalesce(nullif(product_catalog.invoice_name, ''), excluded.invoice_name),
+            retail_name = coalesce(nullif(product_catalog.retail_name, ''), excluded.retail_name),
+            unit = coalesce(nullif(product_catalog.unit, ''), excluded.unit),
             product_id = excluded.product_id,
             updated_at = now()
         `,

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
-import type { AppStore } from "@/lib/shared/schema";
+import type { AppStore, InvoiceDocument, InvoiceRow } from "@/lib/shared/schema";
 
 type ConfirmOptions = {
   title: string;
@@ -9,6 +9,35 @@ type ConfirmOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: "danger" | "primary";
+};
+
+export type ScanResultMeta = {
+  document?: InvoiceDocument;
+  rows?: InvoiceRow[];
+  skipped?: boolean;
+  duplicate?: boolean;
+  restored?: boolean;
+  retried?: boolean;
+};
+
+export type ScanBatchFile = {
+  document: InvoiceDocument;
+  rows: InvoiceRow[];
+  selected: boolean;
+  skipped?: boolean;
+  duplicate?: boolean;
+  restored?: boolean;
+  retried?: boolean;
+};
+
+export type ScanJob = {
+  running: boolean;
+  startedAt: string;
+  fileCount: number;
+  pendingFileNames: string[];
+  batchFiles: ScanBatchFile[];
+  lastMessage: string;
+  error: string;
 };
 
 export type Lookups = {
@@ -31,6 +60,15 @@ export type Lookups = {
 };
 
 const emptyStore: AppStore = { documents: [], rows: [] };
+const emptyScanJob: ScanJob = {
+  running: false,
+  startedAt: "",
+  fileCount: 0,
+  pendingFileNames: [],
+  batchFiles: [],
+  lastMessage: "",
+  error: ""
+};
 const emptyLookups: Lookups = {
   suppliers: [],
   inputProductNames: [],
@@ -41,6 +79,27 @@ const emptyLookups: Lookups = {
   vatRates: [],
   products: []
 };
+
+function scanResultsToBatchFiles(results: ScanResultMeta[], store: AppStore): ScanBatchFile[] {
+  const batchFiles: ScanBatchFile[] = [];
+
+  for (const result of results) {
+    if (!result.document) continue;
+    const document = store.documents.find((item) => item.id === result.document?.id) ?? result.document;
+    const rows = store.rows.filter((row) => row.documentId === document.id);
+    batchFiles.push({
+      document,
+      rows: result.rows?.length ? result.rows : rows,
+      selected: document.status === "scanned",
+      skipped: result.skipped,
+      duplicate: result.duplicate,
+      restored: result.restored,
+      retried: result.retried
+    });
+  }
+
+  return batchFiles;
+}
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
@@ -67,6 +126,9 @@ interface AppContextType {
   setNotice: (msg: string) => void;
   confirmAction: (options: ConfirmOptions) => Promise<boolean>;
   refreshLookups: () => Promise<void>;
+  scanJob: ScanJob;
+  startScanJob: (files: File[]) => Promise<void>;
+  setScanBatchFiles: React.Dispatch<React.SetStateAction<ScanBatchFile[]>>;
   productMeta: Record<string, { salePrice: string; imageUrl: string }>;
   setProductMeta: React.Dispatch<React.SetStateAction<Record<string, { salePrice: string; imageUrl: string }>>>;
 }
@@ -81,6 +143,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState("");
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
   const confirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const [scanJob, setScanJob] = useState<ScanJob>(emptyScanJob);
   const [productMeta, setProductMeta] = useState<Record<string, { salePrice: string; imageUrl: string }>>({});
 
   const loadState = async () => {
@@ -98,6 +161,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const data = await readJsonResponse<Lookups & { error?: string }>(response);
     if (!response.ok) throw new Error(data.error ?? "Không tải được danh sách gợi ý.");
     setLookups({ ...emptyLookups, ...data });
+  };
+
+  const setScanBatchFiles: React.Dispatch<React.SetStateAction<ScanBatchFile[]>> = (value) => {
+    setScanJob((current) => ({
+      ...current,
+      batchFiles: typeof value === "function" ? value(current.batchFiles) : value
+    }));
+  };
+
+  const startScanJob = async (files: File[]) => {
+    if (scanJob.running) {
+      setNotice("Hệ thống đang OCR file hiện tại. Bạn có thể chuyển trang và quay lại xem kết quả.");
+      return;
+    }
+
+    setError("");
+    setNotice("");
+    setScanJob({
+      running: true,
+      startedAt: new Date().toISOString(),
+      fileCount: files.length,
+      pendingFileNames: files.map((file) => file.name),
+      batchFiles: [],
+      lastMessage: "",
+      error: ""
+    });
+
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file));
+
+    try {
+      const response = await fetch("/api/scan", { method: "POST", body: form });
+      const data = await readJsonResponse<AppStore & { error?: string; results?: ScanResultMeta[] }>(response);
+      if (!response.ok) throw new Error(data.error ?? "Scan thất bại.");
+
+      setStore(data);
+      const results = Array.isArray(data.results) ? data.results : [];
+      const nextBatchFiles = scanResultsToBatchFiles(results, data);
+
+      const duplicateCount = results.filter((result) => result.duplicate || result.skipped).length;
+      const restoredCount = results.filter((result) => result.restored).length;
+      const retriedCount = results.filter((result) => result.retried).length;
+      const newCount = results.length - duplicateCount;
+      const messages = [
+        newCount > 0 ? `${newCount} file đã OCR và lưu kết quả scan.` : "",
+        duplicateCount ? `${duplicateCount} file trùng đã được bỏ qua, không OCR lại.` : "",
+        restoredCount ? `${restoredCount} file đã scan lại để khôi phục dòng đã xóa.` : "",
+        retriedCount ? `${retriedCount} file lỗi cũ đã được thử scan lại.` : ""
+      ].filter(Boolean);
+      const lastMessage = messages.join(" ") || "Scan hóa đơn thành công.";
+
+      setScanJob((current) => ({
+        ...current,
+        running: false,
+        batchFiles: nextBatchFiles,
+        lastMessage,
+        error: ""
+      }));
+      setNotice(lastMessage);
+      await refreshLookups();
+    } catch (scanError) {
+      const message = scanError instanceof Error ? scanError.message : "Scan thất bại.";
+      setScanJob((current) => ({ ...current, running: false, error: message }));
+      setError(message);
+    }
   };
 
   useEffect(() => {
@@ -181,6 +309,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setNotice,
         confirmAction,
         refreshLookups,
+        scanJob,
+        startScanJob,
+        setScanBatchFiles,
         productMeta,
         setProductMeta
       }}

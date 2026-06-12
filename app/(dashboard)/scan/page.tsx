@@ -1,19 +1,9 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { CheckCircle2, Download, FileText, History, Loader2, ShieldCheck, Table2, Trash2, UploadCloud, X } from "lucide-react";
+import { CheckCircle2, Download, FileText, History, Loader2, Table2, Trash2, UploadCloud, X } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
 import type { AppStore, InvoiceDocument, InvoiceRow } from "@/lib/shared/schema";
-
-type ScanResultMeta = {
-  document?: InvoiceDocument;
-  rows?: InvoiceRow[];
-  skipped?: boolean;
-  duplicate?: boolean;
-  restored?: boolean;
-  retried?: boolean;
-};
 
 type QueuedFileStatus = "checking" | "new" | "duplicate" | "restore" | "retry";
 
@@ -25,16 +15,6 @@ type QueuedFileInfo = {
   document?: InvoiceDocument;
   activeRowCount: number;
   deletedRowCount: number;
-};
-
-type ScanBatchFile = {
-  document: InvoiceDocument;
-  rows: InvoiceRow[];
-  selected: boolean;
-  skipped?: boolean;
-  duplicate?: boolean;
-  restored?: boolean;
-  retried?: boolean;
 };
 
 function fileSizeLabel(size: number) {
@@ -117,27 +97,6 @@ function queuedFileHint(info: QueuedFileInfo) {
   return "Chưa có trong hệ thống";
 }
 
-function scanResultsToBatchFiles(results: ScanResultMeta[], store: AppStore): ScanBatchFile[] {
-  const batchFiles: ScanBatchFile[] = [];
-
-  for (const result of results) {
-    if (!result.document) continue;
-    const document = store.documents.find((item) => item.id === result.document?.id) ?? result.document;
-    const rows = store.rows.filter((row) => row.documentId === document.id);
-    batchFiles.push({
-      document,
-      rows: result.rows?.length ? result.rows : rows,
-      selected: document.status === "scanned",
-      skipped: result.skipped,
-      duplicate: result.duplicate,
-      restored: result.restored,
-      retried: result.retried
-    });
-  }
-
-  return batchFiles;
-}
-
 function documentApplyBadge(document: InvoiceDocument) {
   if (document.status === "error") return { label: "Lỗi OCR", className: "bg-red-50 text-red-700" };
   if (document.appliedToSummary) return { label: "Đã áp dụng", className: "bg-emerald-50 text-emerald-700" };
@@ -170,16 +129,18 @@ function documentMessageClass(message: string) {
 }
 
 export default function ScanPage() {
-  const { store, setStore, setError, setNotice, confirmAction, refreshLookups } = useApp();
+  const { store, setStore, setError, setNotice, confirmAction, refreshLookups, scanJob, startScanJob, setScanBatchFiles } = useApp();
   const inputRef = useRef<HTMLInputElement>(null);
+  const lastBatchSelectionRef = useRef("");
 
   const [files, setFiles] = useState<File[]>([]);
   const [fileHashes, setFileHashes] = useState<Record<string, string>>({});
-  const [scanning, setScanning] = useState(false);
   const [applyingDocuments, setApplyingDocuments] = useState(false);
-  const [scanBatchFiles, setScanBatchFiles] = useState<ScanBatchFile[]>([]);
+  const [exportingExcelTarget, setExportingExcelTarget] = useState<"" | "batch" | "panel">("");
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false);
   const [selectedPanelDocumentIds, setSelectedPanelDocumentIds] = useState<string[]>([]);
+  const scanning = scanJob.running;
+  const scanBatchFiles = scanJob.batchFiles;
 
   useEffect(() => {
     let cancelled = false;
@@ -238,6 +199,7 @@ export default function ScanPage() {
     const selectedIds = new Set(selectedDocumentIds);
     return store.rows.filter((row) => selectedIds.has(row.documentId));
   }, [selectedDocumentIds, store.rows]);
+  const batchSelectionKey = useMemo(() => scanBatchFiles.map((item) => item.document.id).join("|"), [scanBatchFiles]);
   const selectablePanelDocumentIds = useMemo(
     () => store.documents.filter((document) => document.status === "scanned").map((document) => document.id),
     [store.documents]
@@ -255,6 +217,14 @@ export default function ScanPage() {
     () => store.rows.filter((row) => selectedPanelDocumentIdSet.has(row.documentId)),
     [selectedPanelDocumentIdSet, store.rows]
   );
+
+  useEffect(() => {
+    if (scanning || !batchSelectionKey || lastBatchSelectionRef.current === batchSelectionKey) return;
+    const scannedDocumentIds = scanBatchFiles.filter((item) => item.document.status === "scanned").map((item) => item.document.id);
+    setSelectedPanelDocumentIds(scannedDocumentIds);
+    setDocumentPanelOpen(true);
+    lastBatchSelectionRef.current = batchSelectionKey;
+  }, [batchSelectionKey, scanBatchFiles, scanning]);
 
   const setPanelDocumentSelected = (documentId: string, checked: boolean) => {
     setSelectedPanelDocumentIds((current) => {
@@ -371,12 +341,14 @@ export default function ScanPage() {
     }
   };
 
-  const exportRowsToExcel = async (rows: InvoiceRow[], fileName: string) => {
+  const exportRowsToExcel = async (rows: InvoiceRow[], fileName: string, target: "batch" | "panel") => {
     if (rows.length === 0) {
       setError("Chọn ít nhất một file đã scan có dòng hàng để xuất Excel.");
       return;
     }
 
+    setExportingExcelTarget(target);
+    setError("");
     try {
       const response = await fetch("/api/export", {
         method: "POST",
@@ -394,14 +366,17 @@ export default function ScanPage() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      setNotice("Đã tạo file Excel từ các tài liệu đã chọn.");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Không xuất được Excel.");
+    } finally {
+      setExportingExcelTarget("");
     }
   };
 
-  const exportSelectedScanBatchExcel = async () => exportRowsToExcel(selectedRows, "ket-qua-scan-hoa-don.xlsx");
+  const exportSelectedScanBatchExcel = async () => exportRowsToExcel(selectedRows, "ket-qua-scan-hoa-don.xlsx", "batch");
 
-  const exportSelectedPanelExcel = async () => exportRowsToExcel(selectedPanelRows, "hoa-don-da-scan-da-chon.xlsx");
+  const exportSelectedPanelExcel = async () => exportRowsToExcel(selectedPanelRows, "hoa-don-da-scan-da-chon.xlsx", "panel");
 
   const applySelectedScanBatch = async () => applyDocumentsToSummary(selectedApplyDocumentIds);
 
@@ -413,48 +388,13 @@ export default function ScanPage() {
       return;
     }
 
-    setScanning(true);
-    setError("");
-    setNotice("");
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file));
-
-    try {
-      const response = await fetch("/api/scan", { method: "POST", body: form });
-      const data = await readJsonResponse<AppStore & { error?: string; results?: ScanResultMeta[] }>(response);
-      if (!response.ok) throw new Error(data.error ?? "Scan thất bại.");
-
-      setStore(data);
-      const results = Array.isArray(data.results) ? data.results : [];
-      const nextBatchFiles = scanResultsToBatchFiles(results, data);
-      setScanBatchFiles(nextBatchFiles);
-      const scannedDocumentIds = nextBatchFiles.filter((item) => item.document.status === "scanned").map((item) => item.document.id);
-      setSelectedPanelDocumentIds(scannedDocumentIds);
-      if (nextBatchFiles.length > 0) setDocumentPanelOpen(true);
-
-      const duplicateCount = results.filter((result) => result.duplicate || result.skipped).length;
-      const restoredCount = results.filter((result) => result.restored).length;
-      const retriedCount = results.filter((result) => result.retried).length;
-      const newCount = results.length - duplicateCount;
-      const messages = [
-        newCount > 0 ? `${newCount} file đã OCR và lưu kết quả scan.` : "",
-        duplicateCount ? `${duplicateCount} file trùng đã được bỏ qua, không OCR lại.` : "",
-        restoredCount ? `${restoredCount} file đã được scan lại để khôi phục dòng đã xóa.` : "",
-        retriedCount ? `${retriedCount} file lỗi cũ đã được thử scan lại.` : ""
-      ].filter(Boolean);
-
-      setNotice(messages.join(" ") || "Scan hóa đơn thành công.");
-      await refreshLookups();
-      setFiles([]);
-    } catch (scanError) {
-      setError(scanError instanceof Error ? scanError.message : "Scan thất bại.");
-    } finally {
-      setScanning(false);
-    }
+    const filesToScan = files;
+    void startScanJob(filesToScan);
+    setFiles([]);
   };
 
   return (
-    <section className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_420px]">
+    <section className="panel grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_380px]">
       <div
         className="flex min-h-[430px] flex-col items-center justify-center border-b border-slate-200 p-8 text-center lg:border-b-0 lg:border-r"
         onDragOver={(event) => event.preventDefault()}
@@ -492,41 +432,38 @@ export default function ScanPage() {
             </div>
           ))}
         </div>
-        <div className="mt-4 grid w-full max-w-2xl gap-2 sm:grid-cols-2">
-          <Link href="/products" className="rounded-md border bg-white px-3 py-2 text-left text-sm hover:bg-secondary">
-            <div className="font-semibold">Sản phẩm / SKU</div>
-            <div className="mt-1 text-xs text-muted-foreground">Sản phẩm kho là luồng riêng, chỉ thêm khi dữ liệu đã đủ.</div>
-          </Link>
-          <Link href="/inventory" className="rounded-md border bg-white px-3 py-2 text-left text-sm hover:bg-secondary">
-            <div className="font-semibold">Kho sản phẩm</div>
-            <div className="mt-1 text-xs text-muted-foreground">Dữ liệu kho giữ độc lập với file hóa đơn đã xóa.</div>
-          </Link>
-        </div>
       </div>
 
       <aside className="flex flex-col overflow-hidden">
-        <div className="border-b border-slate-200 px-5 py-4">
-          <div className="font-semibold">File chờ / đang scan</div>
-          {queuedFiles.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-              <span className="rounded-full bg-blue-50 px-2 py-1 font-medium text-blue-700">{queuedStats.newCount} mới</span>
-              <span className="rounded-full bg-emerald-50 px-2 py-1 font-medium text-emerald-700">{queuedStats.duplicateCount} trùng bỏ qua</span>
-              <span className="rounded-full bg-amber-50 px-2 py-1 font-medium text-amber-700">{queuedStats.restoreCount} khôi phục</span>
-              <span className="rounded-full bg-red-50 px-2 py-1 font-medium text-red-700">{queuedStats.retryCount} lỗi scan lại</span>
-              {queuedStats.checkingCount > 0 ? (
-                <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">{queuedStats.checkingCount} đang kiểm tra</span>
-              ) : null}
-            </div>
-          ) : null}
+        <div className="border-b border-slate-200 px-5 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-semibold">File scan</div>
+            <button
+              type="button"
+              className="text-xs font-semibold text-primary hover:underline"
+              onClick={() => setDocumentPanelOpen(true)}
+            >
+              Quản lý
+            </button>
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            {scanning
+              ? `${scanJob.fileCount} file đang OCR nền`
+              : queuedFiles.length > 0
+              ? `${queuedFiles.length} chờ · ${queuedStats.newCount + queuedStats.restoreCount + queuedStats.retryCount} cần OCR · ${queuedStats.duplicateCount} trùng`
+              : store.documents.length > 0
+                ? `${store.documents.length} file đã lưu trong hệ thống`
+                : "Chưa chọn file"}
+          </div>
         </div>
         <div className="flex-1 overflow-auto">
           {scanning ? (
-            <div className="m-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 shadow-sm">
+            <div className="m-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-700">
               <div className="flex items-center gap-2 font-semibold">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Đang OCR {queuedFiles.filter((item) => item.status !== "duplicate").length || queuedFiles.length} file
               </div>
-              <div className="mt-1 text-blue-600">Có thể chuyển trang, hệ thống vẫn lưu kết quả khi scan xong.</div>
+              <div className="mt-1 text-xs text-blue-600">Có thể chuyển trang, hệ thống vẫn lưu kết quả khi xong.</div>
             </div>
           ) : null}
 
@@ -537,12 +474,11 @@ export default function ScanPage() {
                 <FileText className="h-5 w-5 shrink-0 text-primary" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold" title={info.file.name}>{info.file.name}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{fileSizeLabel(info.file.size)}</div>
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                    <span>{fileSizeLabel(info.file.size)}</span>
                     <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${badge.className}`}>{badge.label}</span>
-                    {info.hash ? <span className="font-mono text-[10px] text-slate-400">{info.hash.slice(0, 10)}</span> : null}
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">{queuedFileHint(info)}</div>
+                  {info.status !== "new" ? <div className="mt-1 text-xs text-slate-500">{queuedFileHint(info)}</div> : null}
                   {scanning ? (
                     <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold ${
                       info.status === "duplicate"
@@ -551,12 +487,12 @@ export default function ScanPage() {
                           ? "bg-slate-100 text-slate-600"
                           : "bg-blue-50 text-blue-700"
                     }`}>
-                      {info.status === "duplicate" ? <ShieldCheck className="h-3.5 w-3.5" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {info.status === "duplicate" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       {info.status === "duplicate"
-                        ? "Đã có trong hệ thống, bỏ qua OCR"
+                        ? "Bỏ qua OCR"
                         : info.status === "checking"
                           ? "Đang kiểm tra file"
-                          : "Đang OCR và lưu kết quả"}
+                          : "Đang OCR"}
                     </div>
                   ) : null}
                 </div>
@@ -579,22 +515,39 @@ export default function ScanPage() {
             );
           })}
 
+          {scanning && queuedFiles.length === 0
+            ? scanJob.pendingFileNames.map((fileName) => (
+                <div key={fileName} className="flex items-start gap-3 border-b border-slate-200 px-5 py-3">
+                  <FileText className="h-5 w-5 shrink-0 text-primary" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold" title={fileName}>{fileName}</div>
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Đang OCR nền
+                    </div>
+                  </div>
+                </div>
+              ))
+            : null}
+
           {scanBatchFiles.length > 0 ? (
-            <div className="border-b border-slate-200 px-5 py-4">
+            <div className="border-b border-slate-200 px-5 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="font-semibold">Kết quả vừa scan</div>
-                  <div className="mt-0.5 text-xs text-slate-500">Chọn file để xuất Excel riêng hoặc áp dụng vào bảng tổng hợp.</div>
+                  <div className="font-semibold">Kết quả scan</div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {selectedBatchFiles.length} file chọn · {selectedRows.length} dòng
+                  </div>
                 </div>
                 <button
                   type="button"
-                  className="text-xs font-semibold text-primary hover:underline"
+                  className="rounded-md border bg-white px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-blue-50"
                   onClick={() => {
                     const hasUnselected = scanBatchFiles.some((item) => !item.selected && item.document.status === "scanned");
                     setScanBatchFiles((current) => current.map((item) => ({ ...item, selected: item.document.status === "scanned" && hasUnselected })));
                   }}
                 >
-                  Chọn tất cả
+                  {scanBatchFiles.some((item) => !item.selected && item.document.status === "scanned") ? "Chọn tất cả" : "Bỏ chọn"}
                 </button>
               </div>
               <div className="mt-3 space-y-2">
@@ -622,8 +575,8 @@ export default function ScanPage() {
                       />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-semibold" title={item.document.fileName}>{item.document.fileName}</div>
-                        <div className="mt-1 text-xs text-slate-500">{documentProgressText(item.document)}</div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                          <span>{documentProgressText(item.document)}</span>
                           <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${badge.className}`}>{badge.label}</span>
                           {item.duplicate || item.skipped ? (
                             <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">Trùng file</span>
@@ -639,11 +592,11 @@ export default function ScanPage() {
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-md border bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-secondary disabled:opacity-50"
-                  disabled={selectedRows.length === 0}
+                  disabled={selectedRows.length === 0 || Boolean(exportingExcelTarget)}
                   onClick={exportSelectedScanBatchExcel}
                 >
-                  <Download className="h-4 w-4" />
-                  Tải Excel file chọn
+                  {exportingExcelTarget === "batch" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {exportingExcelTarget === "batch" ? "Đang tạo Excel..." : "Tải Excel"}
                 </button>
                 <button
                   type="button"
@@ -659,45 +612,22 @@ export default function ScanPage() {
           ) : null}
 
           <div className="px-5 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold">Đã có trong hệ thống</div>
-                <div className="mt-0.5 text-xs text-slate-500">Upload trùng sẽ bỏ qua OCR. File chỉ vào Tổng hợp hóa đơn sau khi bấm Áp dụng.</div>
-              </div>
-              <button
-                type="button"
-                className="rounded-md border bg-white px-3 py-2 text-sm font-semibold hover:bg-secondary"
-                onClick={() => setDocumentPanelOpen(true)}
-              >
-                Quản lý
-              </button>
-            </div>
-            <div className="mt-3 space-y-2">
-              {recentDocuments.map((document) => {
-                const badge = documentApplyBadge(document);
-                return (
-                  <div key={document.id} className="rounded-md border bg-white p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold" title={document.fileName}>{document.fileName}</div>
-                        <div className="mt-1 text-xs text-slate-500">{fileSizeLabel(document.fileSize)} · {documentProgressText(document)}</div>
-                      </div>
-                      {document.appliedToSummary ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> : null}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${badge.className}`}>{badge.label}</span>
-                      {document.duplicateCount ? (
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
-                          Trùng {document.duplicateCount} lần
-                        </span>
-                      ) : null}
-                    </div>
+            <div className="rounded-md border bg-slate-50 px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">Tài liệu đã lưu</div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {recentDocuments.length ? `${store.documents.length} file · upload trùng sẽ bỏ qua OCR` : "Chưa có file nào trong hệ thống"}
                   </div>
-                );
-              })}
-              {recentDocuments.length === 0 ? (
-                <div className="py-8 text-center text-sm text-slate-500">Chưa có file nào trong hệ thống.</div>
-              ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="rounded-md border bg-white px-3 py-2 text-sm font-semibold hover:bg-secondary"
+                  onClick={() => setDocumentPanelOpen(true)}
+                >
+                  Quản lý
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -713,6 +643,8 @@ export default function ScanPage() {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Đang xử lý OCR...
               </>
+            ) : queuedFiles.length === 0 ? (
+              "Chọn file để scan"
             ) : (
               `Bắt đầu scan ${queuedFiles.length} file`
             )}
@@ -760,11 +692,11 @@ export default function ScanPage() {
                   <button
                     type="button"
                     className="inline-flex h-9 items-center gap-2 rounded-md border bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={selectedPanelRows.length === 0}
+                    disabled={selectedPanelRows.length === 0 || Boolean(exportingExcelTarget)}
                     onClick={exportSelectedPanelExcel}
                   >
-                    <Download className="h-4 w-4" />
-                    Tải Excel file chọn
+                    {exportingExcelTarget === "panel" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {exportingExcelTarget === "panel" ? "Đang tạo Excel..." : "Tải Excel file chọn"}
                   </button>
                   <button
                     type="button"

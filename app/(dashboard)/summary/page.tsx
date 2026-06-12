@@ -358,10 +358,33 @@ export default function SummaryPage() {
     const quantity = parseNumeric(row.quantity) ?? 0;
     const unit = cleanText(row.unit);
     const existingProduct = lookups.products.find((product) => cleanText(product.sku).toLowerCase() === sku.toLowerCase());
+    const existingName = existingProduct
+      ? cleanText(existingProduct.retailName) || cleanText(existingProduct.adjustedInvoiceName) || cleanText(existingProduct.inputProductName)
+      : "";
+    const incomingName = cleanText(row.retailName) || cleanText(row.adjustedInvoiceName) || cleanText(row.inputProductName);
+    const nameDiffers =
+      Boolean(existingName && incomingName && existingName.toLowerCase() !== incomingName.toLowerCase());
+    const unitDiffers =
+      Boolean(existingProduct && cleanText(existingProduct.unit) && unit && cleanText(existingProduct.unit).toLowerCase() !== unit.toLowerCase());
+    const productConflictLines = [
+      nameDiffers ? `Tên đang có: ${existingName}` : "",
+      nameDiffers ? `Tên dòng scan: ${incomingName}` : "",
+      unitDiffers ? `Đơn vị đang có: ${cleanText(existingProduct?.unit)}` : "",
+      unitDiffers ? `Đơn vị dòng scan: ${unit}` : ""
+    ].filter(Boolean);
     const confirmed = await confirmAction({
       title: existingProduct ? `Cộng tồn kho cho SKU ${sku}?` : `Tạo sản phẩm mới từ SKU ${sku}?`,
       description: existingProduct
-        ? `Sản phẩm này đã có trong Sản phẩm / SKU.\nHệ thống sẽ cộng thêm ${fmtNumber(quantity)} ${unit} vào tồn kho, không tạo sản phẩm mới.`
+        ? [
+            "SKU này đã có trong Sản phẩm / SKU.",
+            productConflictLines.length > 0
+              ? `Thông tin dòng scan khác sản phẩm đang có:\n${productConflictLines.join("\n")}`
+              : "",
+            `Hệ thống sẽ cộng thêm ${fmtNumber(quantity)} ${unit} vào tồn kho của SKU hiện có, không tạo sản phẩm mới và không tự đổi tên/đơn vị.`,
+            "Muốn chỉnh tên hoặc đơn vị thì sửa trong trang Sản phẩm / SKU."
+          ]
+            .filter(Boolean)
+            .join("\n")
         : `Hệ thống sẽ tạo sản phẩm mới và nhập kho ${fmtNumber(quantity)} ${unit} từ dòng hóa đơn này.`,
       confirmLabel: existingProduct ? "Cộng tồn kho" : "Tạo và nhập kho",
       tone: "primary"
