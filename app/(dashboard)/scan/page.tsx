@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, Download, FileText, Loader2, ShieldCheck, Table2, Trash2, UploadCloud } from "lucide-react";
+import { CheckCircle2, Download, FileText, History, Loader2, ShieldCheck, Table2, Trash2, UploadCloud, X } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
 import type { AppStore, InvoiceDocument, InvoiceRow } from "@/lib/shared/schema";
 
@@ -144,6 +144,31 @@ function documentApplyBadge(document: InvoiceDocument) {
   return { label: "Chưa áp dụng", className: "bg-blue-50 text-blue-700" };
 }
 
+function documentStatusLabel(document: InvoiceDocument) {
+  return document.status === "scanned" ? "Đã scan" : "Lỗi OCR";
+}
+
+function documentDuplicateText(document: InvoiceDocument) {
+  if (!document.duplicateCount) return "";
+  const time = document.lastDuplicateAt ? ` · gần nhất ${new Date(document.lastDuplicateAt).toLocaleString("vi-VN")}` : "";
+  return `Upload trùng ${document.duplicateCount} lần${time}`;
+}
+
+function isSignatureInfo(message: string) {
+  const lower = String(message ?? "").toLowerCase();
+  return lower.includes("signature valid") || lower.includes("chữ ký số hợp lệ");
+}
+
+function displayDocumentMessage(message: string) {
+  return isSignatureInfo(message) ? "Chữ ký số hợp lệ" : String(message ?? "");
+}
+
+function documentMessageClass(message: string) {
+  return isSignatureInfo(message)
+    ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+    : "bg-honey-50 text-amber-800 ring-1 ring-amber-100";
+}
+
 export default function ScanPage() {
   const { store, setStore, setError, setNotice, refreshLookups } = useApp();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +177,7 @@ export default function ScanPage() {
   const [fileHashes, setFileHashes] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
   const [scanBatchFiles, setScanBatchFiles] = useState<ScanBatchFile[]>([]);
+  const [documentPanelOpen, setDocumentPanelOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -223,6 +249,59 @@ export default function ScanPage() {
     });
     setError("");
     setNotice("");
+  };
+
+  const applyDocument = async (documentId: string) => {
+    const document = store.documents.find((item) => item.id === documentId);
+    try {
+      const response = await fetch("/api/documents/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentIds: [documentId] })
+      });
+      const data = await readJsonResponse<AppStore & { error?: string }>(response);
+      if (!response.ok) throw new Error(data.error ?? "Không áp dụng được tài liệu.");
+      setStore(data);
+      setScanBatchFiles((current) =>
+        current.map((item) => ({
+          ...item,
+          document: data.documents.find((nextDocument) => nextDocument.id === item.document.id) ?? item.document
+        }))
+      );
+      setNotice(document ? `Đã áp dụng ${document.fileName} vào Tổng hợp hóa đơn.` : "Đã áp dụng tài liệu.");
+      await refreshLookups();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Không áp dụng được tài liệu.");
+    }
+  };
+
+  const deleteDocument = async (documentId: string) => {
+    const document = store.documents.find((item) => item.id === documentId);
+    const activeRows = store.rows.filter((row) => row.documentId === documentId).length;
+    const deletedRows = document?.deletedRowCount ?? 0;
+    const fileName = document?.fileName ?? "tài liệu này";
+    const confirmMessage = [
+      `Xóa file "${fileName}"?`,
+      document?.appliedToSummary
+        ? `Toàn bộ ${activeRows} dòng đang có trong bảng tổng hợp sẽ bị xóa theo file này.`
+        : `Toàn bộ ${activeRows} dòng scan đang lưu tạm của file này sẽ bị xóa.`,
+      deletedRows ? `File này trước đó đã xóa thủ công ${deletedRows} dòng.` : "",
+      "Hành động này chỉ nên dùng khi scan nhầm hoặc không cần giữ file."
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      const response = await fetch(`/api/documents/${documentId}`, { method: "DELETE" });
+      const data = await readJsonResponse<AppStore & { error?: string }>(response);
+      if (!response.ok) throw new Error(data.error ?? "Không xóa được tài liệu.");
+      setStore(data);
+      setScanBatchFiles((current) => current.filter((item) => item.document.id !== documentId));
+      setNotice(document ? `Đã xóa tài liệu ${document.fileName} và các dòng thuộc file.` : "Đã xóa tài liệu.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Không xóa được tài liệu.");
+    }
   };
 
   const exportSelectedScanBatchExcel = async () => {
@@ -530,9 +609,13 @@ export default function ScanPage() {
                 <div className="font-semibold">Đã có trong hệ thống</div>
                 <div className="mt-0.5 text-xs text-slate-500">Upload trùng sẽ bỏ qua OCR. File chỉ vào Tổng hợp hóa đơn sau khi bấm Áp dụng.</div>
               </div>
-              <Link href="/documents" className="rounded-md border bg-white px-3 py-2 text-sm font-semibold hover:bg-secondary">
-                Xem tất cả
-              </Link>
+              <button
+                type="button"
+                className="rounded-md border bg-white px-3 py-2 text-sm font-semibold hover:bg-secondary"
+                onClick={() => setDocumentPanelOpen(true)}
+              >
+                Quản lý
+              </button>
             </div>
             <div className="mt-3 space-y-2">
               {recentDocuments.map((document) => {
@@ -581,6 +664,105 @@ export default function ScanPage() {
           </button>
         </div>
       </aside>
+
+      {documentPanelOpen ? (
+        <div className="fixed inset-0 z-[85] flex justify-end bg-slate-950/35">
+          <button className="absolute inset-0" aria-label="Đóng quản lý tài liệu" onClick={() => setDocumentPanelOpen(false)} />
+          <div className="relative z-10 flex h-full w-[min(760px,100vw)] flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <div className="flex items-center gap-2 text-base font-semibold text-slate-950">
+                  <History className="h-4 w-4 text-primary" />
+                  Quản lý tài liệu hóa đơn
+                </div>
+                <div className="mt-1 text-sm text-slate-500">
+                  {store.documents.length} file · upload trùng tự bỏ qua OCR · xóa file sẽ xóa toàn bộ dòng thuộc file đó
+                </div>
+              </div>
+              <button className="rounded-md p-2 text-slate-500 hover:bg-slate-100" onClick={() => setDocumentPanelOpen(false)} aria-label="Đóng">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto">
+              {store.documents.map((document) => {
+                const badge = documentApplyBadge(document);
+                return (
+                  <div key={document.id} className="border-b border-slate-200 px-5 py-4">
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_116px] md:items-start">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold" title={document.fileName}>
+                          {document.fileName}
+                        </div>
+                        <div className="mt-1 text-sm text-slate-500">
+                          {fileSizeLabel(document.fileSize)} · {new Date(document.uploadedAt).toLocaleString("vi-VN")} · {documentProgressText(document)}
+                        </div>
+                        {documentDuplicateText(document) ? (
+                          <div className="mt-1 text-xs font-medium text-slate-500">{documentDuplicateText(document)}</div>
+                        ) : null}
+                        {document.deletedRowCount > 0 ? (
+                          <div className="mt-1 text-xs font-medium text-amber-700">
+                            Đã xóa thủ công {document.deletedRowCount} dòng. Upload lại đúng file này để scan lại và khôi phục dòng đã xóa.
+                          </div>
+                        ) : null}
+                        {document.warnings.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {document.warnings.map((message, index) => (
+                              <span key={`${message}-${index}`} className={`rounded-md px-2.5 py-1.5 text-xs font-medium ${documentMessageClass(message)}`}>
+                                {displayDocumentMessage(message)}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 md:block md:space-y-2">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badge.className}`}>
+                          {badge.label}
+                        </span>
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          document.status === "scanned" ? "bg-slate-100 text-slate-700" : "bg-red-50 text-red-700"
+                        }`}>
+                          {documentStatusLabel(document)}
+                        </span>
+                        <div className="font-mono text-xs text-slate-400">{document.id.slice(0, 10)}</div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2">
+                        {!document.appliedToSummary && document.status === "scanned" ? (
+                          <button
+                            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-primary hover:bg-blue-100"
+                            onClick={() => applyDocument(document.id)}
+                            title="Áp dụng vào Tổng hợp hóa đơn"
+                          >
+                            <Table2 className="h-4 w-4" />
+                            Áp dụng
+                          </button>
+                        ) : null}
+                        <button
+                          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100"
+                          onClick={() => deleteDocument(document.id)}
+                          title="Xóa tài liệu và các dòng thuộc tài liệu"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Xóa
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {store.documents.length === 0 ? (
+                <div className="px-5 py-16 text-center text-slate-500">Chưa có tài liệu nào. Chọn file ở màn hình scan để bắt đầu.</div>
+              ) : null}
+            </div>
+
+            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-500">
+              Mẹo: nếu file đã có trong hệ thống, kéo thả lại file đó sẽ không OCR lại. Nếu file từng bị xóa bớt dòng, upload lại đúng file để khôi phục.
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

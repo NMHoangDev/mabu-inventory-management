@@ -24,9 +24,8 @@ import { useApp } from "@/components/providers/AppProvider";
 
 const navItems = [
   { key: "dashboard", path: "/", label: "Dashboard", group: "Tổng quan", icon: LayoutDashboard },
-  { key: "scan", path: "/scan", label: "Scan hóa đơn", group: "Hóa đơn", icon: FileSpreadsheet },
+  { key: "scan", path: "/scan", label: "Scan & tài liệu", group: "Hóa đơn", icon: FileSpreadsheet },
   { key: "summary", path: "/summary", label: "Tổng hợp hóa đơn", group: "Hóa đơn", icon: Table2 },
-  { key: "documents", path: "/documents", label: "Tài liệu hóa đơn", group: "Hóa đơn", icon: FileText },
   { 
     key: "products", path: "/products", label: "Sản phẩm / SKU", group: "Vận hành", icon: Package,
     subItems: [
