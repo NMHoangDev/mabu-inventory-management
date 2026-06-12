@@ -178,6 +178,7 @@ export default function ScanPage() {
   const [scanning, setScanning] = useState(false);
   const [scanBatchFiles, setScanBatchFiles] = useState<ScanBatchFile[]>([]);
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false);
+  const [selectedPanelDocumentIds, setSelectedPanelDocumentIds] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,6 +233,35 @@ export default function ScanPage() {
     const selectedIds = new Set(selectedDocumentIds);
     return store.rows.filter((row) => selectedIds.has(row.documentId));
   }, [selectedDocumentIds, store.rows]);
+  const selectablePanelDocumentIds = useMemo(
+    () => store.documents.filter((document) => document.status === "scanned").map((document) => document.id),
+    [store.documents]
+  );
+  const selectedPanelDocumentIdSet = useMemo(() => new Set(selectedPanelDocumentIds), [selectedPanelDocumentIds]);
+  const selectedPanelDocuments = useMemo(
+    () => store.documents.filter((document) => selectedPanelDocumentIdSet.has(document.id)),
+    [selectedPanelDocumentIdSet, store.documents]
+  );
+  const selectedPanelRows = useMemo(
+    () => store.rows.filter((row) => selectedPanelDocumentIdSet.has(row.documentId)),
+    [selectedPanelDocumentIdSet, store.rows]
+  );
+
+  const setPanelDocumentSelected = (documentId: string, checked: boolean) => {
+    setSelectedPanelDocumentIds((current) => {
+      if (checked) return Array.from(new Set([...current, documentId]));
+      return current.filter((id) => id !== documentId);
+    });
+  };
+
+  const toggleAllPanelDocuments = () => {
+    setSelectedPanelDocumentIds((current) => {
+      const selectable = new Set(selectablePanelDocumentIds);
+      const selectedSelectableCount = current.filter((id) => selectable.has(id)).length;
+      if (selectablePanelDocumentIds.length > 0 && selectedSelectableCount === selectablePanelDocumentIds.length) return [];
+      return selectablePanelDocumentIds;
+    });
+  };
 
   const addFiles = (fileList: FileList | File[]) => {
     const incoming = Array.from(fileList);
@@ -251,24 +281,30 @@ export default function ScanPage() {
     setNotice("");
   };
 
-  const applyDocument = async (documentId: string) => {
-    const document = store.documents.find((item) => item.id === documentId);
+  const applyDocumentsToSummary = async (documentIds: string[]) => {
+    if (documentIds.length === 0) {
+      setError("Chọn ít nhất một file đã scan để áp dụng vào Tổng hợp hóa đơn.");
+      return;
+    }
+
     try {
       const response = await fetch("/api/documents/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentIds: [documentId] })
+        body: JSON.stringify({ documentIds })
       });
       const data = await readJsonResponse<AppStore & { error?: string }>(response);
       if (!response.ok) throw new Error(data.error ?? "Không áp dụng được tài liệu.");
+
       setStore(data);
+      const nextDocuments = new Map(data.documents.map((document) => [document.id, document]));
       setScanBatchFiles((current) =>
         current.map((item) => ({
           ...item,
-          document: data.documents.find((nextDocument) => nextDocument.id === item.document.id) ?? item.document
+          document: nextDocuments.get(item.document.id) ?? item.document
         }))
       );
-      setNotice(document ? `Đã áp dụng ${document.fileName} vào Tổng hợp hóa đơn.` : "Đã áp dụng tài liệu.");
+      setNotice(`Đã áp dụng ${documentIds.length} file vào Tổng hợp hóa đơn.`);
       await refreshLookups();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Không áp dụng được tài liệu.");
@@ -298,14 +334,15 @@ export default function ScanPage() {
       if (!response.ok) throw new Error(data.error ?? "Không xóa được tài liệu.");
       setStore(data);
       setScanBatchFiles((current) => current.filter((item) => item.document.id !== documentId));
+      setSelectedPanelDocumentIds((current) => current.filter((id) => id !== documentId));
       setNotice(document ? `Đã xóa tài liệu ${document.fileName} và các dòng thuộc file.` : "Đã xóa tài liệu.");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Không xóa được tài liệu.");
     }
   };
 
-  const exportSelectedScanBatchExcel = async () => {
-    if (selectedRows.length === 0) {
+  const exportRowsToExcel = async (rows: InvoiceRow[], fileName: string) => {
+    if (rows.length === 0) {
       setError("Chọn ít nhất một file đã scan có dòng hàng để xuất Excel.");
       return;
     }
@@ -314,7 +351,7 @@ export default function ScanPage() {
       const response = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: selectedRows })
+        body: JSON.stringify({ rows })
       });
       if (!response.ok) throw new Error("Không xuất được Excel.");
 
@@ -322,7 +359,7 @@ export default function ScanPage() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "ket-qua-scan-hoa-don.xlsx";
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -332,35 +369,13 @@ export default function ScanPage() {
     }
   };
 
-  const applySelectedScanBatch = async () => {
-    if (selectedDocumentIds.length === 0) {
-      setError("Chọn ít nhất một file đã scan để áp dụng vào Tổng hợp hóa đơn.");
-      return;
-    }
+  const exportSelectedScanBatchExcel = async () => exportRowsToExcel(selectedRows, "ket-qua-scan-hoa-don.xlsx");
 
-    try {
-      const response = await fetch("/api/documents/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentIds: selectedDocumentIds })
-      });
-      const data = await readJsonResponse<AppStore & { error?: string }>(response);
-      if (!response.ok) throw new Error(data.error ?? "Không áp dụng được tài liệu.");
+  const exportSelectedPanelExcel = async () => exportRowsToExcel(selectedPanelRows, "hoa-don-da-scan-da-chon.xlsx");
 
-      setStore(data);
-      const nextDocuments = new Map(data.documents.map((document) => [document.id, document]));
-      setScanBatchFiles((current) =>
-        current.map((item) => ({
-          ...item,
-          document: nextDocuments.get(item.document.id) ?? item.document
-        }))
-      );
-      setNotice(`Đã áp dụng ${selectedDocumentIds.length} file vào Tổng hợp hóa đơn.`);
-      await refreshLookups();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Không áp dụng được tài liệu.");
-    }
-  };
+  const applySelectedScanBatch = async () => applyDocumentsToSummary(selectedDocumentIds);
+
+  const applySelectedPanelDocuments = async () => applyDocumentsToSummary(selectedPanelDocumentIds);
 
   const scanFiles = async () => {
     if (files.length === 0) {
@@ -383,6 +398,9 @@ export default function ScanPage() {
       const results = Array.isArray(data.results) ? data.results : [];
       const nextBatchFiles = scanResultsToBatchFiles(results, data);
       setScanBatchFiles(nextBatchFiles);
+      const scannedDocumentIds = nextBatchFiles.filter((item) => item.document.status === "scanned").map((item) => item.document.id);
+      setSelectedPanelDocumentIds(scannedDocumentIds);
+      if (nextBatchFiles.length > 0) setDocumentPanelOpen(true);
 
       const duplicateCount = results.filter((result) => result.duplicate || result.skipped).length;
       const restoredCount = results.filter((result) => result.restored).length;
@@ -668,7 +686,7 @@ export default function ScanPage() {
       {documentPanelOpen ? (
         <div className="fixed inset-0 z-[85] flex justify-end bg-slate-950/35">
           <button className="absolute inset-0" aria-label="Đóng quản lý tài liệu" onClick={() => setDocumentPanelOpen(false)} />
-          <div className="relative z-10 flex h-full w-[min(760px,100vw)] flex-col bg-white shadow-2xl">
+          <div className="relative z-10 flex h-full w-[min(900px,100vw)] flex-col bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
               <div>
                 <div className="flex items-center gap-2 text-base font-semibold text-slate-950">
@@ -684,12 +702,67 @@ export default function ScanPage() {
               </button>
             </div>
 
+            <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-800">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-primary"
+                    checked={
+                      selectablePanelDocumentIds.length > 0 &&
+                      selectablePanelDocumentIds.every((id) => selectedPanelDocumentIdSet.has(id))
+                    }
+                    onChange={toggleAllPanelDocuments}
+                  />
+                  Chọn file đã scan
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
+                    {selectedPanelDocuments.length} file · {selectedPanelRows.length} dòng
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex h-9 items-center gap-2 rounded-md border bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={selectedPanelRows.length === 0}
+                    onClick={exportSelectedPanelExcel}
+                  >
+                    <Download className="h-4 w-4" />
+                    Tải Excel file chọn
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={selectedPanelDocumentIds.length === 0}
+                    onClick={applySelectedPanelDocuments}
+                  >
+                    <Table2 className="h-4 w-4" />
+                    Áp dụng vào tổng hợp
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                File đã scan được lưu ở đây trước. Chỉ file đã bấm áp dụng mới đi vào bảng Tổng hợp hóa đơn.
+              </div>
+            </div>
+
             <div className="flex-1 overflow-auto">
               {store.documents.map((document) => {
                 const badge = documentApplyBadge(document);
+                const canSelect = document.status === "scanned";
+                const selected = selectedPanelDocumentIdSet.has(document.id);
                 return (
-                  <div key={document.id} className="border-b border-slate-200 px-5 py-4">
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_116px] md:items-start">
+                  <div key={document.id} className={`border-b border-slate-200 px-5 py-4 ${selected ? "bg-blue-50/35" : ""}`}>
+                    <div className="grid gap-3 md:grid-cols-[28px_minmax(0,1fr)_128px_86px] md:items-start">
+                      <div className="pt-1">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+                          checked={selected}
+                          disabled={!canSelect}
+                          onChange={(event) => setPanelDocumentSelected(document.id, event.target.checked)}
+                          aria-label={`Chọn file ${document.fileName}`}
+                        />
+                      </div>
                       <div className="min-w-0">
                         <div className="truncate font-semibold" title={document.fileName}>
                           {document.fileName}
@@ -729,16 +802,6 @@ export default function ScanPage() {
                       </div>
 
                       <div className="flex items-center justify-end gap-2">
-                        {!document.appliedToSummary && document.status === "scanned" ? (
-                          <button
-                            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-primary hover:bg-blue-100"
-                            onClick={() => applyDocument(document.id)}
-                            title="Áp dụng vào Tổng hợp hóa đơn"
-                          >
-                            <Table2 className="h-4 w-4" />
-                            Áp dụng
-                          </button>
-                        ) : null}
                         <button
                           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100"
                           onClick={() => deleteDocument(document.id)}
