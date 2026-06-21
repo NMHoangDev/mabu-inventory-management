@@ -1,0 +1,14 @@
+{
+  "shippings": [],
+  "events": [
+    {
+      "id": "1781796403077",
+      "shipping_id": "5faf2082-1920-4c35-bb8c-fee918f5d1f7",
+      "status": "shipping",
+      "description": "Den hub Binh Thanh",
+      "location": "Hub BT",
+      "occurred_at": "2026-06-18T15:26:43.077Z",
+      "created_at": "2026-06-18T15:26:43.077Z"
+    }
+  ]
+}

@@ -1,8 +1,26 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
+import { getInventoryProductDetail } from "@/lib/products/inventory";
 import { deleteProduct, updateProduct } from "@/lib/products/repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await context.params;
+    const product = await getInventoryProductDetail(id);
+    if (!product) {
+      return NextResponse.json({ error: "Product not found." }, { status: 404 });
+    }
+    return NextResponse.json(product);
+  } catch (error) {
+    console.error("Get product API failed:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to load product." },
+      { status: 500 }
+    );
+  }
+}
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {

@@ -1,0 +1,87 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import {
+  createOrder,
+  getOrderStats,
+  listOrders,
+  OrderItemInput,
+} from "@/lib/orders/repository";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const search = url.searchParams.get("search") ?? undefined;
+    const status = (url.searchParams.get("status") ?? undefined) as any;
+    const payment_status = (url.searchParams.get("payment_status") ?? undefined) as any;
+    const fulfillment_status = (url.searchParams.get("fulfillment_status") ?? undefined) as any;
+    const date_from = url.searchParams.get("date_from") ?? undefined;
+    const date_to = url.searchParams.get("date_to") ?? undefined;
+    const page = Number(url.searchParams.get("page") ?? 1);
+    const page_size = Number(url.searchParams.get("page_size") ?? 20);
+
+    const [list, stats] = await Promise.all([
+      listOrders({ search, status, payment_status, fulfillment_status, date_from, date_to, page, page_size }),
+      getOrderStats(),
+    ]);
+
+    return NextResponse.json({ ...list, stats });
+  } catch (error) {
+    console.error("GET /api/orders failed:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to load orders." },
+      { status: 500 }
+    );
+  }
+}
+
+const itemSchema = z.object({
+  product_id: z.string().nullable(),
+  product_name: z.string().min(1),
+  product_sku: z.string().optional(),
+  unit: z.string().optional(),
+  image_url: z.string().optional(),
+  quantity: z.number().int().min(1),
+  unit_price: z.number().min(0),
+});
+
+const createSchema = z.object({
+  customer_id: z.string().nullable().optional(),
+  customer_name: z.string().optional(),
+  customer_phone: z.string().optional(),
+  status: z.enum(["new", "processing", "completed", "cancelled"]).optional(),
+  payment_status: z.enum(["unpaid", "partial", "paid", "refunded"]).optional(),
+  fulfillment_status: z.enum(["unshipped", "shipping", "shipped", "returned"]).optional(),
+  source: z.enum(["store", "facebook", "website", "zalo", "other"]).optional(),
+  branch: z.string().optional(),
+  staff: z.string().optional(),
+  note: z.string().optional(),
+  discount: z.number().min(0).optional(),
+  shipping_fee: z.number().min(0).optional(),
+  paid: z.number().min(0).optional(),
+  items: z.array(itemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm."),
+});
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const parsed = createSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+    const items: OrderItemInput[] = parsed.data.items;
+    const order = await createOrder({ ...parsed.data, items });
+    return NextResponse.json(order, { status: 201 });
+  } catch (error) {
+    console.error("POST /api/orders failed:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to create order." },
+      { status: 500 }
+    );
+  }
+}

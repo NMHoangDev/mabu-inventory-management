@@ -1,0 +1,17 @@
+
+> invoiceflow-manager@0.1.0 dev
+> next dev -H 0.0.0.0 -p 3000
+
+▲ Next.js 16.2.7 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://0.0.0.0:3000
+- Environments: .env.local
+✓ Ready in 733ms
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: 52428800
+
+ GET /api/shipping/settings 200 in 2.7s (next.js: 519ms, application-code: 2.1s)
+ POST /api/shipping/settings 200 in 288ms (next.js: 5ms, application-code: 283ms)
+ GET /api/shipping/settings 200 in 219ms (next.js: 4ms, application-code: 215ms)
+ POST /api/shipping/settings 400 in 9ms (next.js: 3ms, application-code: 6ms)
+[?25h

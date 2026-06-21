@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { ReactNode, useState } from "react";
 import Link from "next/link";
@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   Bell,
-  Boxes,
+  Building2,
   ChevronsLeft,
   ChevronsRight,
   FileSpreadsheet,
@@ -18,25 +18,84 @@ import {
   ShoppingCart,
   Settings,
   Table2,
-  X
+  Truck,
+  Users,
+  X,
+  Wallet,
+  Sparkles,
+  Zap
 } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
 
 const navItems = [
   { key: "dashboard", path: "/", label: "Dashboard", group: "Tổng quan", icon: LayoutDashboard },
   { key: "scan", path: "/scan", label: "Scan & tài liệu", group: "Hóa đơn", icon: FileSpreadsheet },
-  { key: "summary", path: "/summary", label: "Tổng hợp hóa đơn", group: "Hóa đơn", icon: Table2 },
-  { 
+  { key: "summary", path: "/summary", label: "Tổng hợp", group: "Hóa đơn", icon: Table2 },
+  { key: "documents", path: "/documents", label: "Tài liệu hóa đơn", group: "Hóa đơn", icon: FileText },
+  {
+    key: "customers", path: "/customers", label: "Khách hàng", group: "Khách hàng", icon: Users,
+    subItems: [
+      { key: "customer-list", path: "/customers", label: "Danh sách khách hàng" },
+      { key: "customer-groups", path: "/customers/groups", label: "Nhóm khách hàng" }
+    ]
+  },
+  {
     key: "products", path: "/products", label: "Sản phẩm / SKU", group: "Vận hành", icon: Package,
     subItems: [
       { key: "product-list", path: "/products", label: "Danh sách sản phẩm" },
+      { key: "product-inventory", path: "/products/inventory", label: "Quản lý kho" },
+      { key: "product-purchase-orders", path: "/products/purchase-orders", label: "Đặt hàng nhập" },
+      { key: "product-goods-receipts", path: "/products/goods-receipts", label: "Nhập hàng" },
+      { key: "product-stock-checks", path: "/products/stock-checks", label: "Kiểm hàng" },
+      { key: "product-cost-adjustments", path: "/products/cost-adjustments", label: "Điều chỉnh giá vốn" },
       { key: "product-categories", path: "/products/categories", label: "Danh mục sản phẩm" },
       { key: "product-pricing", path: "/products/pricing", label: "Bảng giá" }
     ]
   },
-  { key: "inventory", path: "/inventory", label: "Tồn kho", group: "Vận hành", icon: Boxes },
-  { key: "sales", path: "/sales", label: "Lên đơn hàng", group: "Vận hành", icon: ShoppingCart },
-  { key: "reports", path: "/reports", label: "Báo cáo", group: "Vận hành", icon: BarChart3 },
+  {
+    key: "suppliers", path: "/suppliers", label: "Nhà cung cấp", group: "Vận hành", icon: Building2,
+    subItems: [
+      { key: "suppliers-list", path: "/suppliers", label: "Tất cả nhà cung cấp" },
+      { key: "suppliers-groups", path: "/suppliers/groups", label: "Nhóm nhà cung cấp" }
+    ]
+  },
+  {
+    key: "orders", path: "/orders", label: "Đơn hàng", group: "Vận hành", icon: ShoppingCart,
+    subItems: [
+      { key: "orders-list", path: "/orders", label: "Tất cả đơn hàng" },
+      { key: "orders-new", path: "/orders/new", label: "Tạo đơn hàng" },
+      { key: "orders-parse", path: "/orders/parse", label: "Tạo từ AI parse" }
+    ]
+  },
+  {
+    key: "shipping", path: "/shipping", label: "Vận chuyển", group: "Vận hành", icon: Truck,
+    subItems: [
+      { key: "shipping-overview", path: "/shipping", label: "Tổng quan" },
+      { key: "shipping-list", path: "/shipping/orders", label: "Quản lý vận đơn" },
+      { key: "shipping-new", path: "/shipping/orders/new", label: "Tạo vận đơn" },
+      { key: "shipping-config", path: "/shipping/config", label: "Cấu hình vận chuyển" }
+    ]
+  },
+  {
+    key: "reports", path: "/reports/sales", label: "Báo cáo", group: "Vận hành", icon: BarChart3,
+    subItems: [
+      { key: "reports-sales", path: "/reports/sales", label: "Báo cáo bán hàng" },
+      { key: "reports-purchases", path: "/reports/purchases", label: "Báo cáo nhập hàng" },
+      { key: "reports-inventory", path: "/reports/inventory", label: "Báo cáo kho" },
+      { key: "reports-finance", path: "/reports/finance", label: "Báo cáo tài chính" },
+      { key: "reports-customers", path: "/reports/customers", label: "Báo cáo khách hàng" }
+    ]
+  },
+  {
+    key: "finance", path: "/finance", label: "Sổ quỹ", group: "Vận hành", icon: Wallet,
+    subItems: [
+      { key: "finance-receipt-vouchers", path: "/finance/receipt-vouchers", label: "Phiếu thu" },
+      { key: "finance-payment-vouchers", path: "/finance/payment-vouchers", label: "Phiếu chi" },
+      { key: "finance-cash-ledger", path: "/finance/cash-ledger", label: "Sổ quỹ" }
+    ]
+  },
+  { key: "automations", path: "/automations", label: "Tự động hóa", group: "Vận hành", icon: Zap },
+  { key: "assistant", path: "/assistant", label: "Trợ lý AI", group: "Hệ thống", icon: Sparkles },
   { key: "settings", path: "/settings", label: "Cài đặt", group: "Hệ thống", icon: Settings },
   { key: "blueprint", path: "/blueprint", label: "Design Blueprint", group: "Hệ thống", icon: FileText }
 ];
@@ -51,7 +110,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
   if (!navItems.find((item) => item.path === pathname)) {
     for (const item of navItems) {
       if (item.subItems) {
-        const subItem = item.subItems.find((sub) => sub.path === pathname);
+        const subItem = item.subItems.find((sub) => pathname === sub.path || pathname.startsWith(`${sub.path}/`));
         if (subItem) {
           currentNav = { ...item, label: subItem.label };
           break;
@@ -93,7 +152,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
                 .map((item) => {
                   const Icon = item.icon;
                   const activePath = pathname === item.path;
-                  const hasActiveSub = item.subItems?.some((sub) => pathname === sub.path);
+                  const hasActiveSub = item.subItems?.some((sub) => pathname === sub.path || pathname.startsWith(`${sub.path}/`));
                   const active = activePath || hasActiveSub;
                   return (
                     <div key={item.key}>
@@ -117,7 +176,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
                       {!isCollapsed && item.subItems && (active || hasActiveSub || pathname.startsWith(item.path)) ? (
                         <div className="mt-1 ml-4 space-y-0.5 border-l border-sidebar-border/30 pl-2">
                           {item.subItems.map((sub) => {
-                            const subActive = pathname === sub.path;
+                            const subActive = pathname === sub.path || pathname.startsWith(`${sub.path}/`);
                             return (
                               <Link
                                 key={sub.key}
@@ -191,8 +250,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
             <button
               onClick={() => setMobileOpen(false)}
               className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-sidebar-foreground opacity-70 hover:bg-sidebar-accent hover:opacity-100 hover:text-sidebar-foreground"
-              aria-label="Đóng"
-            >
+              aria-label="Đóng">
               <X className="h-4 w-4" />
             </button>
             {renderSidebar(false)}
@@ -206,8 +264,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
             <button
               onClick={() => setMobileOpen(true)}
               className="-ml-2 rounded-md p-2 hover:bg-muted lg:hidden"
-              aria-label="Mở menu"
-            >
+              aria-label="Mở menu">
               <Menu className="h-5 w-5" />
             </button>
             <button
@@ -269,3 +326,5 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+

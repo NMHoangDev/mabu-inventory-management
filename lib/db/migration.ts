@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 4; // Bump version for scan apply state and product catalog compatibility
+const SCHEMA_VERSION = 15; // Bumped: cash_book + receipt_vouchers (Sổ quỹ / Phiếu thu)
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -191,6 +191,15 @@ async function migrate() {
       values      text[] default '{}'
     );
 
+    -- Stock + reorder columns (idempotent)
+    alter table products add column if not exists stock numeric(14,2) not null default 0;
+    alter table products add column if not exists reorder_point numeric(14,2) not null default 0;
+    alter table products add column if not exists reorder_quantity numeric(14,2) not null default 0;
+    alter table products add column if not exists avg_daily_sales numeric(14,4) not null default 0;
+    alter table products add column if not exists last_restocked_at timestamptz;
+    alter table products add column if not exists preferred_supplier text;
+    alter table products add column if not exists stock_updated_at timestamptz;
+
     create table if not exists product_variants (
       id                uuid primary key default gen_random_uuid(),
       product_id        uuid not null references products(id) on delete cascade,
@@ -277,6 +286,128 @@ async function migrate() {
     alter table product_catalog add column if not exists product_id uuid references products(id) on delete set null;
   `);
 
+  // 4. Customer Management tables
+  await client.query(`
+    create table if not exists customer_groups (
+      id          uuid primary key default gen_random_uuid(),
+      name        text not null unique,
+      description text,
+      created_at  timestamptz default now(),
+      updated_at  timestamptz default now()
+    );
+
+    create table if not exists customers (
+      id                uuid primary key default gen_random_uuid(),
+      code              text unique,
+      name              text not null,
+      phone             text,
+      email             text,
+      gender            text check (gender in ('male', 'female', 'other')),
+      birthday          date,
+      company           text,
+      tax_code          text,
+      website           text,
+      description       text,
+      tags              text[] default '{}',
+      group_id          uuid references customer_groups(id) on delete set null,
+      assigner_id       text,
+      total_spent       numeric(18,2) default 0,
+      total_orders      integer default 0,
+      total_debt        numeric(18,2) default 0,
+      birth_day         int,
+      birth_month       int,
+      last_order_at     timestamptz,
+      created_at        timestamptz default now(),
+      updated_at        timestamptz default now()
+    );
+
+    create table if not exists customer_addresses (
+      id           uuid primary key default gen_random_uuid(),
+      customer_id  uuid not null references customers(id) on delete cascade,
+      is_default   boolean default false,
+      recipient_name text,
+      phone         text,
+      address       text not null default '',
+      ward          text,
+      district      text,
+      city          text,
+      region        text,
+      postal_code   text,
+      address_type  text check (address_type in ('shipping', 'billing', 'other')),
+      created_at   timestamptz default now(),
+      updated_at   timestamptz default now()
+    );
+
+    create index if not exists idx_customers_code      on customers(code);
+    create index if not exists idx_customers_phone     on customers(phone);
+    create index if not exists idx_customers_email     on customers(email);
+    create index if not exists idx_customers_group_id  on customers(group_id);
+    create index if not exists idx_customer_addresses_customer on customer_addresses(customer_id);
+
+    -- Add code + type columns to customer_groups if they don't exist (idempotent)
+    alter table customer_groups add column if not exists code text;
+    alter table customer_groups add column if not exists type text default 'Cố định';
+    -- Backfill code for existing rows (idempotent - only updates nulls)
+    update customer_groups set code = upper(regexp_replace(name, '[^a-zA-Z0-9]', '', 'g')) where code is null;
+  `);
+
+  // 5. Order Management tables
+  await client.query(`
+    create table if not exists orders (
+      id              uuid primary key default gen_random_uuid(),
+      code            text unique not null,
+      customer_id     uuid references customers(id) on delete set null,
+      customer_name   text not null default '',
+      customer_phone  text default '',
+      status          text not null default 'new'
+                      check (status in ('new', 'processing', 'completed', 'cancelled')),
+      payment_status  text not null default 'unpaid'
+                      check (payment_status in ('unpaid', 'partial', 'paid', 'refunded')),
+      fulfillment_status text not null default 'unshipped'
+                      check (fulfillment_status in ('unshipped', 'shipping', 'shipped', 'returned')),
+      source          text default 'store' check (source in ('store', 'facebook', 'website', 'zalo', 'other')),
+      branch          text default 'Chi nhánh chính',
+      staff           text default '',
+      note            text default '',
+      subtotal        numeric(18,2) not null default 0,
+      discount        numeric(18,2) not null default 0,
+      shipping_fee    numeric(18,2) not null default 0,
+      total           numeric(18,2) not null default 0,
+      paid            numeric(18,2) not null default 0,
+      created_at      timestamptz not null default now(),
+      updated_at      timestamptz not null default now()
+    );
+
+    create table if not exists order_items (
+      id            uuid primary key default gen_random_uuid(),
+      order_id      uuid not null references orders(id) on delete cascade,
+      product_id    uuid references products(id) on delete set null,
+      product_name  text not null default '',
+      product_sku   text default '',
+      unit          text default '',
+      image_url     text default '',
+      quantity      integer not null default 1,
+      unit_price    numeric(18,2) not null default 0,
+      line_total    numeric(18,2) not null default 0,
+      position      integer default 1,
+      created_at    timestamptz not null default now()
+    );
+
+    create index if not exists idx_orders_code         on orders(code);
+    create index if not exists idx_orders_customer_id  on orders(customer_id);
+    create index if not exists idx_orders_status       on orders(status);
+    create index if not exists idx_orders_created_at   on orders(created_at desc);
+    create index if not exists idx_order_items_order   on order_items(order_id);
+  `);
+  await client.query(`
+    alter table customer_addresses
+      add constraint fk_customer_addresses_customer
+      foreign key (customer_id) references customers(id) on delete cascade
+      not valid;
+    alter table customer_addresses
+      validate constraint fk_customer_addresses_customer;
+  `).catch(() => undefined);
+
   // Add foreign key constraint to variants if product_images table is ready, avoiding cycle constraints on creation
     await client.query(`
     alter table product_variants
@@ -285,9 +416,470 @@ async function migrate() {
       not valid;
     alter table product_variants
       validate constraint fk_variant_image;
-    `).catch(() => undefined); // Catch if it already exists
-  } finally {
+  `).catch(() => undefined); // Catch if it already exists
+
+  // 6. Shipping tables
+  await client.query(`
+    create table if not exists shippings (
+      id                 uuid primary key default gen_random_uuid(),
+      tracking_code      text unique not null,
+      order_id           uuid references orders(id) on delete set null,
+      customer_name      text not null default '',
+      customer_phone     text default '',
+      shipping_address   text default '',
+      province           text default '',
+      district           text default '',
+      ward               text default '',
+      partner            text default 'NINJA VAN',
+      partner_service    text default '',
+      status             text not null default 'pending'
+                        check (status in ('pending', 'packing', 'awaiting_pickup', 'shipping', 'delivered', 'returning', 'cancelled', 'returned', 'failed')),
+      cod_amount         numeric(18,2) default 0,
+      shipping_fee       numeric(18,2) default 0,
+      weight             numeric(10,3) default 0,
+      note               text default '',
+      branch             text default 'Chi nhánh chính',
+      staff              text default '',
+      packed_at          timestamptz,
+      picked_up_at       timestamptz,
+      delivered_at       timestamptz,
+      cancelled_at       timestamptz,
+      created_at         timestamptz not null default now(),
+      updated_at         timestamptz not null default now()
+    );
+
+    create table if not exists shipping_events (
+      id           bigserial primary key,
+      shipping_id  uuid not null references shippings(id) on delete cascade,
+      status       text not null,
+      description  text default '',
+      location     text default '',
+      occurred_at  timestamptz not null default now(),
+      created_at   timestamptz not null default now()
+    );
+
+    create index if not exists idx_shippings_tracking        on shippings(tracking_code);
+    create index if not exists idx_shippings_status          on shippings(status);
+    create index if not exists idx_shippings_partner         on shippings(partner);
+    create index if not exists idx_shippings_order_id        on shippings(order_id);
+    create index if not exists idx_shippings_created_at      on shippings(created_at desc);
+    create index if not exists idx_shippings_packed_at       on shippings(packed_at desc);
+    create index if not exists idx_shipping_events_shipping  on shipping_events(shipping_id, occurred_at asc);
+  `);
+
+  // 7. Shipping settings (singleton row for store-wide shipping config)
+  await client.query(`
+    create table if not exists shipping_settings (
+      id                          integer primary key default 1,
+      weight_source               text not null default 'order'
+                                  check (weight_source in ('order', 'custom')),
+      default_weight_g            integer not null default 0,
+      default_dimension           text not null default 'default',
+      default_requirement         text not null default 'view_only',
+      default_note                text default '',
+      auto_sync_returned_status   boolean not null default false,
+      auto_sync_cod               boolean not null default true,
+      pickup_warning_days         integer not null default 2,
+      delivery_warning_days       integer not null default 3,
+      restricted_zones            text default '',
+      pickup_addresses            jsonb not null default '[]'::jsonb,
+      updated_at                  timestamptz not null default now(),
+      constraint shipping_settings_singleton check (id = 1)
+    );
+
+    insert into shipping_settings (id) values (1) on conflict (id) do nothing;
+  `);
+
+  // 8. Stock receipts + reorder suggestions (inventory automation)
+  await client.query(`
+    create table if not exists stock_receipts (
+      id               uuid primary key default gen_random_uuid(),
+      code             text unique not null,
+      source           text not null default 'manual'
+                       check (source in ('scan', 'manual', 'transfer', 'return')),
+      invoice_row_id   text references invoice_rows(id) on delete set null,
+      document_id      text references invoice_documents(id) on delete set null,
+      supplier_name    text default '',
+      note             text default '',
+      total_quantity   numeric(14,2) not null default 0,
+      total_amount     numeric(18,2) not null default 0,
+      received_at      timestamptz not null default now(),
+      staff            text default '',
+      branch           text default 'Chi nhánh chính',
+      created_at       timestamptz not null default now()
+    );
+
+    create table if not exists stock_receipt_items (
+      id           uuid primary key default gen_random_uuid(),
+      receipt_id   uuid not null references stock_receipts(id) on delete cascade,
+      product_id   uuid references products(id) on delete set null,
+      sku          text default '',
+      product_name text not null default '',
+      unit         text default '',
+      quantity     numeric(14,2) not null default 0,
+      unit_cost    numeric(18,2) not null default 0,
+      line_total   numeric(18,2) not null default 0,
+      position     int default 1,
+      created_at   timestamptz not null default now()
+    );
+
+    create table if not exists reorder_suggestions (
+      id              uuid primary key default gen_random_uuid(),
+      product_id      uuid not null references products(id) on delete cascade,
+      urgency         text not null default 'low'
+                      check (urgency in ('low', 'medium', 'high', 'critical')),
+      current_stock   numeric(14,2) not null,
+      reorder_point   numeric(14,2) not null,
+      suggested_qty   numeric(14,2) not null,
+      avg_daily_sales numeric(14,4) default 0,
+      days_until_zero int default 0,
+      preferred_supplier text default '',
+      note            text default '',
+      status          text not null default 'open'
+                      check (status in ('open', 'dismissed', 'ordered', 'received')),
+      generated_at    timestamptz not null default now(),
+      resolved_at     timestamptz
+    );
+
+    -- Idempotent unique constraint (one open suggestion per product)
+    do $$
+    begin
+      if not exists (
+        select 1 from pg_constraint
+         where conname = 'reorder_suggestions_product_id_status_unique'
+      ) then
+        alter table reorder_suggestions
+          add constraint reorder_suggestions_product_id_status_unique
+          unique (product_id, status);
+      end if;
+    end$$;
+
+    create index if not exists idx_stock_receipts_received    on stock_receipts(received_at desc);
+    create index if not exists idx_stock_receipts_source      on stock_receipts(source);
+    create index if not exists idx_stock_receipt_items_receipt on stock_receipt_items(receipt_id);
+    create index if not exists idx_reorder_suggestions_status  on reorder_suggestions(status, urgency);
+    create index if not exists idx_reorder_suggestions_product on reorder_suggestions(product_id);
+  `);
+
+  // 9. Automation rules + log
+  await client.query(`
+    create table if not exists automation_rules (
+      id           uuid primary key default gen_random_uuid(),
+      name         text not null,
+      description  text default '',
+      enabled      boolean not null default true,
+      trigger      text not null check (trigger in (
+        'order.created','order.paid','order.shipped','shipping.pickup_overdue',
+        'shipping.delivered','shipping.returned','stock.low','stock.out',
+        'reorder.suggested','reorder.critical','invoice.scanned'
+      )),
+      conditions   jsonb not null default '[]'::jsonb,
+      actions      jsonb not null default '[]'::jsonb,
+      run_count    integer not null default 0,
+      last_run_at  timestamptz,
+      last_status  text default '',
+      created_at   timestamptz not null default now(),
+      updated_at   timestamptz not null default now()
+    );
+
+    create table if not exists automation_runs (
+      id          bigserial primary key,
+      rule_id     uuid references automation_rules(id) on delete cascade,
+      rule_name   text not null default '',
+      status      text not null check (status in ('success','failed','skipped')),
+      message     text default '',
+      payload     jsonb default '{}'::jsonb,
+      executed_at timestamptz not null default now()
+    );
+
+    create index if not exists idx_automation_rules_enabled   on automation_rules(enabled);
+    create index if not exists idx_automation_runs_rule       on automation_runs(rule_id, executed_at desc);
+  `);
+
+  // 10. Suppliers + Purchase Orders (Đơn đặt hàng nhập)
+  await client.query(`
+    create table if not exists suppliers (
+      id              uuid primary key default gen_random_uuid(),
+      code            text unique,
+      name            text not null,
+      contact_name    text default '',
+      phone           text default '',
+      email           text default '',
+      tax_code        text default '',
+      address         text default '',
+      ward            text default '',
+      district        text default '',
+      city            text default '',
+      note            text default '',
+      tags            text[] default '{}',
+      total_purchased numeric(18,2) default 0,
+      total_orders    integer default 0,
+      last_order_at   timestamptz,
+      status          text not null default 'active'
+                     check (status in ('active', 'inactive')),
+      created_at      timestamptz not null default now(),
+      updated_at      timestamptz not null default now()
+    );
+
+    alter table suppliers add column if not exists status text not null default 'active';
+    do $$
+    begin
+      if not exists (
+        select 1 from pg_constraint where conname = 'suppliers_status_check'
+      ) then
+        alter table suppliers add constraint suppliers_status_check
+          check (status in ('active', 'inactive'));
+      end if;
+    end
+    $$;
+
+    create table if not exists purchase_orders (
+      id              uuid primary key default gen_random_uuid(),
+      code            text unique not null,
+      supplier_id     uuid references suppliers(id) on delete set null,
+      supplier_name   text not null default '',
+      supplier_phone  text default '',
+      branch          text default 'Chi nhánh mặc định',
+      staff           text default '',
+      expected_date   date,
+      note            text default '',
+      tags            text[] default '{}',
+      status          text not null default 'draft'
+                      check (status in ('draft', 'pending', 'partial', 'completed', 'cancelled')),
+      subtotal        numeric(18,2) not null default 0,
+      discount        numeric(18,2) not null default 0,
+      tax             numeric(18,2) not null default 0,
+      total           numeric(18,2) not null default 0,
+      received_qty    numeric(18,2) not null default 0,
+      created_at      timestamptz not null default now(),
+      updated_at      timestamptz not null default now(),
+      completed_at    timestamptz
+    );
+
+    create table if not exists purchase_order_items (
+      id              uuid primary key default gen_random_uuid(),
+      purchase_order_id uuid not null references purchase_orders(id) on delete cascade,
+      product_id      uuid references products(id) on delete set null,
+      sku             text default '',
+      product_name    text not null default '',
+      unit            text default '',
+      image_url       text default '',
+      ordered_qty     numeric(14,2) not null default 0,
+      received_qty    numeric(14,2) not null default 0,
+      unit_cost       numeric(18,2) not null default 0,
+      discount        numeric(18,2) not null default 0,
+      line_total      numeric(18,2) not null default 0,
+      position        integer default 1,
+      note            text default '',
+      created_at      timestamptz not null default now()
+    );
+
+    create index if not exists idx_suppliers_name        on suppliers(name);
+    create index if not exists idx_suppliers_phone       on suppliers(phone);
+    create index if not exists idx_suppliers_code        on suppliers(code);
+    create index if not exists idx_purchase_orders_code          on purchase_orders(code);
+    create index if not exists idx_purchase_orders_supplier      on purchase_orders(supplier_id);
+    create index if not exists idx_purchase_orders_status        on purchase_orders(status);
+    create index if not exists idx_purchase_orders_created_at    on purchase_orders(created_at desc);
+    create index if not exists idx_purchase_order_items_order    on purchase_order_items(purchase_order_id);
+    create index if not exists idx_purchase_order_items_product  on purchase_order_items(product_id);
+    create index if not exists idx_purchase_order_items_sku      on purchase_order_items(sku);
+  `);
+
+  // 11. Stock checks (Phiếu kiểm hàng)
+  await client.query(`
+    create table if not exists stock_checks (
+      id              uuid primary key default gen_random_uuid(),
+      code            text unique not null,
+      branch          text not null default 'Chi nhánh mặc định',
+      staff           text not null default '',
+      note            text default '',
+      tags            text[] default '{}',
+      status          text not null default 'draft'
+                      check (status in ('draft', 'in_progress', 'balanced', 'cancelled')),
+      total_items     integer not null default 0,
+      matched_items   integer not null default 0,
+      variance_items  integer not null default 0,
+      created_at      timestamptz not null default now(),
+      updated_at      timestamptz not null default now(),
+      completed_at    timestamptz
+    );
+
+    create table if not exists stock_check_items (
+      id                uuid primary key default gen_random_uuid(),
+      stock_check_id    uuid not null references stock_checks(id) on delete cascade,
+      product_id        uuid references products(id) on delete set null,
+      sku               text default '',
+      product_name      text not null default '',
+      unit              text default '',
+      image_url         text default '',
+      system_quantity   numeric(14,2) not null default 0,
+      actual_quantity   numeric(14,2) not null default 0,
+      variance          numeric(14,2) not null default 0,
+      variance_reason   text default '',
+      note              text default '',
+      position          integer default 1,
+      created_at        timestamptz not null default now()
+    );
+
+    create index if not exists idx_stock_checks_code         on stock_checks(code);
+    create index if not exists idx_stock_checks_status       on stock_checks(status);
+    create index if not exists idx_stock_checks_created_at   on stock_checks(created_at desc);
+    create index if not exists idx_stock_check_items_check   on stock_check_items(stock_check_id);
+    create index if not exists idx_stock_check_items_product on stock_check_items(product_id);
+    create index if not exists idx_stock_check_items_sku     on stock_check_items(sku);
+  `);
+
+  // 12. Goods Receipts (Đơn nhập hàng)
+  await client.query(`
+    create table if not exists goods_receipts (
+      id                 uuid primary key default gen_random_uuid(),
+      code               text unique not null,
+      supplier_id        uuid references suppliers(id) on delete set null,
+      supplier_name      text not null default '',
+      supplier_phone     text default '',
+      purchase_order_id  uuid references purchase_orders(id) on delete set null,
+      purchase_order_code text default '',
+      branch             text not null default 'Chi nhánh mặc định',
+      staff              text default '',
+      received_at        timestamptz not null default now(),
+      expected_date      date,
+      note               text default '',
+      tags               text[] default '{}',
+      receipt_status     text not null default 'pending'
+                         check (receipt_status in ('pending','in_progress','completed','cancelled')),
+      order_status       text not null default 'pending'
+                         check (order_status in ('pending','in_progress','completed','cancelled')),
+      subtotal          numeric(18,2) not null default 0,
+      discount          numeric(18,2) not null default 0,
+      tax               numeric(18,2) not null default 0,
+      total_cost        numeric(18,2) not null default 0,
+      total_quantity    numeric(14,2) not null default 0,
+      paid              numeric(18,2) not null default 0,
+      payment_method    text default 'cash',
+      created_at        timestamptz not null default now(),
+      updated_at        timestamptz not null default now(),
+      completed_at      timestamptz
+    );
+
+    create table if not exists goods_receipt_items (
+      id                    uuid primary key default gen_random_uuid(),
+      goods_receipt_id      uuid not null references goods_receipts(id) on delete cascade,
+      purchase_order_item_id uuid references purchase_order_items(id) on delete set null,
+      product_id            uuid references products(id) on delete set null,
+      sku                   text default '',
+      product_name          text not null default '',
+      unit                  text default '',
+      image_url             text default '',
+      ordered_qty           numeric(14,2) not null default 0,
+      received_qty          numeric(14,2) not null default 0,
+      unit_cost             numeric(18,2) not null default 0,
+      discount              numeric(18,2) not null default 0,
+      line_total            numeric(18,2) not null default 0,
+      position              integer default 1,
+      note                  text default '',
+      created_at            timestamptz not null default now()
+    );
+
+    create index if not exists idx_goods_receipts_code         on goods_receipts(code);
+    create index if not exists idx_goods_receipts_supplier     on goods_receipts(supplier_id);
+    create index if not exists idx_goods_receipts_po           on goods_receipts(purchase_order_id);
+    create index if not exists idx_goods_receipts_receipt_status on goods_receipts(receipt_status);
+    create index if not exists idx_goods_receipts_order_status  on goods_receipts(order_status);
+    create index if not exists idx_goods_receipts_created_at    on goods_receipts(created_at desc);
+    create index if not exists idx_goods_receipt_items_receipt  on goods_receipt_items(goods_receipt_id);
+    create index if not exists idx_goods_receipt_items_po_item  on goods_receipt_items(purchase_order_item_id);
+    create index if not exists idx_goods_receipt_items_product on goods_receipt_items(product_id);
+  `);
+
+  // 14. Cost Adjustments (Điều chỉnh giá vốn)
+  await client.query(`
+    create table if not exists cost_adjustments (
+      id           uuid primary key default gen_random_uuid(),
+      code         text unique not null,
+      branch       text not null default 'Chi nhánh mặc định',
+      staff        text default '',
+      note         text default '',
+      tags         text[] default '{}',
+      status       text not null default 'draft'
+                   check (status in ('draft', 'completed', 'cancelled')),
+      total_items  integer not null default 0,
+      created_at   timestamptz not null default now(),
+      updated_at   timestamptz not null default now(),
+      completed_at timestamptz
+    );
+
+    create table if not exists cost_adjustment_items (
+      id              uuid primary key default gen_random_uuid(),
+      cost_adjustment_id uuid not null references cost_adjustments(id) on delete cascade,
+      product_id      uuid references products(id) on delete set null,
+      sku             text default '',
+      product_name    text not null default '',
+      unit            text default '',
+      image_url       text default '',
+      current_cost    numeric(18,2) not null default 0,
+      new_cost        numeric(18,2) not null default 0,
+      variance        numeric(18,2) not null default 0,
+      position        integer default 1,
+      note            text default '',
+      created_at      timestamptz not null default now()
+    );
+
+    create index if not exists idx_cost_adjustments_code        on cost_adjustments(code);
+    create index if not exists idx_cost_adjustments_status     on cost_adjustments(status);
+    create index if not exists idx_cost_adjustments_created_at on cost_adjustments(created_at desc);
+    create index if not exists idx_cost_adjustment_items_adj    on cost_adjustment_items(cost_adjustment_id);
+    create index if not exists idx_cost_adjustment_items_prod  on cost_adjustment_items(product_id);
+  `);
+
+  // 15. Cash Book + Receipt Vouchers (Sổ quỹ / Phiếu thu)
+  await client.query(`
+    create table if not exists cash_book (
+      id              uuid primary key default gen_random_uuid(),
+      code            text unique not null,
+      voucher_type    text not null default 'receipt'
+                     check (voucher_type in ('receipt', 'payment')),
+      payment_type    text default ''
+                     check (payment_type in ('', 'order_payment', 'supplier_payment', 'other')),
+      payment_category text default 'Tự động',
+      group_name      text default '',
+      person_name     text default '',
+      reference_code   text default '',
+      reference_type  text default '',
+      payment_method  text default 'Tiền mặt',
+      amount          numeric(18,2) not null default 0,
+      branch          text default 'Chi nhánh mặc định',
+      recorded_date   date default current_date,
+      note            text default '',
+      tags            text[] default '{}',
+      debt_change     boolean default true,
+      business_acc    boolean default true,
+      status          text not null default 'completed'
+                     check (status in ('draft', 'completed', 'cancelled')),
+      created_by      text default '',
+      created_at      timestamptz not null default now(),
+      updated_at      timestamptz not null default now()
+    );
+
+    alter table cash_book add column if not exists payment_type text default '';
+    alter table cash_book add column if not exists payment_category text default 'Tự động';
+    alter table cash_book add column if not exists payment_method text default 'Tiền mặt';
+    alter table cash_book add column if not exists branch text default 'Chi nhánh mặc định';
+    alter table cash_book add column if not exists recorded_date date default current_date;
+    alter table cash_book add column if not exists tags text[] default '{}';
+    alter table cash_book add column if not exists debt_change boolean default true;
+    alter table cash_book add column if not exists business_acc boolean default true;
+
+    create index if not exists idx_cash_book_voucher_type   on cash_book(voucher_type);
+    create index if not exists idx_cash_book_status        on cash_book(status);
+    create index if not exists idx_cash_book_reference      on cash_book(reference_code);
+    create index if not exists idx_cash_book_created_at     on cash_book(created_at desc);
+    create index if not exists idx_cash_book_group         on cash_book(group_name);
+    create index if not exists idx_cash_book_payment_type   on cash_book(payment_type);
+  `);
+} finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);
     client.release();
   }
 }
+

@@ -1,0 +1,13 @@
+▲ Next.js 16.2.7 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://0.0.0.0:3001
+- Environments: .env.local
+✓ Ready in 563ms
+Error: An IO error occurred while attempting to create and acquire the lockfile
+    at ignore-listed frames {
+  [cause]: Error: Access is denied. (os error 5)
+      at ignore-listed frames {
+    code: 'GenericFailure'
+  }
+}
+[?25h
