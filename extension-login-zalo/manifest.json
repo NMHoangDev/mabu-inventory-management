@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "Mabuu Zalo Login Extension",
+  "version": "2.0.0",
+  "description": "Capture Zalo Web cookies and sync visible Zalo Web messages to Markee.",
+  "permissions": [
+    "activeTab",
+    "cookies",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://chat.zalo.me/*",
+    "https://*.zalo.me/*",
+    "https://zalo.me/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://localhost/*",
+    "https://127.0.0.1/*",
+    "https://auto-fb.zenithglobal.dev/*",
+    "https://seeding.zenithglobal.dev/*",
+    "https://seeding.markeeai.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://localhost/*",
+        "https://127.0.0.1/*",
+        "https://auto-fb.zenithglobal.dev/*",
+        "https://seeding.zenithglobal.dev/*",
+        "https://seeding.markeeai.com/*"
+      ],
+      "js": [
+        "page-bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://chat.zalo.me/*"
+      ],
+      "js": [
+        "zalo-content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Markee Zalo",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
+}

@@ -1,0 +1,17 @@
+.git
+.gitignore
+.venv
+venv
+venv/
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+.pytest_cache
+.mypy_cache
+.vscode
+.env
+storage/linkedin_state.json
+data/raw
+data/output

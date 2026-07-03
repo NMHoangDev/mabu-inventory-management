@@ -1,0 +1,46 @@
+{
+  "type": [
+    {
+      "name": "KOL/Influencer",
+      "desc": "Cá nhân có sức ảnh hưởng lớn",
+      "platform": "Linkedin"
+    },
+    {
+      "name": "Community",
+      "desc": "Các hội nhóm, cộng đồng ngành",
+      "platform": "Linkedin"
+    }
+  ],
+  "industry": [
+    {
+      "industry_name": "Information Technology",
+      "status": "active"
+    },
+    {
+      "industry_name": "Marketing & Advertising",
+      "status": "active"
+    }
+  ],
+  "tier": [
+    {
+      "tier_level": "Tier 1",
+      "budget": "High"
+    },
+    {
+      "tier_level": "Tier 2",
+      "budget": "Medium"
+    }
+  ],
+  "team": [
+    {
+      "team_name": "Growth Team",
+      "leader": "Minh Hoang"
+    }
+  ],
+  "icp": [
+    {
+      "target": "Founder / CEO",
+      "geo": "US/UK"
+    }
+  ]
+}

@@ -12,6 +12,7 @@
   "dependencies": {
     "@google/genai": "^2.8.0",
     "@supabase/supabase-js": "^2.107.0",
+    "@tanstack/react-virtual": "^3.14.5",
     "exceljs": "^4.4.0",
     "lucide-react": "^0.468.0",
     "next": "^16.2.7",

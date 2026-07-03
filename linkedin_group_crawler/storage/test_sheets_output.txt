@@ -1,0 +1,11 @@
+seeding_content_kpi rows:
+Row 0: ['email_member', 'name', 'url_profile', 'platform', 'content', 'link_post', 'verify', 'day']
+Row 1: ['ngminhhoang0934@gmail.com', 'Nguyễn Minh Hoàng', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'facebook', '', 'https://www.facebook.com/groups/vieclamcnttdanangnew/permalink/35628934040085309/', 'Chưa seeding']
+Row 2: ['ngminhhoang0934@gmail.com', 'Nguyễn Minh Hoàng', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'facebook', '.', 'https://www.facebook.com/groups/vieclamcnttdanangnew/permalink/35628934040085309/', 'Đã seeding']
+Row 3: ['ngminhhoang0934@gmail.com', 'Nguyễn Minh Hoàng', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'facebook', 'tuyệt vời', 'https://www.facebook.com/permalink.php', 'Đã seeding']
+Row 4: ['ngminhhoang0934@gmail.com', 'Nguyễn Minh Hoàng', 'Nguyễn Minh Hoàng', 'facebook', '', 'https://www.facebook.com/sapp.cfaonline/posts/pfbid0zdVaynbE4GEoHJXx8rrfuc6Z1evsqKfUgmati5EwdRbCa6Nc5jMysr7NpNzgPWtnl', 'Chưa seeding', '26-05-2026']
+Row 5: ['ngminhhoang0934@gmail.com', 'Nguyễn Minh Hoàng', 'Nguyễn Minh Hoàng', 'facebook', '', 'https://www.facebook.com/sapp.cfaonline/posts/pfbid0zdVaynbE4GEoHJXx8rrfuc6Z1evsqKfUgmati5EwdRbCa6Nc5jMysr7NpNzgPWtnl', 'Chưa seeding', '26-05-2026']
+Row 6: ['https://www.facebook.com/nguyen.minh.hoang.788828', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'Nguyễn Minh Hoàng', 'facebook', '', 'https://www.facebook.com/groups/xomdata/permalink/2027196228193871/', 'Chưa seeding', '26-05-2026']
+Row 7: ['https://www.facebook.com/nguyen.minh.hoang.788828', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'Nguyễn Minh Hoàng', 'facebook', '', 'https://www.facebook.com/groups/xomdata/permalink/2027196228193871/', 'Chưa seeding', '26-05-2026']
+Row 8: ['https://www.facebook.com/nguyen.minh.hoang.788828', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'facebook', '', 'https://www.facebook.com/groups/xomdata/permalink/2027196228193871/', 'Chưa seeding', '26-05-2026']
+Row 9: ['https://www.facebook.com/nguyen.minh.hoang.788828', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'https://www.facebook.com/nguyen.minh.hoang.788828', 'facebook', '', 'https://www.facebook.com/groups/xomdata/permalink/2027196228193871/', 'Chưa seeding', '26-05-2026']

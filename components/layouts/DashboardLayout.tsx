@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { ReactNode, useState } from "react";
 import Link from "next/link";
@@ -22,8 +22,9 @@ import {
   Users,
   X,
   Wallet,
-  Sparkles,
-  Zap
+  Zap,
+  MessageSquare,
+  Sparkles
 } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
 
@@ -32,6 +33,7 @@ const navItems = [
   { key: "scan", path: "/scan", label: "Scan & tài liệu", group: "Hóa đơn", icon: FileSpreadsheet },
   { key: "summary", path: "/summary", label: "Tổng hợp", group: "Hóa đơn", icon: Table2 },
   { key: "documents", path: "/documents", label: "Tài liệu hóa đơn", group: "Hóa đơn", icon: FileText },
+  { key: "zalo", path: "/zalo", label: "Zalo Social", group: "Zalo Social", icon: MessageSquare },
   {
     key: "customers", path: "/customers", label: "Khách hàng", group: "Khách hàng", icon: Users,
     subItems: [

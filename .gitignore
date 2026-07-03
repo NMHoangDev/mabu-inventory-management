@@ -40,3 +40,19 @@ Thumbs.db
 FlowScan Pro/
 LOVABLE_PROMPT.md
 6KP
+
+# Additional logs
+*.log
+!dev.log
+!dev.err.log
+
+# Actually just ignore all local logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/

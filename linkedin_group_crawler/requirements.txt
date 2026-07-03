@@ -1,0 +1,27 @@
+fastapi
+# Cần [standard] để WebSocket (/facebook/api/v1/ws/CrawlFbForFE) hoạt động (websockets + wsproto)
+uvicorn[standard]
+websockets>=12.0
+playwright
+python-dotenv
+pydantic
+pydantic-settings
+python-multipart
+httpx
+pytest
+google-api-python-client
+google-auth
+# nguyen
+playwright-stealth==1.0.6
+pyotp
+gspread
+apscheduler
+pyngrok
+gspread_asyncio
+# Supabase
+supabase>=2.0.0
+# Auth
+bcrypt
+python-jose[cryptography]
+loguru
+asyncssh
