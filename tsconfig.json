@@ -25,6 +25,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@/invoice-flow-manager-fe/*": [
+        "./*"
       ]
     }
   },
@@ -32,6 +35,8 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
+    "invoice-flow-manager-fe/.next/types/**/*.ts",
+    "invoice-flow-manager-fe/.next/dev/types/**/*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],

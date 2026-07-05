@@ -60,7 +60,9 @@ export interface PurchaseOrder {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  invoice_document_id: string | null;
   items: PurchaseOrderItem[];
+  linked_goods_receipts?: Array<{ id: string; code: string; receipt_status: string }>;
 }
 
 export interface PurchaseOrderListRow {
@@ -149,6 +151,7 @@ function rowToOrder(row: any, items: any[]): PurchaseOrder {
     created_at: row.created_at,
     updated_at: row.updated_at,
     completed_at: row.completed_at,
+    invoice_document_id: row.invoice_document_id ?? null,
     items: items.map((it) => ({
       id: it.id,
       product_id: it.product_id,
@@ -199,16 +202,33 @@ export async function getPurchaseOrder(id: string): Promise<PurchaseOrder | null
   if (!isDatabaseConfigured) return null;
   await ensureDatabase();
   const pool = getPool();
-  const orderResult = await pool.query(
-    `select * from purchase_orders where id = $1 or code = $1 limit 1`,
-    [id]
-  );
+
+  // Detect UUID vs text-code to avoid "operator does not exist: text = uuid"
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+  const orderResult = isUuid
+    ? await pool.query(`select * from purchase_orders where id = $1::uuid limit 1`, [id])
+    : await pool.query(`select * from purchase_orders where code = $1 limit 1`, [id]);
   if (orderResult.rows.length === 0) return null;
   const itemsResult = await pool.query(
     `select * from purchase_order_items where purchase_order_id = $1 order by position asc, created_at asc`,
     [orderResult.rows[0].id]
   );
-  return rowToOrder(orderResult.rows[0], itemsResult.rows);
+  const order = rowToOrder(orderResult.rows[0], itemsResult.rows);
+  // Linked goods_receipts (for "Đã tạo đơn nhập hàng X" reference)
+  const grRes = await pool.query(
+    `select id, code, receipt_status
+       from goods_receipts
+      where purchase_order_id = $1
+      order by created_at desc`,
+    [order.id]
+  );
+  order.linked_goods_receipts = grRes.rows.map((r: any) => ({
+    id: String(r.id),
+    code: String(r.code),
+    receipt_status: String(r.receipt_status)
+  }));
+  return order;
 }
 
 export async function getNextPurchaseOrderCode(): Promise<string> {
@@ -252,6 +272,8 @@ export async function createPurchaseOrder(input: CreatePurchaseOrderInput): Prom
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // Advisory lock tránh race condition khi generate code tự động.
+    await client.query("select pg_advisory_xact_lock(hashtext('purchase_order_code'))");
 
     const code = await getNextPurchaseOrderCode();
 

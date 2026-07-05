@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-import { AppProvider } from "@/components/providers/AppProvider";
+import { AppProvider } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 
 export const metadata: Metadata = {
   title: "InvoiceFlow Manager",

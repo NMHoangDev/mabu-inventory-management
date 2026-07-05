@@ -336,16 +336,26 @@ export async function createOrder(input: OrderInput): Promise<Order> {
     }
 
     // Update customer stats
+    // Trước khi cộng stats, verify customer tồn tại — nếu id không match, UPDATE
+    // silently no-op và stats sẽ bị lệch (mỗi đơn sẽ "tăng" total của 1 customer ảo).
     if (order.customer_id) {
-      await client.query(
-        `update customers set
-          total_orders = coalesce(total_orders, 0) + 1,
-          total_spent = coalesce(total_spent, 0) + $2,
-          last_order_at = now(),
-          updated_at = now()
-         where id = $1`,
-        [order.customer_id, total]
+      const customerRes = await client.query(
+        `select id from customers where id = $1::uuid limit 1`,
+        [order.customer_id]
       );
+      if (customerRes.rows.length > 0) {
+        await client.query(
+          `update customers set
+            total_orders = coalesce(total_orders, 0) + 1,
+            total_spent = coalesce(total_spent, 0) + $2,
+            last_order_at = now(),
+            updated_at = now()
+           where id = $1::uuid`,
+          [order.customer_id, total]
+        );
+      } else {
+        console.warn(`[createOrder] customer_id=${order.customer_id} không tồn tại, bỏ qua cập nhật stats`);
+      }
     }
 
     await client.query("commit");
@@ -477,8 +487,30 @@ export async function deleteOrder(id: string): Promise<boolean> {
   if (!isDatabaseConfigured) return false;
   await ensureDatabase();
   const pool = getPool();
-  const res = await pool.query(`delete from orders where id = $1`, [id]);
+  // Lấy customer_id + total TRƯỚC khi xóa để hoàn lại stats. Nếu không, stats
+  // (total_orders, total_spent) sẽ bị lệch dần sau mỗi lần xóa đơn.
+  const before = await pool.query(
+    `select customer_id, total from orders where id = $1::uuid limit 1`,
+    [id]
+  );
+  if (before.rows.length === 0) return false;
+  const { customer_id, total } = before.rows[0];
+  const res = await pool.query(`delete from orders where id = $1::uuid`, [id]);
   if ((res.rowCount ?? 0) > 0) {
+    if (customer_id) {
+      await pool
+        .query(
+          `update customers set
+             total_orders = greatest(coalesce(total_orders, 0) - 1, 0),
+             total_spent  = greatest(coalesce(total_spent, 0) - $2, 0),
+             updated_at   = now()
+           where id = $1::uuid`,
+          [customer_id, Number(total ?? 0)]
+        )
+        .catch((err) => {
+          console.warn(`[deleteOrder] rollback customer stats failed:`, err);
+        });
+    }
     await logActivity("order", `Xoá đơn hàng ${id}`);
   }
   return (res.rowCount ?? 0) > 0;

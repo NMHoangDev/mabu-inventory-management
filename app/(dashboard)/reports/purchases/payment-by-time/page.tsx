@@ -13,7 +13,7 @@ import {
   SvgBarChart,
   SvgLineChart,
   SummaryCard,
-} from "@/components/reports/ReportShell";
+} from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPaymentByTime } from "@/services/reportService";
 
 export default function PaymentByTimePage() {

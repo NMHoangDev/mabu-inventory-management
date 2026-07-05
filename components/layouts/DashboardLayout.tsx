@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { ReactNode, useState } from "react";
 import Link from "next/link";
@@ -13,12 +13,14 @@ import {
   FileText,
   LayoutDashboard,
   Menu,
+  MessageCircle,
   Package,
   Search,
   ShoppingCart,
   Settings,
   Table2,
   Truck,
+  UserCog,
   Users,
   X,
   Wallet,
@@ -26,6 +28,7 @@ import {
   Zap
 } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
+import StaffBadge from "@/components/layouts/StaffBadge";
 
 const navItems = [
   { key: "dashboard", path: "/", label: "Dashboard", group: "Tổng quan", icon: LayoutDashboard },
@@ -58,6 +61,12 @@ const navItems = [
       { key: "suppliers-list", path: "/suppliers", label: "Tất cả nhà cung cấp" },
       { key: "suppliers-groups", path: "/suppliers/groups", label: "Nhóm nhà cung cấp" }
     ]
+  },
+  {
+    key: "zalo-notify", path: "/thong-bao-zalo", label: "Thông báo Zalo", group: "Vận hành", icon: MessageCircle
+  },
+  {
+    key: "zalo-accounts", path: "/zalo/accounts", label: "Quản lý TK Zalo", group: "Hệ thống", icon: UserCog
   },
   {
     key: "orders", path: "/orders", label: "Đơn hàng", group: "Vận hành", icon: ShoppingCart,
@@ -290,9 +299,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
               <Bell className="h-4 w-4" />
               {errorDocuments > 0 ? <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-destructive" /> : null}
             </button>
-            <div className="brand-gradient grid h-9 w-9 place-items-center rounded-full text-xs font-semibold text-primary-foreground shadow-elegant">
-              NV
-            </div>
+            <StaffBadge />
           </div>
         </header>
 

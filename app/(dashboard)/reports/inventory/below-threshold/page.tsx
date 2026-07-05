@@ -12,7 +12,7 @@ import {
   ReportTable,
   SvgBarChart,
   SummaryCard,
-} from "@/components/reports/ReportShell";
+} from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchBelowThreshold } from "@/services/reportService";
 
 const URGENT_STYLE: Record<string, string> = {

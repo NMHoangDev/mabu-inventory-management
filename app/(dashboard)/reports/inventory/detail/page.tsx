@@ -11,7 +11,7 @@ import {
   ReportShell,
   ReportTable,
   SummaryCard,
-} from "@/components/reports/ReportShell";
+} from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInventoryDetail } from "@/services/reportService";
 
 const STATE_STYLE: Record<string, string> = {

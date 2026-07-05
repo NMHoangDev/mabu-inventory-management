@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useApp } from "@/components/providers/AppProvider";
+import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import {
   Plus,
   Search,

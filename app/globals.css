@@ -223,6 +223,11 @@ table,
   box-shadow: inset 0 0 0 1px var(--editable-border);
 }
 
+.sku-matched {
+  background: color-mix(in oklab, #22c55e 12%, var(--editable, white));
+  box-shadow: inset 0 0 0 1px #16a34a66;
+}
+
 .data-table thead th {
   position: sticky;
   top: 0;

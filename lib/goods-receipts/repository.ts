@@ -1,6 +1,10 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export type GoodsReceiptStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type OrderStatusType = "pending" | "in_progress" | "completed" | "cancelled";
 
@@ -160,10 +164,11 @@ export async function getGoodsReceipt(id: string): Promise<GoodsReceipt | null> 
   if (!isDatabaseConfigured) return null;
   await ensureDatabase();
   const pool = getPool();
-  const orderResult = await pool.query(
-    `select * from goods_receipts where id = $1 or code = $1 limit 1`,
-    [id]
-  );
+
+  const isUuidParam = isUuid(id);
+  const orderResult = isUuidParam
+    ? await pool.query(`select * from goods_receipts where id = $1::uuid limit 1`, [id])
+    : await pool.query(`select * from goods_receipts where code = $1 limit 1`, [id]);
   if (orderResult.rows.length === 0) return null;
   const itemsResult = await pool.query(
     `select * from goods_receipt_items where goods_receipt_id = $1 order by position asc, created_at asc`,
@@ -220,6 +225,8 @@ export async function createGoodsReceipt(input: CreateGoodsReceiptInput): Promis
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // Advisory lock tránh race condition khi generate code tự động.
+    await client.query("select pg_advisory_xact_lock(hashtext('goods_receipt_code'))");
 
     const code = input.code?.trim() || (await getNextGoodsReceiptCode());
 
@@ -320,12 +327,29 @@ export async function createGoodsReceipt(input: CreateGoodsReceiptInput): Promis
     }
 
     // Update purchase_order status if linked
-    if (input.purchase_order_id) {
+    // - Tất cả items đã nhận đủ + GR completed → PO completed
+    // - Một phần items đã nhận → PO partial
+    // - Chưa nhận gì → PO pending (giữ nguyên)
+    if (input.purchase_order_id && isUuid(input.purchase_order_id)) {
+      const itemsArr = input.items ?? [];
+      const allCompleted =
+        itemsArr.length > 0 &&
+        itemsArr.every(
+          (it) => Number(it.received_qty ?? 0) >= Number(it.ordered_qty ?? 0)
+        );
+      const anyReceived = itemsArr.some(
+        (it) => Number(it.received_qty ?? 0) > 0
+      );
+      const newPoStatus = allCompleted
+        ? "completed"
+        : anyReceived
+          ? "partial"
+          : "pending";
       await client.query(
         `update purchase_orders
            set status = $1, updated_at = now()
-         where id = $2`,
-        [orderStatus === "completed" ? "partial" : "pending", input.purchase_order_id]
+         where id = $2::uuid`,
+        [newPoStatus, input.purchase_order_id]
       ).catch(() => undefined);
     }
 
@@ -373,11 +397,77 @@ export async function searchProductsForReceipt(query: string): Promise<GoodsRece
     [q]
   );
   return result.rows.map((row) => ({
-    product_id: row.product_id,
-    sku: str(row.sku),
-    product_name: str(row.product_name),
-    unit: str(row.unit),
-    image_url: str(row.image_url),
-    default_cost: num(row.default_cost)
+    product_id: String(row.product_id),
+    sku: String(row.sku ?? ""),
+    product_name: String(row.product_name ?? ""),
+    unit: String(row.unit ?? ""),
+    image_url: String(row.image_url ?? ""),
+    default_cost: Number(row.default_cost ?? 0)
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Used by scan modal: search products by SKU OR name (LIKE), returning stock so
+// the frontend can show "tồn: X" alongside each option. Lighter than the goods-
+// receipt variant because scan only needs id/sku/name/unit/stock.
+// ---------------------------------------------------------------------------
+export interface ScanProductSearchHit {
+  id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  stock: number;
+}
+
+export async function searchProductsForScan(query: string, limit = 15): Promise<ScanProductSearchHit[]> {
+  if (!isDatabaseConfigured) return [];
+  const trimmed = query.trim();
+  if (trimmed.length < 1) return [];
+  await ensureDatabase();
+  const pool = getPool();
+  const q = `%${trimmed}%`;
+  // Prioritize exact SKU match (sku = $2 ILIKE upper/lower) over name match by
+  // ordering SKU equality first. Empty sku (no SKU column) goes last.
+  const result = await pool.query(
+    `select p.id, p.sku, p.name, p.unit, coalesce(p.stock, 0) as stock
+       from products p
+      where p.sku ilike $1 or p.name ilike $1
+      order by
+        case when lower(p.sku) = lower($2) then 0 else 1 end,
+        case when lower(p.name) = lower($2) then 0 else 1 end,
+        p.name asc
+      limit $3`,
+    [q, trimmed, Math.max(1, Math.min(limit, 50))]
+  );
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    sku: String(row.sku ?? ""),
+    name: String(row.name ?? ""),
+    unit: String(row.unit ?? ""),
+    stock: Number(row.stock ?? 0)
+  }));
+}
+
+// Look up a single product by exact SKU. Returns null when not found.
+// Used as a fast path in the scan modal: row's SKU already exists → return it.
+export async function findProductByExactSku(sku: string): Promise<ScanProductSearchHit | null> {
+  if (!isDatabaseConfigured || sku.trim().length === 0) return null;
+  await ensureDatabase();
+  const pool = getPool();
+  const result = await pool.query(
+    `select id, sku, name, unit, coalesce(stock, 0) as stock
+       from products
+      where sku = $1
+      limit 1`,
+    [sku.trim()]
+  );
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
+  return {
+    id: String(row.id),
+    sku: String(row.sku ?? ""),
+    name: String(row.name ?? ""),
+    unit: String(row.unit ?? ""),
+    stock: Number(row.stock ?? 0)
+  };
 }

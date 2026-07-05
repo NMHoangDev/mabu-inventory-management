@@ -1,10 +1,11 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Download, FileText, History, Loader2, Table2, Trash2, UploadCloud, X } from "lucide-react";
-import { useApp } from "@/components/providers/AppProvider";
-import type { ScanJobFileView } from "@/components/providers/AppProvider";
+import { CheckCircle2, Download, FileText, History, Loader2, PackagePlus, Table2, Trash2, UploadCloud, X } from "lucide-react";
+import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
+import type { ScanJobFileView } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import type { AppStore, InvoiceDocument, InvoiceRow } from "@/lib/shared/schema";
+import ScanReceiptOptionsModal from "@/app/(dashboard)/scan/components/ScanReceiptOptionsModal";
 
 type QueuedFileStatus = "checking" | "new" | "duplicate" | "restore" | "retry";
 
@@ -150,6 +151,7 @@ export default function ScanPage() {
   const [exportingExcelTarget, setExportingExcelTarget] = useState<"" | "batch" | "panel">("");
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false);
   const [selectedPanelDocumentIds, setSelectedPanelDocumentIds] = useState<string[]>([]);
+  const [receiptModalDocumentId, setReceiptModalDocumentId] = useState<string | null>(null);
   const scanning = scanJob.running;
   const scanBatchFiles = scanJob.batchFiles;
 
@@ -613,7 +615,7 @@ export default function ScanPage() {
                   );
                 })}
               </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-md border bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-secondary disabled:opacity-50"
@@ -622,6 +624,23 @@ export default function ScanPage() {
                 >
                   {exportingExcelTarget === "batch" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                   {exportingExcelTarget === "batch" ? "Đang tạo Excel..." : "Tải Excel"}
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={selectedBatchFiles.length === 0}
+                  title="Tạo đơn đặt hàng + đơn nhập hàng từ file scan (1 file/lần)"
+                  onClick={() => {
+                    const target = selectedBatchFiles[0]?.document;
+                    if (!target) return;
+                    if (selectedBatchFiles.length > 1) {
+                      setNotice("Chỉ xử lý 1 file mỗi lần. Vui lòng chọn 1 file đã scan.");
+                    }
+                    setReceiptModalDocumentId(target.id);
+                  }}
+                >
+                  <PackagePlus className="h-4 w-4" />
+                  Tạo đơn đặt hàng
                 </button>
                 <button
                   type="button"
@@ -844,6 +863,13 @@ export default function ScanPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {receiptModalDocumentId ? (
+        <ScanReceiptOptionsModal
+          documentId={receiptModalDocumentId}
+          onClose={() => setReceiptModalDocumentId(null)}
+        />
       ) : null}
     </section>
   );

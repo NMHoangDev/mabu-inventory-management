@@ -1,17 +1,18 @@
 "use client";
 
-import { useMemo, useState, MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  CheckCircle2,
+  Check,
   ChevronDown,
   ChevronUp,
   Download,
   FileText,
   Filter,
-  Plus,
+  Loader2,
+  PackagePlus,
   RotateCcw,
   Search,
   Trash2,
@@ -19,7 +20,9 @@ import {
 } from "lucide-react";
 import { excelColumns, type ExcelColumnKey, type InvoiceRow, type InvoiceDocument } from "@/lib/shared/schema";
 import { calculateVatFields, normalizeDateForInput, normalizeFinancials, normalizeNumberText, parseNumeric } from "@/lib/shared/format";
-import { useApp } from "@/components/providers/AppProvider";
+import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
+import type { Lookups } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
+import ScanReceiptOptionsModal from "@/app/(dashboard)/scan/components/ScanReceiptOptionsModal";
 
 type Filters = {
   file: string;
@@ -109,6 +112,23 @@ function fileSizeLabel(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function productLookupBySku(products: Lookups["products"], sku: string) {
+  const trimmed = sku.trim().toLowerCase();
+  if (!trimmed) return null;
+  return products.find((p) => String(p.sku ?? "").trim().toLowerCase() === trimmed) ?? null;
+}
+
+function productCanonicalName(product: NonNullable<ReturnType<typeof productLookupBySku>>) {
+  // Legacy `Lookups.products` (product_catalog) chỉ có retailName/adjustedInvoiceName/
+  // inputProductName. Một số nơi vẫn truyền ProductSummary có thêm `name` (từ
+  // /api/products/search). Ưu tiên `name` trước để hiển thị đúng tên thật.
+  const anyProduct = product as unknown as { name?: string | null };
+  return (
+    String(anyProduct.name ?? "") ||
+    String(product.retailName || product.adjustedInvoiceName || product.inputProductName || "")
+  );
+}
+
 function documentProgressText(document: InvoiceDocument) {
   const original = document.originalRowCount || document.rowCount;
   if (document.deletedRowCount > 0) return `${document.rowCount}/${original} dòng · đã xóa ${document.deletedRowCount}`;
@@ -116,7 +136,7 @@ function documentProgressText(document: InvoiceDocument) {
 }
 
 export default function SummaryPage() {
-  const { store, setStore, lookups, setError, setNotice, confirmAction, refreshLookups } = useApp();
+  const { store, setStore, lookups, setError, setNotice, confirmAction } = useApp();
 
   const [filters, setFilters] = useState<Filters>({
     file: "",
@@ -132,13 +152,21 @@ export default function SummaryPage() {
   const [summaryColumnWidths, setSummaryColumnWidths] = useState(defaultSummaryColumnWidths);
   const [summarySort, setSummarySort] = useState<SummarySort>(null);
   const [vatDrafts, setVatDrafts] = useState<Record<string, string>>({});
-  const [syncingProductRowIds, setSyncingProductRowIds] = useState<string[]>([]);
   const [vatConfirm, setVatConfirm] = useState<{
     rowId: string;
     previousRate: string;
     nextRate: string;
     preview: InvoiceRow;
   } | null>(null);
+  // Khi user bấm "Tạo đơn đặt hàng nhập" trên 1 dòng → mở modal ScanReceiptOptionsModal
+  // cho documentId của dòng đó. Modal có menu 2 options + tạo PO + đơn nhập hàng
+  // ở trạng thái "chờ" → cộng tồn kho chỉ khi user hoàn thành đơn nhập hàng.
+  const [receiptModalDocumentId, setReceiptModalDocumentId] = useState<string | null>(null);
+  // Khi user click vào 1 ô trống (mã SP / tên bán lẻ / tên chỉnh lại xuất hóa đơn
+  // / tên hàng hóa / đơn vị) → mở SummaryProductLinkModal cho dòng đó. Modal có
+  // menu 2 options: "đã có trong danh sách" (search dropdown) hoặc "chưa có"
+  // (điền tay 3 cột còn thiếu, mã SKU tự tạo với prefix "SKU" nếu bỏ trống).
+  const [linkModalRowId, setLinkModalRowId] = useState<string | null>(null);
 
   const appliedDocuments = useMemo(() => store.documents.filter((document) => document.appliedToSummary), [store.documents]);
   const appliedDocumentIds = useMemo(() => new Set(appliedDocuments.map((document) => document.id)), [appliedDocuments]);
@@ -330,87 +358,6 @@ export default function SummaryPage() {
 
   const cleanText = (value: unknown) => String(value ?? "").trim();
 
-  const missingProductFields = (row: InvoiceRow) => {
-    const fields = [
-      ["MÃ SẢN PHẨM", row.internalProductCode],
-      ["TÊN CHỈNH LẠI XUẤT HÓA ĐƠN", row.adjustedInvoiceName],
-      ["TÊN BÁN LẺ", row.retailName],
-      ["Tên hàng hóa đầu vào", row.inputProductName],
-      ["ĐƠN VỊ TÍNH", row.unit],
-      ["SỐ LƯỢNG", parseNumeric(row.quantity) && (parseNumeric(row.quantity) ?? 0) > 0 ? row.quantity : ""]
-    ] as const;
-    return fields.filter(([, value]) => !cleanText(value)).map(([label]) => label);
-  };
-
-  const addRowToProducts = async (row: InvoiceRow) => {
-    if (isProductSyncedRow(row)) {
-      setNotice(`Dòng này đã được thêm vào sản phẩm/kho trước đó. Không cộng tồn kho lại để tránh trùng.`);
-      return;
-    }
-
-    const missing = missingProductFields(row);
-    if (missing.length > 0) {
-      setError(`Chưa thể thêm sản phẩm. Vui lòng nhập đủ: ${missing.join(", ")}.`);
-      return;
-    }
-
-    const sku = cleanText(row.internalProductCode);
-    const quantity = parseNumeric(row.quantity) ?? 0;
-    const unit = cleanText(row.unit);
-    const existingProduct = lookups.products.find((product) => cleanText(product.sku).toLowerCase() === sku.toLowerCase());
-    const existingName = existingProduct
-      ? cleanText(existingProduct.retailName) || cleanText(existingProduct.adjustedInvoiceName) || cleanText(existingProduct.inputProductName)
-      : "";
-    const incomingName = cleanText(row.retailName) || cleanText(row.adjustedInvoiceName) || cleanText(row.inputProductName);
-    const nameDiffers =
-      Boolean(existingName && incomingName && existingName.toLowerCase() !== incomingName.toLowerCase());
-    const unitDiffers =
-      Boolean(existingProduct && cleanText(existingProduct.unit) && unit && cleanText(existingProduct.unit).toLowerCase() !== unit.toLowerCase());
-    const productConflictLines = [
-      nameDiffers ? `Tên đang có: ${existingName}` : "",
-      nameDiffers ? `Tên dòng scan: ${incomingName}` : "",
-      unitDiffers ? `Đơn vị đang có: ${cleanText(existingProduct?.unit)}` : "",
-      unitDiffers ? `Đơn vị dòng scan: ${unit}` : ""
-    ].filter(Boolean);
-    const confirmed = await confirmAction({
-      title: existingProduct ? `Cộng tồn kho cho SKU ${sku}?` : `Tạo sản phẩm mới từ SKU ${sku}?`,
-      description: existingProduct
-        ? [
-            "SKU này đã có trong Sản phẩm / SKU.",
-            productConflictLines.length > 0
-              ? `Thông tin dòng scan khác sản phẩm đang có:\n${productConflictLines.join("\n")}`
-              : "",
-            `Hệ thống sẽ cộng thêm ${fmtNumber(quantity)} ${unit} vào tồn kho của SKU hiện có, không tạo sản phẩm mới và không tự đổi tên/đơn vị.`,
-            "Muốn chỉnh tên hoặc đơn vị thì sửa trong trang Sản phẩm / SKU."
-          ]
-            .filter(Boolean)
-            .join("\n")
-        : `Hệ thống sẽ tạo sản phẩm mới và nhập kho ${fmtNumber(quantity)} ${unit} từ dòng hóa đơn này.`,
-      confirmLabel: existingProduct ? "Cộng tồn kho" : "Tạo và nhập kho",
-      tone: "primary"
-    });
-    if (!confirmed) return;
-
-    setSyncingProductRowIds((current) => [...current, row.id]);
-    try {
-      const response = await fetch("/api/products/from-invoice-row", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowIds: [row.id] })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? "Không thêm được sản phẩm.");
-
-      if (data.store) setStore(data.store);
-      await refreshLookups();
-      setNotice(data.message ?? `Đã đưa SKU ${sku} vào sản phẩm/kho.`);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Không thêm được sản phẩm.");
-    } finally {
-      setSyncingProductRowIds((current) => current.filter((id) => id !== row.id));
-    }
-  };
-
   const requestVatRateChange = (row: InvoiceRow, nextRateValue: string) => {
     if (vatConfirm) return;
     const nextRate = normalizeNumberText(nextRateValue);
@@ -501,12 +448,32 @@ export default function SummaryPage() {
     });
   };
 
+  const editableCells = new Set<ExcelColumnKey>([
+    "internalProductCode",
+    "retailName",
+    "adjustedInvoiceName",
+    "inputProductName",
+    "unit"
+  ]);
+  const tryOpenLinkModal = (row: InvoiceRow, key: ExcelColumnKey) => {
+    if (!editableCells.has(key)) return;
+    const value = row[key];
+    // Chỉ mở modal khi ô đang TRỐNG. Nếu đã có giá trị → user click để sửa trực tiếp.
+    if (String(value ?? "").trim()) return;
+    setLinkModalRowId(row.id);
+  };
+
   const renderCell = (row: InvoiceRow, key: ExcelColumnKey) => {
     const value = row[key] ?? "";
     const shouldHighlightManualField = internalKeys.has(key) && !cleanText(value);
     const className = `table-field ${shouldHighlightManualField ? "manual-field" : ""} ${
       numericKeys.has(key) ? "text-right tabular-nums" : ""
     }`;
+
+    // Ô "trống" của các cột có thể gắn SP → bọc trong 1 clickable overlay mở modal.
+    // Khi user click vào input thì focus vào input để gõ; click vào overlay thì mở modal.
+    const empty = !cleanText(value);
+    const showOverlay = empty && editableCells.has(key);
 
     if (key === "invoiceDate") {
       const currentValue = normalizeDateForInput(value);
@@ -524,18 +491,68 @@ export default function SummaryPage() {
       );
     }
 
+    if (key === "internalProductCode") {
+      const currentValue = String(value);
+      const matched = productLookupBySku(lookups.products, currentValue);
+      return (
+        <div className="relative h-full w-full">
+          <input
+            key={`${row.id}-${key}-${currentValue}`}
+            className={
+              matched
+                ? `${className} sku-matched`
+                : showOverlay
+                  ? `${className} cursor-pointer border border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10`
+                  : className
+            }
+            defaultValue={currentValue}
+            placeholder={showOverlay ? "Bấm vào đây để chọn / tạo sản phẩm…" : "Mã SKU"}
+            readOnly={showOverlay}
+            onClick={() => {
+              if (showOverlay) tryOpenLinkModal(row, key);
+            }}
+            onBlur={(event) => {
+              const nextValue = event.currentTarget.value.trim();
+              if (nextValue === currentValue) return;
+              const product = productLookupBySku(lookups.products, nextValue);
+              const patch: Partial<InvoiceRow> = { internalProductCode: nextValue };
+              if (product) {
+                const canonical = productCanonicalName(product);
+                if (canonical) {
+                  patch.adjustedInvoiceName = canonical;
+                  patch.retailName = canonical;
+                }
+              }
+              commitRowPatch(row.id, patch);
+            }}
+          />
+        </div>
+      );
+    }
+
     if (key === "unit") {
       const currentValue = String(value);
       return (
-        <input
-          key={`${row.id}-${key}-${currentValue}`}
-          className={className}
-          defaultValue={currentValue}
-          onBlur={(event) => {
-            const nextValue = event.currentTarget.value;
-            if (nextValue !== currentValue) commitRowPatch(row.id, { unit: nextValue });
-          }}
-        />
+        <div className="relative h-full w-full">
+          <input
+            key={`${row.id}-${key}-${currentValue}`}
+            className={
+              showOverlay
+                ? `${className} cursor-pointer border border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10`
+                : className
+            }
+            defaultValue={currentValue}
+            placeholder={showOverlay ? "Bấm vào đây để chọn / tạo sản phẩm…" : "Đơn vị"}
+            readOnly={showOverlay}
+            onClick={() => {
+              if (showOverlay) tryOpenLinkModal(row, key);
+            }}
+            onBlur={(event) => {
+              const nextValue = event.currentTarget.value;
+              if (nextValue !== currentValue) commitRowPatch(row.id, { unit: nextValue });
+            }}
+          />
+        </div>
       );
     }
 
@@ -607,17 +624,29 @@ export default function SummaryPage() {
     }
 
     const currentValue = String(value);
+    const isTextEditable = key === "retailName" || key === "adjustedInvoiceName" || key === "inputProductName";
     return (
-      <input
-        key={`${row.id}-${key}-${currentValue}`}
-        className={className}
-        defaultValue={currentValue}
-        title={currentValue}
-        onBlur={(event) => {
-          const nextValue = event.currentTarget.value;
-          if (nextValue !== currentValue) commitRowPatch(row.id, { [key]: nextValue } as Partial<InvoiceRow>);
-        }}
-      />
+      <div className="relative h-full w-full">
+        <input
+          key={`${row.id}-${key}-${currentValue}`}
+          className={
+            showOverlay
+              ? `${className} cursor-pointer border border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10`
+              : className
+          }
+          defaultValue={currentValue}
+          title={currentValue}
+          placeholder={showOverlay ? "Bấm vào đây để chọn / tạo sản phẩm…" : (isTextEditable ? "Tên sản phẩm" : "")}
+          readOnly={showOverlay}
+          onClick={() => {
+            if (showOverlay) tryOpenLinkModal(row, key);
+          }}
+          onBlur={(event) => {
+            const nextValue = event.currentTarget.value;
+            if (nextValue !== currentValue) commitRowPatch(row.id, { [key]: nextValue } as Partial<InvoiceRow>);
+          }}
+        />
+      </div>
     );
   };
 
@@ -800,13 +829,20 @@ export default function SummaryPage() {
               <tbody>
                 {displayedRows.map((row, index) => {
                   const document = documentById.get(row.documentId);
-                  const productSynced = isProductSyncedRow(row);
-                  const rowClassName = productSynced
-                    ? "product-synced-row"
-                    : isNoTaxRow(row)
-                      ? "no-tax-row"
-                      : "odd:bg-white even:bg-slate-50/40";
-                  const syncingProduct = syncingProductRowIds.includes(row.id);
+                  const hasGoodsReceipt = !!row.goodsReceiptId;
+                  const hasPurchaseOrder = !!row.purchaseOrderId;
+                  // Ưu tiên: GR > PO > bình thường
+                  const rowClassName = isNoTaxRow(row)
+                    ? hasGoodsReceipt
+                      ? "no-tax-row bg-emerald-50/70 hover:bg-emerald-50"
+                      : hasPurchaseOrder
+                        ? "no-tax-row bg-blue-50/70 hover:bg-blue-50"
+                        : "no-tax-row"
+                    : hasGoodsReceipt
+                      ? "bg-emerald-50/70 hover:bg-emerald-50"
+                      : hasPurchaseOrder
+                        ? "bg-blue-50/70 hover:bg-blue-50"
+                        : "odd:bg-white even:bg-slate-50/40";
 
                   return (
                   <tr key={row.id} className={`${rowClassName} hover:bg-accent/40`}>
@@ -816,11 +852,28 @@ export default function SummaryPage() {
                         <div className="truncate" title={row.sourceFileName}>
                           {row.sourceFileName}
                         </div>
-                        {document?.deletedRowCount ? (
-                          <div className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                            Đã xóa {document.deletedRowCount} dòng
-                          </div>
-                        ) : null}
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {hasGoodsReceipt ? (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"
+                              title={`Đã tạo đơn nhập hàng${row.goodsReceiptId ? ` (${row.goodsReceiptId.slice(0, 8)}…)` : ""}`}
+                            >
+                              ✓ Đã tạo đơn nhập hàng
+                            </span>
+                          ) : hasPurchaseOrder ? (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700"
+                              title={`Đã tạo đơn đặt hàng nhập (${row.purchaseOrderId.slice(0, 8)}…)`}
+                            >
+                              ↻ Đơn đặt hàng chờ
+                            </span>
+                          ) : null}
+                          {document?.deletedRowCount ? (
+                            <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                              Đã xóa {document.deletedRowCount} dòng
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </td>
                     {excelColumns.map((column) => (
@@ -831,16 +884,13 @@ export default function SummaryPage() {
                     <td className="border-b border-slate-200 px-2 py-2 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button
-                          className={`rounded-lg p-2 ${
-                            productSynced
-                              ? "text-emerald-700 hover:bg-emerald-50"
-                              : "text-primary hover:bg-blue-50"
-                          } disabled:cursor-not-allowed disabled:opacity-60`}
-                          disabled={syncingProduct}
-                          onClick={() => addRowToProducts(row)}
-                          title={productSynced ? "Dòng này đã thêm vào sản phẩm/kho" : "Thêm dòng này vào Sản phẩm / SKU và cộng tồn kho"}
+                          className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={!row.documentId}
+                          onClick={() => setReceiptModalDocumentId(row.documentId)}
+                          title="Tạo đơn đặt hàng nhập + đơn nhập hàng từ dòng scan. Tồn kho chỉ cộng khi đơn nhập hàng hoàn thành."
                         >
-                          {productSynced ? <CheckCircle2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                          <PackagePlus className="h-4 w-4" />
+                          Tạo đơn nhập
                         </button>
                         <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => deleteRow(row.id)} title="Xóa dòng scan nhầm">
                           <Trash2 className="h-4 w-4" />
@@ -954,6 +1004,538 @@ export default function SummaryPage() {
           </div>
         </div>
       ) : null}
+
+      {receiptModalDocumentId ? (
+        <ScanReceiptOptionsModal
+          documentId={receiptModalDocumentId}
+          onClose={() => setReceiptModalDocumentId(null)}
+        />
+      ) : null}
+
+      {linkModalRowId ? (() => {
+        const linkRow = store.rows.find((item) => item.id === linkModalRowId);
+        if (!linkRow) return null;
+        return (
+          <SummaryProductLinkModal
+            row={linkRow}
+            products={lookups.products}
+            onClose={() => setLinkModalRowId(null)}
+            onApply={async (patch) => {
+              // Merge patch vào store + gọi PATCH /api/rows/:id.
+              // Trả về true/false để modal biết có close hay không.
+              try {
+                setStore((current) => ({
+                  ...current,
+                  rows: current.rows.map((row) =>
+                    row.id === linkRow.id ? normalizeFinancials({ ...row, ...patch }) : row
+                  )
+                }));
+                const res = await fetch(`/api/rows/${linkRow.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(patch)
+                });
+                const text = await res.text();
+                let data: { error?: string; success?: boolean } = {};
+                try { data = JSON.parse(text); } catch {
+                  throw new Error(res.ok ? "API không trả JSON hợp lệ." : `API lỗi ${res.status}.`);
+                }
+                if (!res.ok) throw new Error(data.error ?? "Không lưu được dòng.");
+                setLinkModalRowId(null);
+                return true;
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Không lưu được dòng.");
+                return false;
+              }
+            }}
+          />
+        );
+      })() : null}
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SummaryProductLinkModal — mở khi user click vào 1 ô trống trong hàng tổng
+// hợp (mã SKU / tên SP / tên bán lẻ / tên chỉnh lại / đơn vị).
+//
+// Có 2 lựa chọn:
+//   1. "Đã có sản phẩm này trong danh sách sản phẩm"
+//      → Search dropdown tìm theo tên/SKU. Có input search. Khi chọn 1 SP
+//        sẽ auto-fill: internalProductCode = SKU, inputProductName =
+//        tên hóa đơn, adjustedInvoiceName = tên chỉnh lại, retailName = tên
+//        bán lẻ, unit = đơn vị. SKU prefix "SKU" nếu SP không có SKU.
+//        Nếu SP không có field legacy (retailName/adjustedInvoiceName) thì
+//        fallback về `name` chung để 2 cột tên bán lẻ + tên chỉnh lại không
+//        bị trống.
+//   2. "Sản phẩm này chưa có trong danh sách sản phẩm"
+//      → Form cho điền 3 cột: tên SP, mã SKU (tự tạo "SKU<random>" nếu để
+//        trống, có chữ "SKU"), đơn vị. Apply thì PATCH row + auto-fill cả 3
+//        cột tên (inputProductName, retailName, adjustedInvoiceName) bằng tên
+//        user vừa nhập. Nếu retailName/adjustedInvoiceName đã có giá trị thì
+//        giữ nguyên.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ProductSummary {
+  id: string;
+  sku?: string | null;
+  name?: string | null;
+  retailName?: string | null;
+  adjustedInvoiceName?: string | null;
+  inputProductName?: string | null;
+  unit?: string | null;
+  stock?: number | null;
+}
+
+interface SummaryProductLinkModalProps {
+  row: InvoiceRow;
+  products: Lookups["products"];
+  onClose: () => void;
+  onApply: (patch: Partial<InvoiceRow>) => Promise<boolean>;
+}
+
+function SummaryProductLinkModal({
+  row,
+  products,
+  onClose,
+  onApply
+}: SummaryProductLinkModalProps) {
+  const [menuOpen, setMenuOpen] = useState(true);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [remoteResults, setRemoteResults] = useState<ProductSummary[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    name: cleanInvoice(row.inputProductName),
+    sku: cleanInvoice(row.internalProductCode),
+    unit: cleanInvoice(row.unit)
+  });
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function cleanInvoice(v: unknown): string {
+    return String(v ?? "").trim();
+  }
+
+  // Click outside: nếu đang mở menu → đóng menu (mở picker/manual nếu cần).
+  useEffect(() => {
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (menuOpen && menuRef.current && target && !menuRef.current.contains(target)) {
+        setMenuOpen(false);
+      }
+      if (pickerOpen && pickerRef.current && target && !pickerRef.current.contains(target)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen, pickerOpen]);
+
+  // ESC đóng menu/picker.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (pickerOpen) setPickerOpen(false);
+      else if (menuOpen) setMenuOpen(false);
+      else onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [menuOpen, pickerOpen, onClose]);
+
+  // Khi mở picker → fetch initial products (giúp dropdown không bao giờ trống).
+  useEffect(() => {
+    if (!pickerOpen) return;
+    void doSearch("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => void doSearch(query), 220);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, pickerOpen]);
+
+  async function doSearch(q: string) {
+    setSearching(true);
+    try {
+      // Ưu tiên SKU của dòng làm hint exact-match.
+      const skuHint = cleanInvoice(row.internalProductCode);
+      const params = new URLSearchParams({
+        q: q.trim(),
+        limit: "20"
+      });
+      if (skuHint && !q.trim()) params.set("sku", skuHint);
+      const res = await fetch(`/api/products/search?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      const exact = (data?.exact ?? null) as ProductSummary | null;
+      const rest = Array.isArray(data?.results) ? (data.results as ProductSummary[]) : [];
+      const merged: ProductSummary[] = [];
+      const seen = new Set<string>();
+      const push = (p: ProductSummary | null) => {
+        if (!p || seen.has(p.id)) return;
+        seen.add(p.id);
+        merged.push(p);
+      };
+      push(exact);
+      rest.forEach(push);
+      setRemoteResults(merged);
+    } catch {
+      // ignore
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  const handlePickExisting = () => {
+    setMenuOpen(false);
+    setPickerOpen(true);
+  };
+
+  const handlePickNew = () => {
+    setMenuOpen(false);
+    setManualOpen(true);
+  };
+
+  // Tự tạo mã SKU nếu để trống — phải có chữ "SKU" ở đầu.
+  function autoSku(): string {
+    const ts = Date.now().toString(36).toUpperCase();
+    const rand = Math.floor(Math.random() * 1000)
+      .toString(36)
+      .toUpperCase()
+      .padStart(2, "0");
+    return `SKU-${ts}${rand}`;
+  }
+
+  async function applyPick(product: ProductSummary) {
+    setSubmitting(true);
+    try {
+      // Đảm bảo SKU có chữ "SKU" ở đầu — nếu SP không có SKU thì tự tạo.
+      const rawSku = cleanInvoice(product.sku) || autoSku();
+      const sku = /^SKU/i.test(rawSku) ? rawSku : `SKU-${rawSku.replace(/^[^A-Z0-9]+/i, "")}`;
+      // /api/products/search chỉ trả về `product.name` (từ bảng products).
+      // Ưu tiên `name` trước; nếu API cũ chỉ trả legacy fields thì fallback
+      // từng bước (inputProductName → retailName → adjustedInvoiceName).
+      const productDisplayName =
+        cleanInvoice(product.name) ||
+        cleanInvoice(product.inputProductName) ||
+        cleanInvoice(product.retailName) ||
+        cleanInvoice(product.adjustedInvoiceName);
+      // Auto-fill: luôn fill cả 3 cột tên (tên hàng đầu vào + tên bán lẻ + tên
+      // chỉnh lại) + đơn vị từ SP user vừa chọn. Nếu SP không có field legacy
+      // nào thì fallback về `name` chung để các cột không bị trống.
+      const legacyRetail = cleanInvoice(product.retailName);
+      const legacyAdjusted = cleanInvoice(product.adjustedInvoiceName);
+      const patch: Partial<InvoiceRow> = {
+        internalProductCode: sku,
+        inputProductName: productDisplayName || cleanInvoice(row.inputProductName),
+        adjustedInvoiceName: legacyAdjusted || legacyRetail || productDisplayName || cleanInvoice(row.adjustedInvoiceName),
+        retailName: legacyRetail || productDisplayName || cleanInvoice(row.retailName),
+        unit: cleanInvoice(product.unit) || cleanInvoice(row.unit)
+      };
+      const ok = await onApply(patch);
+      if (ok) setPickerOpen(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function applyManual() {
+    setSubmitting(true);
+    try {
+      const name = cleanInvoice(manualForm.name) || cleanInvoice(row.inputProductName);
+      let sku = cleanInvoice(manualForm.sku);
+      if (!sku) sku = autoSku();
+      else if (!/^SKU/i.test(sku)) sku = `SKU-${sku}`;
+      const unit = cleanInvoice(manualForm.unit);
+      // Auto-fill cả 3 cột tên từ tên user vừa nhập: tên hàng đầu vào, tên bán lẻ
+      // và tên chỉnh lại. Nếu 1 trong 3 cột đã có sẵn giá trị thì GIỮ NGUYÊN
+      // (không ghi đè dữ liệu user đã tự điền trước đó).
+      const patch: Partial<InvoiceRow> = {
+        internalProductCode: sku,
+        inputProductName: name,
+        unit,
+        retailName: cleanInvoice(row.retailName) || name,
+        adjustedInvoiceName: cleanInvoice(row.adjustedInvoiceName) || name
+      };
+      const ok = await onApply(patch);
+      if (ok) setManualOpen(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4" onClick={onClose}>
+      <div
+        className="relative flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <div className="flex items-center gap-2 text-base font-semibold text-slate-900">
+              <PackagePlus className="h-5 w-5 text-primary" />
+              Gắn sản phẩm cho dòng scan
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {row.sourceFileName ? (
+                <>
+                  File <span className="font-medium">{row.sourceFileName}</span> ·{" "}
+                  Tên: <span className="font-medium">{cleanInvoice(row.inputProductName) || "(chưa có)"}</span>
+                  {cleanInvoice(row.internalProductCode) ? (
+                    <> · SKU hiện tại: <span className="font-mono">{row.internalProductCode}</span></>
+                  ) : null}
+                </>
+              ) : (
+                "Chọn cách gắn sản phẩm cho dòng tổng hợp này."
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            aria-label="Đóng"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-auto p-5">
+          {/* Menu 2 options */}
+          {menuOpen ? (
+            <div ref={menuRef} className="space-y-2">
+              <button
+                type="button"
+                onClick={handlePickExisting}
+                className="group flex w-full items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50"
+              >
+                <Check className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-slate-900">
+                    Đã có sản phẩm này trong danh sách sản phẩm
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-600">
+                    Tìm theo SKU hoặc tên rồi chọn. Hệ thống sẽ tự điền SKU, tên
+                    sản phẩm, tên chỉnh lại, tên bán lẻ và đơn vị.
+                  </div>
+                </div>
+                <ChevronDown className="mt-1 h-4 w-4 rotate-[-90deg] text-emerald-700" />
+              </button>
+              <button
+                type="button"
+                onClick={handlePickNew}
+                className="group flex w-full items-start gap-3 rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-3 text-left transition hover:border-blue-400 hover:bg-blue-50"
+              >
+                <PackagePlus className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-slate-900">
+                    Sản phẩm này chưa có trong danh sách sản phẩm
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-600">
+                    Điền 3 cột: tên sản phẩm, mã SKU (sẽ tự tạo nếu bỏ trống, luôn
+                    có chữ "SKU"), đơn vị. Tên bán lẻ và tên chỉnh lại sẽ giữ
+                    trống để bạn điền sau.
+                  </div>
+                </div>
+                <ChevronDown className="mt-1 h-4 w-4 rotate-[-90deg] text-blue-700" />
+              </button>
+            </div>
+          ) : null}
+
+          {/* Picker: tìm sản phẩm có sẵn */}
+          {pickerOpen ? (
+            <div ref={pickerRef} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+              <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+                <Search className="h-4 w-4 text-slate-400" />
+                <input
+                  autoFocus
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Tìm theo tên hoặc SKU…"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                />
+                {searching ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(false)}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Đóng"
+                  title="Đóng"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="max-h-72 overflow-auto py-1">
+                {remoteResults.length === 0 && !searching ? (
+                  <div className="px-3 py-6 text-center text-xs text-slate-500">
+                    Không tìm thấy sản phẩm phù hợp.
+                    <br />
+                    Bấm <button
+                      type="button"
+                      className="text-blue-600 font-semibold hover:underline"
+                      onClick={() => { setPickerOpen(false); setManualOpen(true); }}
+                    >"Sản phẩm này chưa có trong danh sách sản phẩm"</button>
+                    {" "}để tạo mới.
+                  </div>
+                ) : null}
+                {remoteResults.map((p) => {
+                  // API /api/products/search trả về `name` từ products.name.
+                  // Các field cũ (retailName/adjustedInvoiceName/inputProductName) chỉ
+                  // có trong legacy Lookups.products (product_catalog). Trước đây
+                  // code chỉ check 3 field cũ → luôn fallback "(không tên)". Ưu tiên
+                  // `p.name` (đúng dữ liệu search trả về) trước, rồi mới fallback
+                  // legacy fields để không vỡ khi API cũ vẫn populate.
+                  const canonicalName =
+                    cleanInvoice(p.name) ||
+                    cleanInvoice(p.retailName) ||
+                    cleanInvoice(p.adjustedInvoiceName) ||
+                    cleanInvoice(p.inputProductName);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => void applyPick(p)}
+                      className="flex w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      <Check className="mt-0.5 h-3.5 w-3.5 text-transparent" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-slate-900" title={canonicalName}>
+                          {canonicalName || "(không tên)"}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          SKU <span className="font-mono">{p.sku || "—"}</span>
+                          {p.unit ? ` · ${p.unit}` : ""}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+                Gõ để tìm nhanh. Có thể bấm "Sản phẩm này chưa có…" ở menu để tạo mới.
+              </div>
+            </div>
+          ) : null}
+
+          {/* Manual form: điền tay */}
+          {manualOpen ? (
+            <div className="space-y-3 rounded-lg border border-blue-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-slate-900">
+                  Điền 3 cột để tạo sản phẩm mới
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManualOpen(false)}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Đóng"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                  Tên sản phẩm
+                </label>
+                <input
+                  type="text"
+                  value={manualForm.name}
+                  onChange={(e) => setManualForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Tên hàng hóa đầu vào / tên hóa đơn"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  autoFocus
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                    Mã SKU <span className="text-[10px] font-normal text-slate-400">(để trống sẽ tự tạo)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={manualForm.sku}
+                    onChange={(e) => setManualForm((f) => ({ ...f, sku: e.target.value }))}
+                    placeholder="SKU tự động — ví dụ: SKU-AB12CD"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  {!cleanInvoice(manualForm.sku) ? (
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      Sẽ tạo tự động: <span className="font-mono">{autoSku()}</span>
+                    </div>
+                  ) : !/^SKU/i.test(cleanInvoice(manualForm.sku)) ? (
+                    <div className="mt-1 text-[11px] text-amber-700">
+                      Sẽ lưu thành: <span className="font-mono">SKU-{cleanInvoice(manualForm.sku)}</span>
+                    </div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                    Đơn vị tính
+                  </label>
+                  <input
+                    type="text"
+                    value={manualForm.unit}
+                    onChange={(e) => setManualForm((f) => ({ ...f, unit: e.target.value }))}
+                    placeholder="Cái, hộp, kg…"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                <strong>Tên bán lẻ</strong> và <strong>Tên chỉnh lại xuất hóa đơn</strong> sẽ giữ trống
+                — bạn có thể điền trực tiếp trong bảng tổng hợp sau.
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+          {manualOpen ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setManualOpen(false)}
+                disabled={submitting}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={() => void applyManual()}
+                disabled={submitting || !cleanInvoice(manualForm.name)}
+                className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Lưu sản phẩm
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            >
+              Đóng
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

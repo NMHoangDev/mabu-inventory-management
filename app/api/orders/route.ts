@@ -14,9 +14,17 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const search = url.searchParams.get("search") ?? undefined;
-    const status = (url.searchParams.get("status") ?? undefined) as any;
-    const payment_status = (url.searchParams.get("payment_status") ?? undefined) as any;
-    const fulfillment_status = (url.searchParams.get("fulfillment_status") ?? undefined) as any;
+    // Enum values phải khớp với types trong lib/orders/repository.ts
+    const ORDER_STATUSES = ["new", "processing", "completed", "cancelled", "all"] as const;
+    const PAYMENT_STATUSES = ["unpaid", "partial", "paid", "refunded", "all"] as const;
+    const FULFILLMENT_STATUSES = ["unshipped", "shipping", "shipped", "returned", "all"] as const;
+    function pickEnum<T extends readonly string[]>(values: T, raw: string | null): T[number] | undefined {
+      if (!raw) return undefined;
+      return (values as readonly string[]).includes(raw) ? (raw as T[number]) : undefined;
+    }
+    const status = pickEnum(ORDER_STATUSES, url.searchParams.get("status"));
+    const payment_status = pickEnum(PAYMENT_STATUSES, url.searchParams.get("payment_status"));
+    const fulfillment_status = pickEnum(FULFILLMENT_STATUSES, url.searchParams.get("fulfillment_status"));
     const date_from = url.searchParams.get("date_from") ?? undefined;
     const date_to = url.searchParams.get("date_to") ?? undefined;
     const page = Number(url.searchParams.get("page") ?? 1);

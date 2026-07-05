@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useApp } from "@/components/providers/AppProvider";
+import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import { parseNumeric } from "@/lib/shared/format";
 
 function fmtNumber(value: number) {

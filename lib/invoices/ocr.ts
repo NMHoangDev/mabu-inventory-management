@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GoogleGenAI, createPartFromUri, createUserContent } from "@google/genai";
-import { fixMojibakeText, normalizeFinancials, parseNumeric } from "../shared/format";
+import { cleanInvoiceProductName, fixMojibakeText, normalizeFinancials, parseNumeric } from "../shared/format";
 import { invoiceExtractResultSchema, type InvoiceDocument, type InvoiceExtractResult, type InvoiceRow } from "../shared/schema";
 import { persistUploadedBuffer } from "./storage";
 
@@ -18,6 +18,10 @@ Do not invent internal product codes or retail names.
 Extract every item line separately.
 Keep Vietnamese text exactly as shown.
 Normalize numbers by removing thousand separators when possible.
+CRITICAL - Product Name Extraction:
+- The "inputProductName" field must contain ONLY the actual product item name as it appears in the invoice line.
+- EXCLUDE any of the following from inputProductName: manufacturer names (NSX:), brand names, model numbers that appear after "NSX:", "MH:", "Model:", "KT:", product quality descriptors like "Mới 100%", "Không hiệu", "Không hiệu.", "Mới100%", supplier/company names after "NSX:".
+- Example: If invoice line is "Ví cầm tay cho nữ, mã Meow, dạng gấp, có cúc bấm và dây cầm, lót trong bằng vải dệt, giả da PU, KT:12*3*9.5cm, NSX:Baisier Leather Co.,Ltd. Mới 100%" then inputProductName should be "Ví cầm tay cho nữ, mã Meow, dạng gấp, có cúc bấm và dây cầm, lót trong bằng vải dệt, giả da PU, KT:12*3*9.5cm" — stop before "NSX:" and "Mới 100%".
 Schema:
 {
   "invoiceDate": "",
@@ -149,7 +153,10 @@ function toStoredRows(result: InvoiceExtractResult, document: InvoiceDocument) {
       supplierName: result.supplierName,
       invoiceSymbol: result.invoiceSymbol,
       invoiceNumber: result.invoiceNumber,
-      inputProductName: item.inputProductName,
+      // Strip MH/KT/NSX/Model ngay khi lưu DB — OCR Gemini hay kèm theo các
+      // token này trong inputProductName. Card preview trên /products sẽ
+      // hiển thị sạch, không cần clean lại lúc render.
+      inputProductName: cleanInvoiceProductName(item.inputProductName),
       internalProductCode: "",
       adjustedInvoiceName: "",
       retailName: "",
@@ -165,6 +172,8 @@ function toStoredRows(result: InvoiceExtractResult, document: InvoiceDocument) {
       productSyncedAt: "",
       syncedProductId: "",
       inventoryAddedQuantity: "",
+      purchaseOrderId: "",
+      goodsReceiptId: "",
       createdAt: now,
       updatedAt: now
     });

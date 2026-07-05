@@ -18,7 +18,7 @@ import {
   ChevronRight,
   Clock,
 } from "lucide-react";
-import { useApp } from "@/components/providers/AppProvider";
+import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import type { InvoiceDocument } from "@/lib/shared/schema";
 
 function fmtNumber(value: number) {

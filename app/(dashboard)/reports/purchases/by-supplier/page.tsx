@@ -14,7 +14,7 @@ import {
   ReportTable,
   SvgLineChart,
   SummaryCard,
-} from "@/components/reports/ReportShell";
+} from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseBySupplier, type SupplierPurchaseData } from "@/services/reportService";
 
 export default function BySupplierPage() {

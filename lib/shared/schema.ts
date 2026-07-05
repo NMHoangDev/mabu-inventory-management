@@ -43,6 +43,10 @@ export const invoiceRowSchema = z.object({
   productSyncedAt: z.string().default(""),
   syncedProductId: z.string().default(""),
   inventoryAddedQuantity: z.union([z.number(), z.string()]).default(""),
+  // Set khi user đã tạo đơn đặt hàng nhập từ dòng scan này.
+  // Dùng để highlight row trên /summary (background xanh nhạt nếu đã có GR).
+  purchaseOrderId: z.string().default(""),
+  goodsReceiptId: z.string().default(""),
   createdAt: z.string(),
   updatedAt: z.string()
 });

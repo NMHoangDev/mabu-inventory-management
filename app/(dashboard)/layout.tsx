@@ -1,10 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { DashboardLayout } from "@/components/layouts/DashboardLayout";
+import { DashboardLayout } from "@/invoice-flow-manager-fe/components/layouts/DashboardLayout";
 
 const AutomationBootstrap = dynamic(
-  () => import("@/components/system/AutomationBootstrap").then((m) => m.AutomationBootstrap),
+  () => import("@/invoice-flow-manager-fe/components/system/AutomationBootstrap").then((m) => m.AutomationBootstrap),
   { ssr: false }
 );
 

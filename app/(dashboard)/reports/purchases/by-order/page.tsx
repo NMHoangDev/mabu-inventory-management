@@ -12,7 +12,7 @@ import {
   ReportShell,
   ReportTable,
   SummaryCard,
-} from "@/components/reports/ReportShell";
+} from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseByOrder, type PurchaseOrderData } from "@/services/reportService";
 
 const STATUS_COLORS: Record<string, string> = {

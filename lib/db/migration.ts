@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 15; // Bumped: cash_book + receipt_vouchers (Sổ quỹ / Phiếu thu)
+const SCHEMA_VERSION = 17; // Bumped: scan-flow linkage (purchase_orders.invoice_document_id, goods_receipt_items.stock_added_at, invoice_rows.purchase_order_id/goods_receipt_id)
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -559,6 +559,26 @@ async function migrate() {
     create index if not exists idx_stock_receipt_items_receipt on stock_receipt_items(receipt_id);
     create index if not exists idx_reorder_suggestions_status  on reorder_suggestions(status, urgency);
     create index if not exists idx_reorder_suggestions_product on reorder_suggestions(product_id);
+
+    -- Link stock_receipts -> purchase_orders (PO completed sinh ra từ scan)
+    alter table stock_receipts add column if not exists purchase_order_id uuid references purchase_orders(id) on delete set null;
+    create index if not exists idx_stock_receipts_purchase_order on stock_receipts(purchase_order_id);
+
+    -- Trace PO về invoice_documents gốc (để click "Xem hóa đơn" từ PO detail mở lại scan)
+    alter table purchase_orders add column if not exists invoice_document_id text references invoice_documents(id) on delete set null;
+    create index if not exists idx_purchase_orders_invoice_doc on purchase_orders(invoice_document_id);
+
+    -- Idempotency: đánh dấu đã cộng tồn kho
+    alter table goods_receipt_items add column if not exists stock_added_at timestamptz;
+    create index if not exists idx_goods_receipt_items_stock_pending
+      on goods_receipt_items(stock_added_at) where stock_added_at is null;
+
+    -- Cho phép mỗi invoice_row tham chiếu nhiều PO/GR (audit)
+    -- purchase_orders.id và goods_receipts.id đều là uuid nên FK phải cùng kiểu
+    alter table invoice_rows add column if not exists purchase_order_id uuid references purchase_orders(id) on delete set null;
+    alter table invoice_rows add column if not exists goods_receipt_id uuid references goods_receipts(id) on delete set null;
+    create index if not exists idx_invoice_rows_po on invoice_rows(purchase_order_id);
+    create index if not exists idx_invoice_rows_gr on invoice_rows(goods_receipt_id);
   `);
 
   // 9. Automation rules + log

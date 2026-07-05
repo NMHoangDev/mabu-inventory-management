@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Plus, Loader2, Download, Upload, ChevronLeft, ChevronRight } from "lucide-react";
-import { AddSupplierModal } from "@/components/suppliers/AddSupplierModal";
+import { AddSupplierModal } from "@/invoice-flow-manager-fe/components/suppliers/AddSupplierModal";
 
 interface SupplierRow {
   id: string;

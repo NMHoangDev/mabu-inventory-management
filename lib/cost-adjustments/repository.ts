@@ -1,6 +1,10 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export type CostAdjustmentStatus = "draft" | "completed" | "cancelled";
 
 export interface CostAdjustmentItem {
@@ -113,10 +117,9 @@ export async function getCostAdjustment(id: string): Promise<CostAdjustment | nu
   if (!isDatabaseConfigured) return null;
   await ensureDatabase();
   const pool = getPool();
-  const orderResult = await pool.query(
-    `select * from cost_adjustments where id = $1 or code = $1 limit 1`,
-    [id]
-  );
+  const orderResult = isUuid(id)
+    ? await pool.query(`select * from cost_adjustments where id = $1::uuid limit 1`, [id])
+    : await pool.query(`select * from cost_adjustments where code = $1 limit 1`, [id]);
   if (orderResult.rows.length === 0) return null;
   const itemsResult = await pool.query(
     `select * from cost_adjustment_items where cost_adjustment_id = $1 order by position asc, created_at asc`,
@@ -159,6 +162,8 @@ export async function createCostAdjustment(input: CreateCostAdjustmentInput): Pr
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // Advisory lock tránh race condition khi tạo code tự động đồng thời.
+    await client.query("select pg_advisory_xact_lock(hashtext('cost_adjustment_code'))");
 
     const code = input.code?.trim() || (await getNextCostAdjustmentCode());
 
@@ -207,22 +212,31 @@ export async function createCostAdjustment(input: CreateCostAdjustmentInput): Pr
       );
     }
 
-    // Apply cost updates to product_variants if status is completed
-    if (input.status === "completed" || input.status === "draft") {
+    // Apply cost updates to products/product_variants ONLY when completed.
+    // Draft phiếu KHÔNG được tự ý cập nhật giá vốn (tránh lệch số liệu khi user
+    // còn đang sửa bảng kê). Status transition (draft → completed) phải đi qua
+    // PATCH endpoint riêng.
+    if (input.status === "completed") {
       for (const item of items) {
-        if (item.product_id) {
-          await client.query(
-            `update product_variants
-               set cost_price = $1, updated_at = now()
-             where product_id = $2`,
-            [item.new_cost, item.product_id]
-          ).catch(() => undefined);
-          await client.query(
-            `update products set cost_price = $1, updated_at = now()
-               where id = $2`,
-            [item.new_cost, item.product_id]
-          ).catch(() => undefined);
-        }
+        const newCost = Number(item.new_cost);
+        if (!Number.isFinite(newCost) || newCost < 0) continue;
+        if (!isUuid(item.product_id ?? "")) continue;
+        // Cập nhật products (nguồn chính cho báo cáo giá vốn)
+        await client.query(
+          `update products
+             set cost_price = $1, updated_at = now()
+           where id = $2::uuid`,
+          [newCost, item.product_id]
+        );
+        // Cập nhật product_variants (nếu có — nhiều variant cùng 1 product sẽ
+        // được đồng bộ giá vốn theo product_id; nếu sau này cần per-variant,
+        // đổi sang truyền variant_id từ input).
+        await client.query(
+          `update product_variants
+             set cost_price = $1, updated_at = now()
+           where product_id = $2::uuid`,
+          [newCost, item.product_id]
+        );
       }
     }
 

@@ -14,6 +14,18 @@ declare global {
   // eslint-disable-next-line no-var
   var invoiceflowParseRateLimit: Map<string, { count: number; firstAt: number }> | undefined;
 }
+// Rate limit key: hash toàn bộ text thay vì lấy 64 ký tự đầu.
+// Trước đây dùng slice(0, 64) → user bypass được bằng cách đổi phần đuôi text.
+function hashForRateLimit(text: string): string {
+  // djb2 hash — đủ nhanh và đủ tốt cho rate limit key (không cần crypto)
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) + hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return "text:" + (hash >>> 0).toString(36);
+}
+
 function getRateLimit() {
   if (!globalThis.invoiceflowParseRateLimit) {
     globalThis.invoiceflowParseRateLimit = new Map();
@@ -42,7 +54,30 @@ const parseSchema = z.object({
 
 const applySchema = z.object({
   mode: z.literal("apply"),
-  draft: z.any(), // ParsedOrderDraft, validated at runtime
+  // Bắt buộc các trường tối thiểu — runtime validate sâu hơn trong applyOrderDraft.
+  // Tránh tình trạng client gửi object rỗng / sai kiểu vẫn pass schema rồi crash giữa chừng.
+  draft: z.object({
+    customer_name: z.string(),
+    customer_phone: z.string(),
+    customer_address: z.string().optional(),
+    note: z.string().optional(),
+    source: z.enum(["store", "facebook", "zalo", "website", "other"]),
+    items: z.array(
+      z.object({
+        product_name: z.string(),
+        sku: z.string().optional(),
+        quantity: z.number().nonnegative(),
+        unit_price: z.number().nonnegative().optional(),
+        matched_product_id: z.string().optional(),
+        matched_sku: z.string().optional(),
+        confidence: z.enum(["high", "medium", "low"])
+      })
+    ),
+    subtotal: z.number().nonnegative(),
+    discount: z.number().nonnegative(),
+    shipping_fee: z.number().nonnegative(),
+    total: z.number().nonnegative()
+  }),
   staff: z.string().optional(),
   branch: z.string().optional(),
   auto_match: z.boolean().optional(),
@@ -107,7 +142,7 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Validation failed" }, { status: 400 });
     }
-    if (!checkRateLimit("text:" + parsed.data.text.slice(0, 64))) {
+    if (!checkRateLimit(hashForRateLimit(parsed.data.text))) {
       return NextResponse.json({ error: "Bạn gửi quá nhanh. Vui lòng đợi vài giây." }, { status: 429 });
     }
     const draft = await parseOrderFromText(parsed.data.text);

@@ -1,0 +1,107 @@
+# =============================================================================
+# InvoiceFlow Manager — full-stack Docker Compose
+#
+#   nginx-router  : cổng 8080 (HTTP) — đổi 80/443 khi có domain + SSL.
+#   frontend      : Next.js 16 (port 4000 nội bộ).
+#   zalo-bridge   : Express Node 20 (port 3001 nội bộ).
+#
+# Trước khi chạy `docker compose up --build -d`:
+#   1. Copy `.env.example` ở root  → `.env`             (frontend + bridge dùng chung)
+#   2. Sửa các giá trị: GEMINI_API_KEY, SUPABASE_*, DATABASE_URL, BRIDGE_API_KEY,
+#      ZALO_BRIDGE_PUBLIC_URL=http://YOUR_DOMAIN/zalo-bridge
+#   3. (Optional) trỏ domain về IP máy ảo và reverse_proxy domain → host:8080
+# =============================================================================
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    image: invoiceflow-frontend:latest
+    container_name: invoiceflow-frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Frontend cần biết URL nội bộ tới bridge để proxy `/api/zalo/*`.
+    # Khi đứng sau nginx-router, frontend gọi trực tiếp `zalo-bridge:3001`
+    # qua mạng nội bộ — không qua nginx (giảm hop).
+    environment:
+      ZALO_BRIDGE_URL: http://zalo-bridge:3001
+      NEXT_PUBLIC_ZALO_BRIDGE_URL: http://zalo-bridge:3001
+      PORT: "4000"
+      HOST: "0.0.0.0"
+    expose:
+      - "4000"
+    volumes:
+      # Data cần persist qua các lần redeploy
+      - frontend-data:/app/data
+      - frontend-db:/app/db
+      - frontend-extensions:/app/extensions
+    depends_on:
+      zalo-bridge:
+        condition: service_healthy
+    networks:
+      invoiceflow-net:
+        aliases:
+          - frontend
+
+  zalo-bridge:
+    build:
+      context: .
+      dockerfile: zalo-bridge.Dockerfile
+    image: invoiceflow-zalo-bridge:latest
+    container_name: invoiceflow-zalo-bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3001"
+      HOST: "0.0.0.0"
+      # Public URL bridge nhìn từ browser — sau khi nginx forward prefix
+      # `/zalo-bridge/`, bạn trỏ URL này vào domain đã publish, vd:
+      #   ZALO_BRIDGE_PUBLIC_URL=https://crm.example.com/zalo-bridge
+      # Container-side mặc định suy ra từ host header, nhưng set tường minh
+      # để link extension-download / config tự render đúng URL public.
+      ZALO_BRIDGE_PUBLIC_URL: ${ZALO_BRIDGE_PUBLIC_URL:-http://localhost:8080/zalo-bridge}
+      # Cho phép CORS tới domain của frontend (sau nginx) — nếu cần cũng có
+      # thể thêm localhost:4000 cho debug.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:4000,http://127.0.0.1:4000,http://localhost:8080,http://127.0.0.1:8080}
+    expose:
+      - "3001"
+    volumes:
+      # Session ZCA phải được lưu ra ngoài container để không mất khi rebuild
+      - zalo-sessions:/app/data
+      - zalo-storage:/app/storage
+    networks:
+      invoiceflow-net:
+        aliases:
+          - zalo-bridge
+
+  router:
+    image: nginx:1.27-alpine
+    container_name: invoiceflow-router
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_started
+      zalo-bridge:
+        condition: service_healthy
+    ports:
+      # Đổi "8080:8080" thành "80:8080" hoặc "443:8080" (kèm SSL) tuỳ domain.
+      - "${ROUTER_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      invoiceflow-net:
+        aliases:
+          - router
+
+volumes:
+  frontend-data:
+  frontend-db:
+  frontend-extensions:
+  zalo-sessions:
+  zalo-storage:
+
+networks:
+  invoiceflow-net:
+    driver: bridge

@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useApp } from "@/components/providers/AppProvider";
-import { normalizeFinancials, normalizeNumberText, parseNumeric } from "@/lib/shared/format";
+import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
+import { normalizeFinancials, normalizeNumberText, parseNumeric, cleanInvoiceProductName } from "@/lib/shared/format";
 import type { InvoiceRow } from "@/lib/shared/schema";
 import {
   Plus,
@@ -1420,8 +1420,8 @@ export default function ProductsPage() {
                             product.adjustedInvoiceName || <span className="text-slate-400 italic">Chưa có</span>
                           )}
                         </td>
-                        <td className="max-w-[240px] truncate px-3 py-3 text-slate-600" title={product.inputProductName}>
-                          {product.inputProductName || "-"}
+                        <td className="max-w-[240px] truncate px-3 py-3 text-slate-600" title={cleanInvoiceProductName(product.inputProductName)}>
+                          {cleanInvoiceProductName(product.inputProductName) || "-"}
                         </td>
                         <td className="px-3 py-3">
                           {productEditMode ? (
@@ -1570,7 +1570,7 @@ export default function ProductsPage() {
             
             <div className="p-6 space-y-4">
               <div className="bg-slate-50 p-3.5 rounded border border-slate-150 text-xs text-slate-600 space-y-1">
-                <div><strong>Tên hàng đầu vào:</strong> {selectedCandidate.inputProductName}</div>
+                <div><strong>Tên hàng đầu vào:</strong> {cleanInvoiceProductName(selectedCandidate.inputProductName)}</div>
                 <div><strong>Giá nhập gần nhất:</strong> {selectedCandidate.purchasePrice ? fmtCurrency(parseNumeric(selectedCandidate.purchasePrice) ?? 0) : "-"}</div>
                 <div><strong>Số lượng quét được:</strong> {selectedCandidate.rowCount} dòng hóa đơn</div>
               </div>

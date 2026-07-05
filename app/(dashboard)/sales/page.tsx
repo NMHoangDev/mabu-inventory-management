@@ -2,8 +2,8 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { useApp } from "@/components/providers/AppProvider";
-import { parseNumeric } from "@/lib/shared/format";
+import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
+import { parseNumeric, cleanInvoiceProductName } from "@/lib/shared/format";
 import type { InvoiceRow } from "@/lib/shared/schema";
 
 type ProductCandidate = {
@@ -183,7 +183,7 @@ export default function SalesPage() {
                 {productCandidates.slice(0, 12).map((product) => (
                   <tr key={product.id} className="border-t">
                     <td className="px-3 py-2 font-semibold">{product.sku || <span className="text-warning-foreground">Cần nhập</span>}</td>
-                    <td className="max-w-[280px] truncate px-3 py-2" title={product.retailName || product.inputProductName}>{product.retailName || product.inputProductName || "-"}</td>
+                    <td className="max-w-[280px] truncate px-3 py-2" title={cleanInvoiceProductName(product.retailName || product.inputProductName)}>{cleanInvoiceProductName(product.retailName || product.inputProductName) || "-"}</td>
                     <td className="px-3 py-2">{product.unit || "-"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{product.purchasePrice ? fmtCurrency(parseNumeric(product.purchasePrice) ?? 0) : "-"}</td>
                     <td className="px-3 py-2">

@@ -67,6 +67,10 @@ function invoiceRowFromDb(row: Record<string, unknown>): InvoiceRow {
     productSyncedAt: asIso(row.product_synced_at),
     syncedProductId: String(row.synced_product_id ?? ""),
     inventoryAddedQuantity: String(row.inventory_added_quantity ?? ""),
+    // Scan-flow linkage (set bởi confirmScanReceiptWithOptions khi user bấm
+    // "Tạo đơn đặt hàng nhập"). UI dùng để highlight row đã có GR.
+    purchaseOrderId: row.purchase_order_id ? String(row.purchase_order_id) : "",
+    goodsReceiptId: row.goods_receipt_id ? String(row.goods_receipt_id) : "",
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at)
   };

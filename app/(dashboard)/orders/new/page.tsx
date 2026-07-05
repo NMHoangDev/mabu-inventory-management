@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -22,6 +22,7 @@ import {
   Info,
   ShoppingCart,
   StickyNote,
+  X
 } from "lucide-react";
 
 interface Product {
@@ -75,11 +76,11 @@ export default function NewOrderPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerResults, setCustomerResults] = useState<Customer[]>([]);
-  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [customerHighlight, setCustomerHighlight] = useState(0);
 
   const [productSearch, setProductSearch] = useState("");
   const [productResults, setProductResults] = useState<Product[]>([]);
-  const [showProductDropdown, setShowProductDropdown] = useState(false);
+  const [productHighlight, setProductHighlight] = useState(0);
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [source, setSource] = useState("store");
@@ -95,37 +96,62 @@ export default function NewOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Customer search
+  // ── Customer search (debounced + bỏ dấu hỗ trợ) ───────────────────────
+  // Backend /api/orders/search-customers đã có unaccent + scoring.
+  // Reset highlight khi danh sách đổi.
   useEffect(() => {
+    if (customer) return; // đã chọn rồi thì không search nữa
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/orders/search-customers?q=${encodeURIComponent(customerSearch)}&limit=8`);
+        const res = await fetch(`/api/orders/search-customers?q=${encodeURIComponent(customerSearch)}&limit=12`);
         const data = await res.json();
         setCustomerResults(data.customers ?? []);
-      } catch (e) { /* ignore */ }
-    }, 250);
+        setCustomerHighlight(0);
+      } catch {
+        /* ignore */
+      }
+    }, 220);
     return () => clearTimeout(t);
-  }, [customerSearch]);
+  }, [customerSearch, customer]);
 
-  // Product search
+  // ── Product search ──────────────────────────────────────────────────────
   useEffect(() => {
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/orders/search-products?q=${encodeURIComponent(productSearch)}&limit=8`);
+        const res = await fetch(`/api/orders/search-products?q=${encodeURIComponent(productSearch)}&limit=12`);
         const data = await res.json();
         setProductResults(data.products ?? []);
-      } catch (e) { /* ignore */ }
-    }, 250);
+        setProductHighlight(0);
+      } catch {
+        /* ignore */
+      }
+    }, 220);
     return () => clearTimeout(t);
   }, [productSearch]);
 
-  const productInputRef = useRef<HTMLInputElement>(null);
+  const productInputRef = useRef<HTMLInputElement | null>(null);
+  const customerInputRef = useRef<HTMLInputElement | null>(null);
 
-  const addProduct = (p: Product) => {
+  // ── Customer actions ───────────────────────────────────────────────────
+  const pickCustomer = useCallback((c: Customer) => {
+    setCustomer(c);
+    setCustomerSearch("");
+    setCustomerResults([]);
+    // Focus lại vào product input để user tiếp tục thêm SP.
+    setTimeout(() => productInputRef.current?.focus(), 0);
+  }, []);
+
+  const clearCustomer = useCallback(() => {
+    setCustomer(null);
+    setTimeout(() => customerInputRef.current?.focus(), 0);
+  }, []);
+
+  // ── Product actions ────────────────────────────────────────────────────
+  const addProduct = useCallback((p: Product) => {
     setCart((prev) => {
       const existing = prev.find((c) => c.product_id === p.id);
       if (existing) {
-        return prev.map((c) => c.product_id === p.id ? { ...c, quantity: c.quantity + 1 } : c);
+        return prev.map((c) => (c.product_id === p.id ? { ...c, quantity: c.quantity + 1 } : c));
       }
       return [
         ...prev,
@@ -141,16 +167,17 @@ export default function NewOrderPage() {
       ];
     });
     setProductSearch("");
-    setShowProductDropdown(false);
+    setProductResults([]);
+    setProductHighlight(0);
     setTimeout(() => productInputRef.current?.focus(), 0);
-  };
+  }, []);
 
   const updateQty = (productId: string, qty: number) => {
     if (qty <= 0) {
       setCart((prev) => prev.filter((c) => c.product_id !== productId));
       return;
     }
-    setCart((prev) => prev.map((c) => c.product_id === productId ? { ...c, quantity: qty } : c));
+    setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, quantity: qty } : c)));
   };
 
   const removeItem = (productId: string) => {
@@ -240,81 +267,94 @@ export default function NewOrderPage() {
         {/* Left column */}
         <div className="flex-1 flex flex-col gap-4 min-w-0">
           {/* Customer search */}
-          <section className="bg-white border border-[#c0c6d6] rounded p-4 relative">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#404754]" />
-              <input
-                value={customer ? customer.name : customerSearch}
-                onChange={(e) => {
-                  setCustomer(null);
-                  setCustomerSearch(e.target.value);
-                  setShowCustomerDropdown(true);
-                }}
-                onFocus={() => setShowCustomerDropdown(true)}
-                placeholder="Tìm kiếm khách hàng (F4)"
-                className="w-full pl-10 pr-10 py-2 border border-[#717785] rounded text-sm focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] outline-none transition-all"
-              />
-              {!customer && (
-                <Link href="/customers" className="absolute right-3 top-1/2 -translate-y-1/2 text-[#005baf] hover:bg-[#ebf5ff] p-1 rounded">
-                  <UserPlus className="w-5 h-5" />
-                </Link>
-              )}
-            </div>
-            {showCustomerDropdown && !customer && customerResults.length > 0 && (
-              <div className="absolute z-20 left-4 right-4 top-full mt-1 bg-white border border-[#c0c6d6] rounded shadow-lg max-h-60 overflow-auto">
-                {customerResults.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => {
-                      setCustomer(c);
-                      setShowCustomerDropdown(false);
-                      setCustomerSearch("");
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-[#ebf5ff] flex flex-col border-b last:border-0 border-[#c0c6d6]"
-                  >
-                    <span className="text-sm font-medium text-[#0d1d29]">{c.name}</span>
-                    <span className="text-xs text-[#404754]">{c.phone || c.code || c.email || "—"}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
+          <CustomerSearch
+            customer={customer}
+            customerSearch={customerSearch}
+            customerResults={customerResults}
+            customerHighlight={customerHighlight}
+            customerInputRef={customerInputRef}
+            onSearchChange={(v) => {
+              setCustomer(null);
+              setCustomerSearch(v);
+            }}
+            onPick={pickCustomer}
+            onClear={clearCustomer}
+            onHighlight={setCustomerHighlight}
+            onFetchInitial={() => {
+              // Gọi fetch ngay (dù search rỗng) để dropdown có data hiển thị
+              // khi user vừa focus vào input. Set customerSearch = "" rồi
+              // trigger lại effect search bằng cách gọi setter 2 lần — nhưng
+              // đơn giản hơn: gọi thẳng fetch ở đây.
+              void fetch(
+                `/api/orders/search-customers?q=&limit=12`,
+                { cache: "no-store" }
+              )
+                .then((r) => r.json().catch(() => ({})))
+                .then((data: { customers?: Customer[] }) => {
+                  setCustomerResults(data.customers ?? []);
+                  setCustomerHighlight(0);
+                })
+                .catch(() => undefined);
+            }}
+            onKeyDown={(e) => {
+              if (customerResults.length === 0) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setCustomerHighlight((h) => Math.min(customerResults.length - 1, h + 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setCustomerHighlight((h) => Math.max(0, h - 1));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                pickCustomer(customerResults[customerHighlight]);
+              } else if (e.key === "Escape") {
+                setCustomerSearch("");
+                setCustomerResults([]);
+              }
+            }}
+          />
 
           {/* Product search + cart */}
           <section className="bg-white border border-[#c0c6d6] rounded flex-1 flex flex-col min-h-0">
-            <div className="p-4 border-b border-[#c0c6d6]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#404754]" />
-                <input
-                  ref={productInputRef}
-                  value={productSearch}
-                  onChange={(e) => { setProductSearch(e.target.value); setShowProductDropdown(true); }}
-                  onFocus={() => setShowProductDropdown(true)}
-                  placeholder="Tìm theo tên, mã SKU, barcode (F2)"
-                  className="w-full pl-10 pr-10 py-2 border border-[#717785] rounded text-sm focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] outline-none transition-all"
-                />
-                <QrCode className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#404754]" />
-                {showProductDropdown && productResults.length > 0 && (
-                  <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-[#c0c6d6] rounded shadow-lg max-h-72 overflow-auto">
-                    {productResults.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => addProduct(p)}
-                        className="w-full text-left px-3 py-2 hover:bg-[#ebf5ff] flex items-center justify-between gap-2 border-b last:border-0 border-[#c0c6d6]"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-[#0d1d29]">{p.name}</p>
-                          <p className="text-xs text-[#404754]">
-                            SKU: {p.sku || "—"} {p.unit ? ` • ${p.unit}` : ""}
-                          </p>
-                        </div>
-                        <span className="text-sm font-semibold text-[#005baf]">{fmtMoney(p.price)}đ</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            <ProductSearch
+              productSearch={productSearch}
+              productResults={productResults}
+              productHighlight={productHighlight}
+              productInputRef={productInputRef}
+              onSearchChange={(v) => setProductSearch(v)}
+              onPick={addProduct}
+              onHighlight={setProductHighlight}
+              onFetchInitial={() => {
+                // Fetch ngay khi focus (dù search rỗng) — dropdown có data
+                // ngay từ đầu, user thấy được các sản phẩm gợi ý.
+                void fetch(`/api/orders/search-products?q=&limit=12`, {
+                  cache: "no-store",
+                })
+                  .then((r) => r.json().catch(() => ({})))
+                  .then((data: { products?: Product[] }) => {
+                    setProductResults(data.products ?? []);
+                    setProductHighlight(0);
+                  })
+                  .catch(() => undefined);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setProductHighlight((h) => Math.min(productResults.length - 1, h + 1));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setProductHighlight((h) => Math.max(0, h - 1));
+                } else if (e.key === "Enter") {
+                  if (productResults.length > 0) {
+                    e.preventDefault();
+                    addProduct(productResults[productHighlight]);
+                  }
+                } else if (e.key === "Escape") {
+                  setProductSearch("");
+                  setProductResults([]);
+                }
+              }}
+            />
 
             {/* Cart table */}
             <div className="flex-1 overflow-auto custom-scrollbar">
@@ -598,6 +638,350 @@ function Hotkey({ k, label }: { k: string; label: string }) {
     <div className="flex items-center gap-1">
       <span className="bg-[#5b6571] text-white px-1 rounded font-bold text-[10px]">{k}</span>
       <span>{label}</span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers chung cho dropdown
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Bỏ dấu tiếng Việt + lowercase + giữ chữ/số/khoảng trắng để highlight.
+function removeAccents(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+// Highlight phần text khớp với query (hỗ trợ không dấu) — không làm hỏng dấu gốc.
+function HighlightMatch({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const qAcc = removeAccents(q);
+  const lower = text.toLowerCase();
+  const lowerAcc = removeAccents(text);
+  // Tìm vị trí match trên chuỗi không dấu, map lại index trên chuỗi gốc.
+  const idx = lowerAcc.indexOf(qAcc);
+  if (idx < 0) return <>{text}</>;
+  // Dùng index của lowerAcc (chuỗi không dấu) để slice trên text gốc
+  // cũng OK vì pre-composed char và decomposed char cùng độ dài trong trường hợp
+  // không chứa dấu. Với text có dấu thì lowerAcc dài hơn → cần map index.
+  // Đơn giản hoá: tìm lại trên lower (giữ dấu) để highlight chính xác phần đầu.
+  const startInOriginal = lower.indexOf(text.substring(idx, idx + q.length).toLowerCase());
+  if (startInOriginal < 0) return <>{text}</>;
+  const end = startInOriginal + q.length;
+  return (
+    <>
+      {text.substring(0, startInOriginal)}
+      <mark className="bg-yellow-200 text-[#0d1d29] rounded px-0.5">
+        {text.substring(startInOriginal, end)}
+      </mark>
+      {text.substring(end)}
+    </>
+  );
+}
+
+// Hook chung: click-outside + ESC để đóng dropdown.
+// Trả về ref gắn vào wrapper + open state.
+function useDismiss(open: boolean, onDismiss: () => void) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (ref.current && !ref.current.contains(target)) onDismiss();
+    };
+    // mousedown thay vì click để đóng TRƯỚC khi button trong dropdown nhận click
+    // (button nhận onMouseDown nhưng không preventDefault → click vẫn fire).
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open, onDismiss]);
+  return ref;
+}
+
+// Khi `open=true` thêm ESC handler để đóng.
+function useEscape(open: boolean, onEscape: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onEscape();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onEscape]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CustomerSearch — input search có dropdown chọn KH.
+//   - Click chọn KH trong dropdown → setCustomer + reset search + focus product input.
+//   - ESC / click ngoài / chọn xong → đóng dropdown.
+//   - ↑ ↓ Enter để chọn nhanh bằng bàn phím.
+//   - Số kết quả hiển thị 12, có thể bấm "Quản lý KH" để tạo mới.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CustomerSearchProps {
+  customer: Customer | null;
+  customerSearch: string;
+  customerResults: Customer[];
+  customerHighlight: number;
+  customerInputRef: React.RefObject<HTMLInputElement | null>;
+  onSearchChange: (v: string) => void;
+  onPick: (c: Customer) => void;
+  onClear: () => void;
+  onHighlight: (n: number) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  // Bắt buộc: gọi khi user focus vào input để component cha trigger 1 lần
+  // fetch ngay (dù search rỗng) — đảm bảo dropdown có data để hiển thị ngay
+  // lúc focus, không phải đợi user gõ.
+  onFetchInitial: () => void;
+}
+
+function CustomerSearch({
+  customer,
+  customerSearch,
+  customerResults,
+  customerHighlight,
+  customerInputRef,
+  onSearchChange,
+  onPick,
+  onClear,
+  onHighlight,
+  onKeyDown,
+  onFetchInitial
+}: CustomerSearchProps) {
+  // Dropdown mở/đóng do focus + có data. Click outside / ESC mới đóng.
+  // KHÔNG phụ thuộc vào customerResults.length (nếu không, focus vào input
+  // mà chưa gõ → dropdown vẫn đóng → user không biết phải gõ).
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const showDropdown = !customer && dropdownOpen;
+  const dismiss = useCallback(() => setDropdownOpen(false), []);
+  const wrapperRef = useDismiss(showDropdown, dismiss);
+  useEscape(showDropdown, dismiss);
+
+  return (
+    <section
+      ref={wrapperRef}
+      className="bg-white border border-[#c0c6d6] rounded p-4 relative"
+    >
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#404754]" />
+        {customer ? (
+          <>
+            <div className="w-full pl-10 pr-10 py-2 border border-[#717785] rounded text-sm flex items-center gap-2 bg-[#f6f9ff]">
+              <span className="font-semibold text-[#0d1d29] truncate">{customer.name}</span>
+              <span className="text-xs text-[#404754] truncate">
+                {customer.phone || customer.code || customer.email || "—"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onClear}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#404754] hover:text-[#0d1d29] p-1 rounded hover:bg-[#ebf5ff]"
+              title="Bỏ chọn khách hàng"
+              aria-label="Bỏ chọn khách hàng"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </>
+        ) : (
+          <>
+            <input
+              ref={customerInputRef}
+              value={customerSearch}
+              onChange={(e) => onSearchChange(e.target.value)}
+              onFocus={() => {
+                setDropdownOpen(true);
+                onFetchInitial();
+              }}
+              onKeyDown={onKeyDown}
+              placeholder="Tìm kiếm khách hàng (F4) — gõ không dấu cũng ra"
+              autoComplete="off"
+              className="w-full pl-10 pr-10 py-2 border border-[#717785] rounded text-sm focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] outline-none transition-all"
+            />
+            <Link
+              href="/customers"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#005baf] hover:bg-[#ebf5ff] p-1 rounded"
+              title="Thêm khách hàng mới"
+            >
+              <UserPlus className="w-5 h-5" />
+            </Link>
+          </>
+        )}
+      </div>
+
+      {showDropdown ? (
+        <div className="absolute z-30 left-4 right-4 top-full mt-1 bg-white border border-[#c0c6d6] rounded shadow-xl max-h-72 overflow-auto">
+          {customerResults.length === 0 ? (
+            <div className="px-3 py-4 text-center text-xs text-slate-500">
+              Không tìm thấy khách hàng
+              {customerSearch.trim() ? ` với "${customerSearch.trim()}"` : ""}.
+              <br />
+              Bấm <Link href="/customers" className="text-[#005baf] font-semibold hover:underline">+ Thêm KH mới</Link> để tạo.
+            </div>
+          ) : null}
+          {customerResults.map((c, idx) => {
+            const active = idx === customerHighlight;
+            return (
+              <button
+                // mousedown (không phải click) + preventDefault để button nhận
+                // event trước khi input blur → tránh race condition dropdown đóng
+                // mất item. Đồng thời useDismiss ở trên cũng bỏ qua click trong
+                // wrapper nhờ ref check.
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setDropdownOpen(false);
+                  onPick(c);
+                }}
+                onMouseEnter={() => onHighlight(idx)}
+                className={`w-full text-left px-3 py-2 flex flex-col border-b last:border-0 border-[#c0c6d6] transition-colors ${
+                  active ? "bg-[#ebf5ff]" : "hover:bg-[#f6f9ff]"
+                }`}
+              >
+                <span className="text-sm font-medium text-[#0d1d29]">
+                  <HighlightMatch text={c.name} query={customerSearch} />
+                </span>
+                <span className="text-xs text-[#404754]">
+                  <HighlightMatch
+                    text={c.phone || c.code || c.email || "—"}
+                    query={customerSearch}
+                  />
+                </span>
+              </button>
+            );
+          })}
+          <div className="px-3 py-1.5 text-[10px] text-[#5b6571] bg-[#f6f9ff] border-t border-[#c0c6d6] flex items-center justify-between">
+            <span>↑↓ để di chuyển · Enter chọn · Esc đóng</span>
+            <Link href="/customers" className="text-[#005baf] hover:underline">
+              + Thêm KH mới
+            </Link>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProductSearch — input search có dropdown chọn SP để thêm vào giỏ.
+//   - Click chọn SP → addProduct + reset search + focus input.
+//   - ↑ ↓ Enter / Esc / click ngoài → đóng dropdown.
+//   - Highlight phần match (kể cả khi user gõ không dấu).
+//   - Hiển thị ảnh + tên + SKU + giá.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ProductSearchProps {
+  productSearch: string;
+  productResults: Product[];
+  productHighlight: number;
+  productInputRef: React.RefObject<HTMLInputElement | null>;
+  onSearchChange: (v: string) => void;
+  onPick: (p: Product) => void;
+  onHighlight: (n: number) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  // Bắt buộc: gọi khi user focus vào input để component cha trigger 1 lần
+  // fetch ngay (dù search rỗng) — đảm bảo dropdown có data hiển thị ngay.
+  onFetchInitial: () => void;
+}
+
+function ProductSearch({
+  productSearch,
+  productResults,
+  productHighlight,
+  productInputRef,
+  onSearchChange,
+  onPick,
+  onHighlight,
+  onKeyDown,
+  onFetchInitial
+}: ProductSearchProps) {
+  // Dropdown mở/đóng do focus + có data (KHÔNG clear search khi click outside).
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const showDropdown = dropdownOpen;
+  const dismiss = useCallback(() => setDropdownOpen(false), []);
+  const wrapperRef = useDismiss(showDropdown, dismiss);
+  useEscape(showDropdown, dismiss);
+
+  return (
+    <div ref={wrapperRef} className="p-4 border-b border-[#c0c6d6]">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#404754]" />
+        <input
+          ref={productInputRef}
+          value={productSearch}
+          onChange={(e) => onSearchChange(e.target.value)}
+          onFocus={() => {
+            setDropdownOpen(true);
+            onFetchInitial();
+          }}
+          onKeyDown={onKeyDown}
+          placeholder="Tìm theo tên, mã SKU, barcode (F2) — gõ không dấu cũng ra"
+          autoComplete="off"
+          className="w-full pl-10 pr-10 py-2 border border-[#717785] rounded text-sm focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] outline-none transition-all"
+        />
+        <QrCode className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#404754]" />
+
+        {showDropdown ? (
+          <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-white border border-[#c0c6d6] rounded shadow-xl max-h-80 overflow-auto">
+            {productResults.length === 0 ? (
+              <div className="px-3 py-4 text-center text-xs text-slate-500">
+                Không tìm thấy sản phẩm
+                {productSearch.trim() ? ` với "${productSearch.trim()}"` : ""}.
+                <br />
+                Gõ tên, SKU hoặc quét barcode để tìm.
+              </div>
+            ) : null}
+            {productResults.map((p, idx) => {
+              const active = idx === productHighlight;
+              return (
+                <button
+                  type="button"
+                  key={p.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setDropdownOpen(false);
+                    onPick(p);
+                  }}
+                  onMouseEnter={() => onHighlight(idx)}
+                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 border-b last:border-0 border-[#c0c6d6] transition-colors ${
+                    active ? "bg-[#ebf5ff]" : "hover:bg-[#f6f9ff]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <div className="w-9 h-9 rounded border border-[#c0c6d6] shrink-0 bg-white overflow-hidden">
+                      {p.image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.image_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-[#ebf5ff] flex items-center justify-center text-[#c0c6d6]">
+                          <ReceiptText className="w-4 h-4" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#0d1d29] truncate">
+                        <HighlightMatch text={p.name} query={productSearch} />
+                      </p>
+                      <p className="text-xs text-[#404754] truncate">
+                        SKU: <HighlightMatch text={p.sku || "—"} query={productSearch} />
+                        {p.unit ? ` • ${p.unit}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-sm font-semibold text-[#005baf] tabular-nums shrink-0">
+                    {fmtMoney(p.price)}đ
+                  </span>
+                </button>
+              );
+            })}
+            <div className="px-3 py-1.5 text-[10px] text-[#5b6571] bg-[#f6f9ff] border-t border-[#c0c6d6]">
+              ↑↓ di chuyển · Enter thêm vào đơn · Esc đóng
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

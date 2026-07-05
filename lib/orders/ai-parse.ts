@@ -278,6 +278,36 @@ export async function applyOrderDraft(draft: ParsedOrderDraft | any, opts: {
     }
   }
 
+  // Validate rằng mọi matched_product_id tồn tại trong DB. Nếu AI parse trả về
+  // id linh tinh (hallucination, id sản phẩm cũ đã xóa...) thì bỏ qua — tránh
+  // tạo order_items với FK trỏ vào hư không, gây lỗi ở các query sau.
+  if (isDatabaseConfigured) {
+    const productIds = Array.from(
+      new Set(
+        items
+          .map((it: any) => it.matched_product_id)
+          .filter((x: any) => typeof x === "string" && x.length > 0)
+      )
+    );
+    if (productIds.length > 0) {
+      try {
+        await ensureDatabase();
+        const existing = await getPool().query(
+          `select id from products where id = any($1::uuid[])`,
+          [productIds]
+        );
+        const validIds = new Set(existing.rows.map((r) => String(r.id)));
+        items = items.map((it: any) =>
+          it.matched_product_id && !validIds.has(String(it.matched_product_id))
+            ? { ...it, matched_product_id: null, matched_sku: it.sku ?? null, confidence: "low" as const }
+            : it
+        );
+      } catch (err) {
+        console.warn("validateMatchedProducts failed (continuing):", err);
+      }
+    }
+  }
+
   // Re-compute totals from items
   const subtotal = items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
   const total = Math.max(0, subtotal - safeDraft.discount + safeDraft.shipping_fee);

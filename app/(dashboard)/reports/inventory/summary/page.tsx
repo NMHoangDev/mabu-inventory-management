@@ -14,7 +14,7 @@ import {
   SvgBarChart,
   SvgLineChart,
   SummaryCard,
-} from "@/components/reports/ReportShell";
+} from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInventorySummary, fetchInventoryDetail } from "@/services/reportService";
 
 const STATUS_STYLE: Record<string, string> = {

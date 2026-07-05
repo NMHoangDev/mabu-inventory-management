@@ -1,6 +1,10 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export type StockCheckStatus = "draft" | "in_progress" | "balanced" | "cancelled";
 
 export interface StockCheckItem {
@@ -139,10 +143,9 @@ export async function getStockCheck(id: string): Promise<StockCheck | null> {
   if (!isDatabaseConfigured) return null;
   await ensureDatabase();
   const pool = getPool();
-  const orderResult = await pool.query(
-    `select * from stock_checks where id = $1 or code = $1 limit 1`,
-    [id]
-  );
+  const orderResult = isUuid(id)
+    ? await pool.query(`select * from stock_checks where id = $1::uuid limit 1`, [id])
+    : await pool.query(`select * from stock_checks where code = $1 limit 1`, [id]);
   if (orderResult.rows.length === 0) return null;
   const itemsResult = await pool.query(
     `select * from stock_check_items where stock_check_id = $1 order by position asc, created_at asc`,
@@ -187,6 +190,10 @@ export async function createStockCheck(input: CreateStockCheckInput): Promise<St
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // Advisory lock tránh race condition khi 2 request cùng gọi
+    // getNextStockCheckCode() đồng thời — cả 2 sẽ serialize qua lock này.
+    // Key = hash của "stock_check" để tránh đụng với các advisory lock khác.
+    await client.query("select pg_advisory_xact_lock(hashtext('stock_check_code'))");
 
     const code = input.code?.trim() || (await getNextStockCheckCode());
 

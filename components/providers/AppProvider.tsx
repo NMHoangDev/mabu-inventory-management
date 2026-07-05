@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, ReactNode, useCallback } from "react";
 import type { AppStore, InvoiceDocument, InvoiceRow } from "@/lib/shared/schema";
+import { zaloAccountsApi, ZaloAccountSummary } from "@/lib/zalo-api";
 
 type ConfirmOptions = {
   title: string;
@@ -194,6 +195,12 @@ interface AppContextType {
   setScanBatchFiles: React.Dispatch<React.SetStateAction<ScanBatchFile[]>>;
   productMeta: Record<string, { salePrice: string; imageUrl: string }>;
   setProductMeta: React.Dispatch<React.SetStateAction<Record<string, { salePrice: string; imageUrl: string }>>>;
+  // ── Multi-account Zalo (Phase 2) ─────────────────────────────────────────
+  zaloAccounts: ZaloAccountSummary[];
+  loadingZaloAccounts: boolean;
+  currentAccountId: string | null;
+  setCurrentAccountId: (id: string | null) => void;
+  refreshZaloAccounts: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -209,6 +216,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pollingJobRef = useRef("");
   const [scanJob, setScanJob] = useState<ScanJob>(emptyScanJob);
   const [productMeta, setProductMeta] = useState<Record<string, { salePrice: string; imageUrl: string }>>({});
+  // ── Multi-account Zalo (Phase 2) ─────────────────────────────────────────
+  // Lưu localStorage để staff không phải chọn lại mỗi lần F5.
+  const ACC_STORAGE_KEY = "zalo-current-account-id";
+  const [zaloAccounts, setZaloAccounts] = useState<ZaloAccountSummary[]>([]);
+  const [loadingZaloAccounts, setLoadingZaloAccounts] = useState(false);
+  const [currentAccountId, _setCurrentAccountId] = useState<string | null>(null);
+
+  const setCurrentAccountId = useCallback((id: string | null) => {
+    _setCurrentAccountId(id);
+    if (typeof window !== "undefined") {
+      try {
+        if (id) window.localStorage.setItem(ACC_STORAGE_KEY, id);
+        else window.localStorage.removeItem(ACC_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const refreshZaloAccounts = useCallback(async () => {
+    setLoadingZaloAccounts(true);
+    try {
+      const data = await zaloAccountsApi.list();
+      const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+      setZaloAccounts(accounts);
+      // Auto-select logic:
+      //   1. localStorage (nếu còn tồn tại)
+      //   2. connected account đầu tiên
+      //   3. bất kỳ account nào
+      _setCurrentAccountId((prev) => {
+        if (prev && accounts.some((a) => a.account_id === prev)) return prev;
+        if (typeof window !== "undefined") {
+          try {
+            const saved = window.localStorage.getItem(ACC_STORAGE_KEY);
+            if (saved && accounts.some((a) => a.account_id === saved)) return saved;
+          } catch {
+            /* ignore */
+          }
+        }
+        const connected = accounts.find((a) => a.status === "connected");
+        return connected?.account_id ?? accounts[0]?.account_id ?? null;
+      });
+    } catch {
+      // Bridge unreachable — fallback trống.
+      setZaloAccounts([]);
+    } finally {
+      setLoadingZaloAccounts(false);
+    }
+  }, []);
 
   const loadState = async () => {
     const [stateResponse, lookupResponse] = await Promise.all([fetch("/api/state"), fetch("/api/lookups")]);
@@ -339,6 +395,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // Initial load Zalo accounts (best-effort).
+  useEffect(() => {
+    void refreshZaloAccounts();
+  }, [refreshZaloAccounts]);
+
+  // Listen cho custom event "zalo-account-changed" để các component có thể
+  // trigger refresh sau khi admin thêm/xoá/gán tài khoản.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      void refreshZaloAccounts();
+    };
+    window.addEventListener("zalo-account-changed", handler);
+    return () => window.removeEventListener("zalo-account-changed", handler);
+  }, [refreshZaloAccounts]);
+
   useEffect(() => {
     const jobId = window.localStorage.getItem("invoiceflow-active-scan-job-id");
     if (jobId) void pollScanJob(jobId);
@@ -423,7 +495,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         startScanJob,
         setScanBatchFiles,
         productMeta,
-        setProductMeta
+        setProductMeta,
+        zaloAccounts,
+        loadingZaloAccounts,
+        currentAccountId,
+        setCurrentAccountId,
+        refreshZaloAccounts
       }}
     >
       {children}

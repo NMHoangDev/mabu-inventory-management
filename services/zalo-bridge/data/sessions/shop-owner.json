@@ -1,0 +1,110 @@
+{
+  "cookie": [
+    {
+      "key": "zpdid",
+      "value": "4X7sarFze3GN6PYRLV_DDXKQdP1M_SCv",
+      "domain": "id.zalo.me",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "lax",
+      "expires": "2027-08-07T04:16:52.679Z"
+    },
+    {
+      "key": "__zi",
+      "value": "3000.SSZzejyD6zOgdh2mtnLQWYQN_RAG01ICFjIXe9fEM8yydkkWdKnTYtMQxw_GIbs4VPZWe3Ot.1",
+      "domain": "zalo.me",
+      "path": "/",
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "no_restriction",
+      "expires": "2027-08-07T13:53:03.979Z"
+    },
+    {
+      "key": "_zlang",
+      "value": "vn",
+      "domain": "zalo.me",
+      "path": "/",
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "none",
+      "expires": "2026-07-04T13:53:01.506Z"
+    },
+    {
+      "key": "zpsid",
+      "value": "FqVV.327635537.99.3b4St6UHEjismxt8Qv4wsnBYIEXLfWpeKgG9x1o2-ZLqd3aQPbWYd0sHEji",
+      "domain": "zalo.me",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "no_restriction",
+      "expires": "2027-07-03T02:04:59.176Z"
+    },
+    {
+      "key": "zpw_sek",
+      "value": "IYGv.327635537.a0.NoYws2W4fGkhSI1csoEdTO41mXxO6OKUaqVc8Pnsw2ATIjuPrMAUHT52qXYh7ffNXrYqjHGmgdOx8crjlKcdTG",
+      "domain": "chat.zalo.me",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "lax",
+      "expires": "2026-10-01T13:20:12.329Z"
+    },
+    {
+      "key": "zpsid",
+      "value": "eMKnVcAlVqAZUYmFHx54EiiuI6vViKCupZnJObMeNcF3GHGsDBDlF_zwF2Gf-5CnlpKUF5_MQHgb834kT_z4Af9y0dXVz151iJzB4NBK9H27Dtz3LiK4Ica",
+      "domain": "zaloapp.com",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "no_restriction",
+      "expires": "2027-07-03T02:04:59.335Z"
+    },
+    {
+      "key": "__zi",
+      "value": "3000.QOBlzDCV2uGerkFzm09KrcBMvF_51XtIPjch_iOA7DjgsQ_s.1",
+      "domain": "zaloapp.com",
+      "path": "/",
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "no_restriction",
+      "expires": "2027-08-07T02:04:59.335Z"
+    },
+    {
+      "key": "zppsid",
+      "value": "FqVV.327635537.99.3b4St6UHEjismxt8Qv4wsnBYIEXLfWpeKgG9x1o2-ZLqd3aQPbWYd0sHEji",
+      "domain": "zalo.me",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "no_restriction",
+      "expires": "2027-07-03T02:04:59.176Z"
+    },
+    {
+      "key": "zppwsid",
+      "value": "IYGv.327635537.a0.NoYws2W4fGkhSI1csoEdTO41mXxO6OKUaqVc8Pnsw2ATIjuPrMAUHT52qXYh7ffNXrYqjHGmgdOx8crjlKcdTG",
+      "domain": "chat.zalo.me",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "lax",
+      "expires": "2026-10-01T13:20:12.329Z"
+    },
+    {
+      "key": "zphpsid",
+      "value": "FqVV.327635537.99.3b4St6UHEjismxt8Qv4wsnBYIEXLfWpeKgG9x1o2-ZLqd3aQPbWYd0sHEji",
+      "domain": "zalo.me",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "no_restriction",
+      "expires": "2027-07-03T02:04:59.176Z"
+    }
+  ],
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+  "imei": "34ed92c7-a1e7-43fe-9d9d-a3026544917c-16fee37559dbd42b448204446d02089f",
+  "chatwootAccountId": "shop-owner",
+  "inboxId": "shop-owner",
+  "zaloId": "36191948659899943",
+  "displayName": "Nguyễn Minh Hoàng"
+}

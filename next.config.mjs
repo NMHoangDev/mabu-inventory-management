@@ -11,6 +11,16 @@ const nextConfig = {
   },
   experimental: {
     proxyClientMaxBodySize: 50 * 1024 * 1024
+  },
+  // Forward /api/v1/* to Python backend in dev (no CORS hassle)
+  async rewrites() {
+    const backendBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8765";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${backendBase}/api/v1/:path*`
+      }
+    ];
   }
 };
 

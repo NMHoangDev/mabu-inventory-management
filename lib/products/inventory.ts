@@ -1,6 +1,11 @@
-﻿import { getPool, isDatabaseConfigured } from "../db/connection";
+import { getPool, isDatabaseConfigured } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { getProducts } from "./repository";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value: string): boolean {
+  return UUID_RE.test(String(value ?? "").trim());
+}
 
 export type InventoryProduct = {
   id: string;
@@ -148,6 +153,9 @@ export async function listInventoryProducts(): Promise<InventoryProduct[]> {
 }
 
 export async function getInventoryProductDetail(id: string): Promise<InventoryProductDetail | null> {
+  // products.id là uuid — nếu id không phải UUID thì return null sớm để tránh
+  // PostgreSQL throw "invalid input syntax for type uuid".
+  if (!isUuid(id)) return null;
   if (!isDatabaseConfigured) {
     const product = (await getProducts()).find((item: any) => String(item.id) === id);
     if (!product) return null;
@@ -204,7 +212,7 @@ export async function getInventoryProductDetail(id: string): Promise<InventoryPr
     ) imgs on true
     left join product_variants pv on pv.product_id = p.id
     left join inventory_levels il on il.variant_id = pv.id
-    where p.id = $1
+    where p.id = $1::uuid
     group by p.id, c.name, b.name, t.name, imgs.images
     limit 1
   `, [id]);

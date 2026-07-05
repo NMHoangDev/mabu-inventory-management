@@ -1,6 +1,10 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export type VoucherType = "receipt" | "payment";
 export type VoucherStatus = "draft" | "completed" | "cancelled";
 
@@ -169,10 +173,9 @@ export async function getCashBookEntry(id: string): Promise<CashBookEntry | null
   if (!isDatabaseConfigured) return null;
   await ensureDatabase();
   const pool = getPool();
-  const result = await pool.query(
-    `select * from cash_book where id = $1 or code = $1 limit 1`,
-    [id]
-  );
+  const result = isUuid(id)
+    ? await pool.query(`select * from cash_book where id = $1::uuid limit 1`, [id])
+    : await pool.query(`select * from cash_book where code = $1 limit 1`, [id]);
   if (result.rows.length === 0) return null;
   return rowToEntry(result.rows[0]);
 }

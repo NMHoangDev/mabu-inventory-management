@@ -1,0 +1,28 @@
+# Git đã loại trừ phần lớn rồi — file này chỉ thêm các artifact tạm mà
+# `docker build` không cần, giúp cache layer nhanh hơn và image nhỏ hơn.
+
+# Dev artifacts (logs, scratch files, build errors)
+*.log
+*.err.log
+*.out.log
+*.tsbuildinfo
+dev.*.log
+scratch/
+build.verify.log
+
+# Local data (mounted as volumes, không cần bake vào image)
+data/
+db/
+backups/
+exports/
+.uploads/
+
+# Backups & stray IDE
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# Standalone Python app (rỗng, không build ở repo này)
+apps/
+apps.old/

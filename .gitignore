@@ -40,3 +40,7 @@ Thumbs.db
 FlowScan Pro/
 LOVABLE_PROMPT.md
 6KP
+
+# Standalone apps directories (not part of the monorepo)
+apps/
+apps.old/

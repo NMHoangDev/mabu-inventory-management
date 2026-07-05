@@ -1,6 +1,10 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export interface Supplier {
   id: string;
   code: string;
@@ -140,10 +144,9 @@ export async function getSupplier(id: string): Promise<Supplier | null> {
   if (!isDatabaseConfigured) return null;
   await ensureDatabase();
   const pool = getPool();
-  const result = await pool.query(
-    `select * from suppliers where id = $1 or code = $1 limit 1`,
-    [id]
-  );
+  const result = isUuid(id)
+    ? await pool.query(`select * from suppliers where id = $1::uuid limit 1`, [id])
+    : await pool.query(`select * from suppliers where code = $1 limit 1`, [id]);
   if (result.rows.length === 0) return null;
   return rowToSupplier(result.rows[0]);
 }
@@ -267,5 +270,5 @@ export async function deleteSupplier(id: string): Promise<void> {
   if (!isDatabaseConfigured) return;
   await ensureDatabase();
   const pool = getPool();
-  await pool.query(`delete from suppliers where id = $1`, [id]);
+  await pool.query(`delete from suppliers where id = $1::uuid`, [id]);
 }

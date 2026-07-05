@@ -12,7 +12,7 @@ import {
   ReportTable,
   SvgBarChart,
   SummaryCard,
-} from "@/components/reports/ReportShell";
+} from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchAboveThreshold } from "@/services/reportService";
 
 export default function AboveThresholdPage() {
