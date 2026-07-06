@@ -54,7 +54,33 @@ function logErr(...args) {
   console.error("[ZaloExt]", ...args);
 }
 // ─── SW State Persistence ─────────────────────────────────────────
+
+/**
+ * One-shot migration: tự sửa backendUrl đã lưu trong chrome.storage.local
+ * khi user dùng bản extension cũ vẫn trỏ về mabuu.markeeai.com.
+ * Migration này chạy 1 lần/session (đánh dấu bằng key `_mabuuToTimetechMigrated`)
+ * để tránh chiếm tài nguyên; sau khi chuyển sang timetech thì tự tắt.
+ */
+async function migrateLegacyBackendUrl() {
+  try {
+    const { _mabuuToTimetechMigrated, backendUrl } = await chrome.storage.local.get([
+      "_mabuuToTimetechMigrated",
+      "backendUrl",
+    ]);
+    if (_mabuuToTimetechMigrated) return;
+    const NEW = "https://timetech.markeeai.com";
+    if (backendUrl && /(^|\/\/|@)mabuu\.markeeai\.com/i.test(backendUrl)) {
+      log(`migrateLegacyBackendUrl: ${backendUrl} -> ${NEW}`);
+      await chrome.storage.local.set({ backendUrl: NEW });
+    }
+    await chrome.storage.local.set({ _mabuuToTimetechMigrated: true });
+  } catch (e) {
+    logErr("migrateLegacyBackendUrl failed", e);
+  }
+}
+
 async function loadState() {
+  await migrateLegacyBackendUrl();
   const s = await chrome.storage.session.get([
     'loginStatus',
     'lastQrDataUrl',
@@ -89,11 +115,18 @@ async function getSettings() {
     "userId",
     "inboxId",
   ]);
+  // Defensive: nếu storage còn mabuu (do extension cũ / chưa migrate), rewrite ngay tại đây
+  let backendUrl = (result.backendUrl || "https://timetech.markeeai.com").replace(
+    /\/+$/,
+    ""
+  );
+  if (/(^|\/\/|@)mabuu\.markeeai\.com/i.test(backendUrl)) {
+    log(`getSettings: rewrite legacy backendUrl ${backendUrl} -> https://timetech.markeeai.com`);
+    backendUrl = "https://timetech.markeeai.com";
+    chrome.storage.local.set({ backendUrl }).catch(() => {});
+  }
   return {
-    backendUrl: (result.backendUrl || "https://timetech.markeeai.com").replace(
-      /\/+$/,
-      ""
-    ),
+    backendUrl,
     apiKey: result.apiKey || "",
     userId: result.userId || "default",
     inboxId: result.inboxId || null,
@@ -696,7 +729,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           importZaloInProgress = true;
           startKeepAlive();
-          const bridgeUrl = (params.backend_url || "http://localhost:3001").replace(/\/+$/, "");
+          // Defensive: nếu frontend gửi nhầm mabuu.markeeai.com thì rewrite sang timetech
+          // ngay tại biên extension để không phụ thuộc env prod đã được deploy hay chưa.
+          const sanitizeBridgeUrl = (raw) => {
+            if (!raw) return raw;
+            if (/(^|\/\/|@)mabuu\.markeeai\.com/i.test(raw)) {
+              log(`IMPORT_ZALO_SESSION: rewrite legacy bridgeUrl ${raw} -> https://timetech.markeeai.com/zalo-bridge`);
+              return "https://timetech.markeeai.com/zalo-bridge";
+            }
+            return raw;
+          };
+          const bridgeUrl = sanitizeBridgeUrl(
+            (params.backend_url || "http://localhost:3001").replace(/\/+$/, "")
+          );
           const loginTimeoutMs = params.login_timeout_ms || 60000;
           const accountId = String(params.account_id || "default");
           const chatwootAccountId = String(params.chatwoot_account_id || params.chatwootAccountId || "");

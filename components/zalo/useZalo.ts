@@ -1232,8 +1232,8 @@ if (type === "new_message") {
               void refreshConversations();
             }
           } else if (type === "session_expired") {
-            showToast("Phiên Zalo đã hết hạn. Vui lòng đăng nhập lại.", false);
-            void pollAuth();
+        showToast("Phiên Zalo đã hết hạn. Vui lòng đăng nhập lại.", false);
+        void pollAuth();
           }
         } catch (err) {
           // Bỏ qua payload không hợp lệ, không crash subscription.
@@ -1349,11 +1349,21 @@ if (type === "new_message") {
     setAuthLoading(true);
     try {
       await ext.ping().catch(() => undefined);
-      const bridgeUrl =
-        (typeof process !== "undefined" &&
-          (process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL ||
-            process.env.NEXT_PUBLIC_API_BASE_URL)) ||
-        "http://localhost:3001";
+      const bridgeUrl = (() => {
+        const raw =
+          (typeof process !== "undefined" &&
+            (process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL ||
+              process.env.NEXT_PUBLIC_API_BASE_URL)) ||
+          "http://localhost:3001";
+        // Defensive: nếu env prod còn trỏ về mabuu.markeeai.com thì rewrite sang timetech.
+        if (/(^|\/\/|@)mabuu\.markeeai\.com/i.test(raw)) {
+          console.warn(
+            "[Zalo] NEXT_PUBLIC_ZALO_BRIDGE_URL trỏ về mabuu — tự động fallback sang timetech"
+          );
+          return "https://timetech.markeeai.com/zalo-bridge";
+        }
+        return raw;
+      })();
 
       const accountId =
         (typeof process !== "undefined" &&
