@@ -90,7 +90,7 @@ async function getSettings() {
     "inboxId",
   ]);
   return {
-    backendUrl: (result.backendUrl || "https://seeding.markeeai.com").replace(
+    backendUrl: (result.backendUrl || "https://timetech.markeeai.com").replace(
       /\/+$/,
       ""
     ),

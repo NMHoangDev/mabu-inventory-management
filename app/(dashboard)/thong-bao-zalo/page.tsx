@@ -26,7 +26,7 @@ const ZaloPageContent = dynamic(
  * `chrome://extensions` → "Load unpacked" trỏ vào thư mục vừa giải nén.
  */
 const ZALO_EXTENSION_DOWNLOAD_URL =
-  "https://drive.google.com/uc?export=download&id=1f8e3HQzcxICu9RMYpvYWGWvwV2Jn5VBJ";
+  "https://drive.google.com/uc?export=download&id=155R1THDDxaeV2tCoZjOMcXbetTGb4uS3";
 
 /**
  * Trang thông báo Zalo — yêu cầu đăng nhập nhân viên (Phase 3).
