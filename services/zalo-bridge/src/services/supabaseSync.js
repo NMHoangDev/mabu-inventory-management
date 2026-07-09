@@ -20,7 +20,7 @@ import { ThreadType } from 'zca-js';
 let _client = null;
 let _warnedMissing = false;
 
-function getClient() {
+export function getClient() {
   if (_client) return _client;
   // Ưu tiên SUPABASE_URL (server-side full access). Nếu không có (vd FE-only
   // env), fallback NEXT_PUBLIC_SUPABASE_URL — vẫn truy cập được nhờ RLS policy
@@ -95,12 +95,61 @@ function resolveMessageId(msg) {
 }
 
 /**
+ * Trích image_urls từ 1 object content ảnh của zca-js. Message ảnh (chat.photo)
+ * trả `data.content` là OBJECT (không phải string) với field tên khác nhau tuỳ
+ * chất lượng — ưu tiên chất lượng cao nhất, chỉ lấy 1 URL/ảnh (không lấy cả
+ * hdUrl+normalUrl+href vì đều là CÙNG 1 ảnh, lấy hết sẽ bị trùng ảnh khi hiển
+ * thị/forward). Field names theo đúng những gì zca-js dùng khi UPLOAD ảnh
+ * (xem zca-js/dist/apis/sendMessage.js, uploadAttachment.js) — Zalo protocol
+ * dùng chung field name cho cả gửi/nhận.
+ */
+function extractOneImageUrl(contentObj) {
+  if (!contentObj || typeof contentObj !== 'object') return null;
+  const url =
+    contentObj.hdUrl ||
+    contentObj.oriUrl ||
+    contentObj.normalUrl ||
+    contentObj.rawUrl ||
+    contentObj.href ||
+    contentObj.thumbUrl ||
+    contentObj.thumb ||
+    null;
+  return typeof url === 'string' && url.length > 0 ? url : null;
+}
+
+/**
  * Trích image_urls từ các field khả dĩ của ZCA payload.
  * ZCA có thể trả ở các field khác nhau tuỳ version: imageUrls (array),
  * thumb (string url), attachments, v.v. → gom về 1 mảng string[].
  */
-function resolveImageUrls(msg) {
+export function resolveImageUrls(msg) {
   const d = msg?.data || {};
+  const c = d.content;
+
+  // Nhiều ảnh trong 1 tin: content là array các object ảnh.
+  if (Array.isArray(c) && c.length > 0 && typeof c[0] === 'object') {
+    const urls = c.map(extractOneImageUrl).filter((u) => u);
+    if (urls.length > 0) return urls;
+  }
+  // 1 ảnh: content là 1 object.
+  if (c && typeof c === 'object' && !Array.isArray(c)) {
+    const one = extractOneImageUrl(c);
+    if (one) return [one];
+    // Bỏ qua sticker ({id, cateId, ...}) — đã có nhánh xử lý riêng ở
+    // forwardEngine.js, không phải "ảnh không nhận diện được".
+    const isStickerShape =
+      Number.isFinite(Number(c.id)) && Number.isFinite(Number(c.cateId));
+    if (!isStickerShape) {
+      // Content là object nhưng không khớp field ảnh nào đã biết — có thể là
+      // format mới/khác (video, file, share link...). Log lại raw shape (cắt
+      // ngắn) để lần sau bổ sung field đúng, thay vì âm thầm coi là "unsupported".
+      logger.warn(
+        `[resolveImageUrls] content object không khớp field ảnh đã biết: ${JSON.stringify(c).slice(0, 300)}`
+      );
+    }
+  }
+
+  // Fallback — field top-level cũ, giữ lại phòng trường hợp payload khác (vd CMRecent).
   if (Array.isArray(d.imageUrls)) {
     return d.imageUrls.filter((u) => typeof u === 'string' && u.length > 0);
   }
@@ -136,15 +185,26 @@ function resolveImageUrls(msg) {
 // Trước đây upsert LUÔN ghi đè conversation_name bằng senderName, kể cả
 // khi mình gửi → tên conv bị đổi thành tên mình ("Nguyễn Minh Hoàng").
 //
-// Quy tắc mới:
-//   - Check conv đã có trong DB chưa.
-//   - Row mới (chưa có) → insert với fallbackName hoặc senderName (nếu có).
-//   - Row đã có:
-//     - tin incoming (isSelf=false) + senderName hợp lệ → UPDATE name (đối
-//       phương đổi tên Zalo, hoặc lần đầu có tên thật).
-//     - tin mình gửi (isSelf=true) → KHÔNG đụng conversation_name, giữ nguyên.
-//   - Không có senderName + cần insert mới → dùng fallback
-//     `[Nhóm] Zalo Nhóm <id>` hoặc `Zalo <id>` để row không null.
+// QUAN TRỌNG — bug đã fix (2026-07-09): senderName là tên NGƯỜI GỬI 1 tin
+// nhắn cụ thể. Với GROUP, người gửi chỉ là 1 thành viên bất kỳ trong nhóm —
+// KHÔNG BAO GIỜ được dùng làm tên nhóm (khác USER/DM, nơi senderName của đối
+// phương CHÍNH LÀ tên hội thoại hợp lệ). Bug cũ dùng chung logic senderName
+// cho cả group/user → mỗi khi có người khác nhắn vào group, tên nhóm bị ghi
+// đè thành tên người đó (vd "Ngọc Thảo", "Gia Sư Yến"...) ngay trong DB, xảy
+// ra ở TẦNG BRIDGE trên MỌI tin nhắn — nặng hơn nhiều so với bug hiển thị tạm
+// thời ở frontend (useZalo.ts) đã fix trước đó, vì nó ghi đè liên tục, không
+// tự sửa được dù frontend có logic resolve lại tên thật.
+//
+// Quy tắc:
+//   - GROUP: KHÔNG bao giờ set tên từ senderName. Row mới → fallback
+//     `[Nhóm] Zalo Nhóm <id>` (tên thật sẽ được frontend resolve qua bridge
+//     /group-info — xem ensureConversationInSupabase trong useZalo.ts). Row
+//     đã có → luôn giữ nguyên, không đụng vào.
+//   - USER (DM): senderName của đối phương là tên hợp lệ.
+//     - Row mới (chưa có) → dùng senderName (nếu incoming + có tên) hoặc fallback.
+//     - Row đã có + tin incoming (isSelf=false) + senderName hợp lệ → UPDATE
+//       name (đối phương đổi tên Zalo, hoặc lần đầu có tên thật).
+//     - Row đã có + tin mình gửi (isSelf=true) → KHÔNG đụng, giữ nguyên.
 async function resolveConversationName(accountId, conversationId, threadId, threadType, senderName, isSelf) {
   try {
     const sb = getClient();
@@ -156,12 +216,23 @@ async function resolveConversationName(accountId, conversationId, threadId, thre
       .eq('conversation_id', conversationId)
       .maybeSingle();
     if (error) return null;
+
+    if (threadType === 'group') {
+      // Format `Group <id>` phải khớp FALLBACK_NAME_RE ở useZalo.ts
+      // (/^(Group|Zalo)\s+\d+$/) — đây là format fallback DUY NHẤT dùng
+      // xuyên suốt cả bridge + FE (route.ts toRow(), ensureConversationInSupabase).
+      // Dùng format khác (vd cũ "[Nhóm] Zalo Nhóm <id>") sẽ khiến FE không
+      // nhận ra đây là tên tạm → không tự resolve sang tên nhóm thật qua
+      // /group-info được.
+      if (!data) return `Group ${threadId}`;
+      return null; // giữ tên cũ — senderName KHÔNG bao giờ đúng cho group
+    }
+
+    // USER (DM)
     if (!data) {
       // Row mới — dùng fallback hoặc senderName (nếu incoming + có tên)
       if (!isSelf && senderName && senderName.trim().length > 0) return senderName;
-      return threadType === 'group'
-        ? `[Nhóm] Zalo Nhóm ${threadId}`
-        : `Zalo ${threadId}`;
+      return `Zalo ${threadId}`;
     }
     // Row đã có
     if (isSelf) return null; // giữ tên cũ

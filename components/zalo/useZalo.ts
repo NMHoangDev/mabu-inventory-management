@@ -220,6 +220,7 @@ async function ensureConversationInSupabase(
       thread_id?: string;
       conversation_name?: string | null;
       avatar_url?: string | null;
+      thread_type?: string | null;
     } | null = null;
     if (check.ok) {
       const data = await check.json();
@@ -241,17 +242,26 @@ async function ensureConversationInSupabase(
       FALLBACK_NAME_RE.test(existing.conversation_name.trim()) ||
       (!!fallbackName &&
         existing.conversation_name.trim() === fallbackName.trim());
-    if (existing && !isFallbackName) {
+    // Lệch thread_type: caller chắc chắn đây là group (tín hiệu từ SSE/bridge
+    // — KHÔNG phải default "user" đoán mò của openConversation) nhưng row DB
+    // đang lưu "user" → tên hiện tại (nếu có) thực chất là sender_name bị lưu
+    // nhầm thành conversation_name lúc trước đó cũng bị đoán sai type. Phải
+    // coi như fallback để retry /group-info + ghi đè lại thread_type đúng,
+    // nếu không sẽ kẹt vĩnh viễn (tên người hiển thị cho 1 group).
+    const hasWrongType =
+      threadType === "group" && !!existing?.thread_type && existing.thread_type !== "group";
+    const needsResolve = isFallbackName || hasWrongType;
+    if (existing && !needsResolve) {
       // eslint-disable-next-line no-console
       console.log(
         `[ZALO_FE][ENSURE_SKIP] threadId=${threadId} already in DB name="${existing.conversation_name}"`
       );
       return;
     }
-    if (existing && isFallbackName) {
+    if (existing && needsResolve) {
       // eslint-disable-next-line no-console
       console.log(
-        `[ZALO_FE][ENSURE_RETRY] threadId=${threadId} current_name="${existing.conversation_name}" looks like fallback — try /group-info`
+        `[ZALO_FE][ENSURE_RETRY] threadId=${threadId} current_name="${existing.conversation_name}" current_type="${existing.thread_type}" wrongType=${hasWrongType} — try /group-info`
       );
     }
     // 2) Row chưa có HOẶC tên là fallback → resolve tên thật:
@@ -1185,29 +1195,36 @@ if (type === "new_message") {
                     // Conversation hoàn toàn mới — chèn row tạm để user thấy ngay.
                     next = [
                       ...prev,
-                      {
-                        conversation_id: targetThread,
-                        thread_id: targetThread,
-                        thread_type:
-                          data?.thread_type === "group" || data?.isGroup
-                            ? "group"
-                            : "user",
-                        conversation_name:
-                          data?.sender_name ||
-                          (data?.thread_type === "group"
+                      (() => {
+                        const isGroupConv =
+                          data?.thread_type === "group" || data?.isGroup;
+                        return {
+                          conversation_id: targetThread,
+                          thread_id: targetThread,
+                          thread_type: isGroupConv ? "group" : "user",
+                          // QUAN TRỌNG: KHÔNG dùng sender_name làm tên hiển thị cho
+                          // group — sender chỉ là 1 thành viên bất kỳ trong nhóm, không
+                          // đại diện cho tên nhóm. Trước đây ưu tiên sender_name bất kể
+                          // type → sidebar/chat header hiển thị nhầm "tên người gửi"
+                          // thay vì tên nhóm cho tới khi refreshConversations() ở dưới
+                          // resolve tên thật (gây hiệu ứng "vài giây sau mới đúng").
+                          // Với user (DM) thì sender_name chính là tên đối phương nên
+                          // vẫn dùng làm placeholder hợp lý.
+                          conversation_name: isGroupConv
                             ? `Group ${targetThread}`
-                            : `Zalo ${targetThread}`),
-                        account_id: accountIdRef.current,
-                        latest_message_at: isoNow,
-                        last_message_ts: tsFromSse,
-                        latest_content: latestContent,
-                        latest_sender_name: data?.sender_name ?? null,
-                        latest_is_self: isOwn,
-                        message_count: 1,
-                        has_messages: true,
-                        unread_count: isOwn ? 0 : 1,
-                        avatar_url: null,
-                      } as ZaloConversation,
+                            : data?.sender_name || `Zalo ${targetThread}`,
+                          account_id: accountIdRef.current,
+                          latest_message_at: isoNow,
+                          last_message_ts: tsFromSse,
+                          latest_content: latestContent,
+                          latest_sender_name: data?.sender_name ?? null,
+                          latest_is_self: isOwn,
+                          message_count: 1,
+                          has_messages: true,
+                          unread_count: isOwn ? 0 : 1,
+                          avatar_url: null,
+                        } as ZaloConversation;
+                      })(),
                     ];
                   }
                   // Sort lại theo latest_message_at DESC để thread "có tin mới"

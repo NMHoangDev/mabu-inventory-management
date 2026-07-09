@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentStaff } from "@/lib/zalo/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -50,6 +51,10 @@ export async function GET(_req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   // Create or upsert staff by email. Body: { email, full_name, role }
+  const staff = await getCurrentStaff(req);
+  if (staff.role !== "admin") {
+    return NextResponse.json({ error: "Chỉ admin mới được tạo/sửa nhân viên." }, { status: 403 });
+  }
   const body = await req.json().catch(() => ({}));
   const { email, full_name, role } = body || {};
   if (!email || !full_name) {

@@ -54,7 +54,7 @@ router.get('/', (req, res) => {
   try {
     // Union: ids từ registry ∪ ids từ sessionManager (để catch session đã login
     // mà chưa được register — ví dụ test/extension cũ).
-    const runtimeIds = sessionManager.listSessions();
+    const runtimeIds = sessionManager.listSessions().map((s) => s.accountId);
     const ids = new Set([
       ...accountRegistry.listAccounts().map((a) => a.account_id),
       ...runtimeIds

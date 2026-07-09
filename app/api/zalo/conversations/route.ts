@@ -30,7 +30,6 @@ async function pickKey(): Promise<{ key: string; isService: boolean } | null> {
     try {
       const r = await fetch(`${SUPABASE_URL}/rest/v1/zalo_conversations_ui?select=conversation_id&limit=1`, {
         headers: { apikey: c.key, Authorization: `Bearer ${c.key}` },
-        // @ts-expect-error Next.js fetch options
         next: { revalidate: 0 },
       });
       if (r.ok) {
@@ -190,7 +189,7 @@ export async function POST(req: NextRequest) {
 // upsert. Khi row INSERT mới với cả 2 field null → sẽ fail NOT NULL constraint
 // nếu schema yêu cầu. Tuy nhiên schema hiện tại cho phép null nên OK.
 const dbSafeRows = rows.map((r) => {
-    const out = { ...r };
+    const out: Record<string, unknown> = { ...r };
     if (out.last_message_ts == null) delete out.last_message_ts;
     if (out.latest_message_at == null) delete out.latest_message_at;
     return out;

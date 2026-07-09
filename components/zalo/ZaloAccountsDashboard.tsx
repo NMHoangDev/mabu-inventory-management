@@ -187,6 +187,18 @@ export default function ZaloAccountsDashboard({
     }
   }
 
+  async function handleResetPassword(s: Staff) {
+    if (!confirm(`Đặt lại mật khẩu cho "${s.full_name}"?\n\nLần đăng nhập kế tiếp của họ sẽ set mật khẩu mới.`)) return;
+    try {
+      const res = await fetch(`/api/zalo/staff/${s.id}/reset-password`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Lỗi đặt lại mật khẩu.");
+      setNotice(`Đã đặt lại mật khẩu cho "${s.full_name}".`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi đặt lại mật khẩu.");
+    }
+  }
+
   async function handleDelete(accountId: string) {
     if (!confirm(`Xoá tài khoản "${accountId}" khỏi registry?\n\nFile cookies vẫn được giữ — chỉ xoá metadata.`)) return;
     try {
@@ -314,8 +326,17 @@ export default function ZaloAccountsDashboard({
                         {s.role === "admin" ? "Admin" : "Staff"}
                       </span>
                     </div>
-                    <div className="mt-1 text-[10.5px] text-slate-500">
-                      {assigned.length > 0 ? `${assigned.length} TK Zalo` : "Chưa được gán TK"}
+                    <div className="mt-1 flex items-center justify-between gap-1 text-[10.5px] text-slate-500">
+                      <span>{assigned.length > 0 ? `${assigned.length} TK Zalo` : "Chưa được gán TK"}</span>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleResetPassword(s)}
+                          className="shrink-0 text-primary hover:underline"
+                        >
+                          Đặt lại mật khẩu
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );

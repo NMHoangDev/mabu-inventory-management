@@ -46,6 +46,9 @@
  */
 
 import { Router } from 'express';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 import { ThreadType } from 'zca-js';
 import { sessionManager } from '../services/sessionManager.js';
 import { logger } from '../utils/logger.js';
@@ -53,6 +56,20 @@ import { logger } from '../utils/logger.js';
 const router = Router();
 
 const DEFAULT_ACCOUNT = process.env.ZALO_DEFAULT_ACCOUNT || 'shop-owner';
+
+// Thư mục tạm cho file upload từ /send-media — dùng chung với webhook.js
+// (attachment Chatwoot) để nhất quán, dọn dẹp khi bridge start (xem index.js
+// "Cleaned up N leftover temporary attachment files").
+const UPLOAD_TEMP_DIR = '/app/data/temp_attachments';
+try {
+  fs.mkdirSync(UPLOAD_TEMP_DIR, { recursive: true });
+} catch (_) {
+  /* ignore — best effort, upload sẽ tự fail nếu dir không ghi được */
+}
+const upload = multer({
+  dest: UPLOAD_TEMP_DIR,
+  limits: { fileSize: 50 * 1024 * 1024, files: 10 },
+});
 
 // In-memory cache: thread_id (raw, không prefix) → thread_type ("user" | "group").
 // Khi frontend gọi API với conversation_id raw (không prefix), bridge lookup cache
@@ -485,6 +502,30 @@ async function resolveThreadTypeAsync(accountId, api, threadId) {
   return 'user';
 }
 
+// Resolve thread_type cuối cùng dùng chung cho /send và /send-media — ưu
+// tiên client gửi lên (UI biết chính xác nhất), rồi cache, rồi resolve on-the-fly.
+// Trả về { finalType } hoặc { error } (object lỗi để route trả res trực tiếp).
+async function resolveFinalType(req, ctx, parsed) {
+  const clientType = req.body?.thread_type;
+  if (clientType === 'group' || clientType === 'user') {
+    return { finalType: clientType };
+  }
+  if (parsed.threadType === 'group' || parsed.threadType === 'user') {
+    return { finalType: parsed.threadType };
+  }
+  const resolved = await resolveThreadTypeAsync(ctx.accountId, ctx.api, parsed.threadId);
+  if (!resolved) {
+    return {
+      error: {
+        error: 'thread_type_unknown',
+        message: 'Không xác định được thread là group hay user. Hãy truyền thread_type trong body.',
+        threadId: parsed.threadId,
+      },
+    };
+  }
+  return { finalType: resolved };
+}
+
 // ── Messages: list ─────────────────────────────────────────────────────────────
 router.get('/all-platform/zalo/conversations/:id/messages', async (req, res) => {
   try {
@@ -616,24 +657,8 @@ router.post('/all-platform/zalo/conversations/:id/send', async (req, res) => {
     const parsed = parseThreadId(req.params.id, ctx.accountId);
     if (!parsed) return res.status(400).json({ error: 'Invalid conversation id' });
 
-    // Ưu tiên thread_type client gửi lên — UI biết chính xác nhất.
-    const clientType = req.body?.thread_type;
-    let finalType;
-    if (clientType === 'group' || clientType === 'user') {
-      finalType = clientType;
-    } else if (parsed.threadType === 'group' || parsed.threadType === 'user') {
-      finalType = parsed.threadType;
-    } else {
-      // Cache miss + không có clientType → resolve on-the-fly
-      finalType = await resolveThreadTypeAsync(ctx.accountId, ctx.api, parsed.threadId);
-      if (!finalType) {
-        return res.status(400).json({
-          error: 'thread_type_unknown',
-          message: 'Không xác định được thread là group hay user. Hãy truyền thread_type trong body.',
-          threadId: parsed.threadId,
-        });
-      }
-    }
+    const { finalType, error: typeError } = await resolveFinalType(req, ctx, parsed);
+    if (typeError) return res.status(400).json(typeError);
 
     const text = String(req.body?.text || '').trim();
     if (!text) return res.status(400).json({ error: 'text is required' });
@@ -641,7 +666,7 @@ router.post('/all-platform/zalo/conversations/:id/send', async (req, res) => {
     // ── LOG: REST send được gọi từ frontend ─────────────────────────────────
     logger.info(
       `[${ctx.accountId}] [SEND_API] convId_in_url=${req.params.id} ` +
-      `parsed.threadId=${parsed.threadId} clientType=${clientType || 'none'} ` +
+      `parsed.threadId=${parsed.threadId} clientType=${req.body?.thread_type || 'none'} ` +
       `finalType=${finalType} text="${text.slice(0, 80)}"`
     );
 
@@ -659,7 +684,24 @@ router.post('/all-platform/zalo/conversations/:id/send', async (req, res) => {
 });
 
 // ── Send media ────────────────────────────────────────────────────────────────
-router.post('/all-platform/zalo/conversations/:id/send-media', async (req, res) => {
+// multipart field name phải là "files" (khớp lib/zalo-api.ts sendMedia() —
+// fd.append("files", f, f.name)). multer lưu tạm vào UPLOAD_TEMP_DIR (dest
+// mode) → path không có extension, phải rename thêm ext gốc thì zca-js mới
+// detect đúng loại file (getFileExtension/getFileName dựa vào path.extname —
+// xem zca-js/dist/apis/uploadAttachment.js).
+router.post('/all-platform/zalo/conversations/:id/send-media', (req, res, next) => {
+  // Gọi multer thủ công (thay vì đặt trực tiếp làm middleware) để bắt lỗi
+  // (file quá lớn, quá số lượng...) và trả JSON gọn thay vì rơi vào Express
+  // default error handler (trả HTML, frontend hiển thị rác trong toast lỗi).
+  upload.array('files', 10)(req, res, (err) => {
+    if (err) {
+      logger.warn(`[send-media] multer error: ${err.message}`);
+      return res.status(400).json({ error: `upload_failed: ${err.message}` });
+    }
+    next();
+  });
+}, async (req, res) => {
+  const renamedPaths = [];
   try {
     const ctx = requireLoggedIn(req, res);
     if (!ctx) return;
@@ -667,22 +709,60 @@ router.post('/all-platform/zalo/conversations/:id/send-media', async (req, res) 
     const parsed = parseThreadId(req.params.id, ctx.accountId);
     if (!parsed) return res.status(400).json({ error: 'Invalid conversation id' });
 
-    // Đơn giản hoá: parse raw multipart bằng buffer; chưa support streaming.
-    // Thực tế frontend chỉ test local nên file nhỏ — chấp nhận.
-    const contentType = req.headers['content-type'] || '';
-    if (!contentType.startsWith('multipart/form-data')) {
-      return res.status(400).json({ error: 'multipart/form-data required' });
+    const { finalType, error: typeError } = await resolveFinalType(req, ctx, parsed);
+    if (typeError) return res.status(400).json(typeError);
+
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'files is required (multipart field "files")' });
     }
 
-    // Lấy file data thô (đã ở req.body nếu multer; vì chưa có, fallback chỉ trả text).
-    const text = (req.body && req.body.text) || '';
+    for (const f of files) {
+      const ext = path.extname(f.originalname || '') || '';
+      const finalPath = ext ? `${f.path}${ext}` : f.path;
+      if (finalPath !== f.path) fs.renameSync(f.path, finalPath);
+      renamedPaths.push(finalPath);
+    }
+
+    const text = String(req.body?.text || '').trim();
+
+    // ── LOG: REST send-media được gọi từ frontend ───────────────────────────
+    logger.info(
+      `[${ctx.accountId}] [SEND_MEDIA_API] convId_in_url=${req.params.id} ` +
+      `parsed.threadId=${parsed.threadId} finalType=${finalType} ` +
+      `files=${renamedPaths.length} text="${text.slice(0, 80)}"`
+    );
+
+    try {
+      await sessionManager.sendMessage(ctx.accountId, parsed.threadId, finalType, {
+        msg: text,
+        attachments: renamedPaths.length === 1 ? renamedPaths[0] : renamedPaths,
+      });
+    } catch (e) {
+      logger.error(`[${ctx.accountId}] sendMessage (media) failed`, { err: e.message });
+      return res.status(502).json({ error: e.message });
+    }
+
     res.json({
-      ok: false,
+      ok: true,
       conversation_id: req.params.id,
-      message: 'send-media chưa impl trong bridge (dùng send text trước). text=' + text,
+      files_sent: renamedPaths.length,
+      message: 'Sent',
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    // Dọn file tạm bất kể thành công/thất bại — không để rác trong UPLOAD_TEMP_DIR.
+    // Check existsSync trước vì file có thể đã bị rename (path gốc không còn)
+    // hoặc lỗi xảy ra trước khi rename xong (path gốc vẫn còn, chưa vào renamedPaths).
+    const candidates = [...renamedPaths, ...(Array.isArray(req.files) ? req.files.map((f) => f.path) : [])];
+    for (const p of candidates) {
+      try {
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch (_) {
+        /* ignore cleanup error */
+      }
+    }
   }
 });
 

@@ -17,6 +17,7 @@ import { chatwootService } from './chatwootService.js';
 import { logger } from '../utils/logger.js';
 import crypto from 'crypto';
 import { persistIncomingMessage, catchUpRecentMessages } from './supabaseSync.js';
+import { handleIncomingGroupMessage } from './forwardEngine.js';
 import * as accountRegistry from './accountRegistry.js';
 
 // Lazy-loaded event bus (avoid circular import với routes/zalo-client.js)
@@ -562,6 +563,21 @@ async function attachListener(accountId, api, inboxId) {
           { err: err instanceof Error ? err.message : String(err) }
         );
       });
+
+      // Auto-forward "nhóm chính" → nhóm đích (xem forwardEngine.js). Fire-and-forget:
+      // KHÔNG await để không block xử lý message khác / không dính timeout của
+      // withTimeout() khi có nhiều target + delay. Chạy cho MỌI tin nhắn trong group
+      // (kể cả isSelf) — đặt trước nhánh isSelf/echo bên dưới để không bị return sớm.
+      if (isGroupMsg && payload.thread_id) {
+        handleIncomingGroupMessage({
+          accountId,
+          api,
+          msg,
+          threadId: payload.thread_id,
+        }).catch((err) => {
+          logger.error(`[${accountId}] forwardEngine error thread=${payload.thread_id}: ${err.message}`);
+        });
+      }
     } catch (err) {
       logger.error(`[${accountId}] emitEvent new_message failed: ${err.message}`);
     }

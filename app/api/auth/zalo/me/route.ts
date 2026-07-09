@@ -1,16 +1,27 @@
 /**
  * GET  /api/auth/zalo/me — trả về staff session hiện tại
- * POST /api/auth/zalo/me { staffId } — set cookie current_staff_id
+ * POST /api/auth/zalo/me { staffId, password } — verify mật khẩu rồi mới set
+ *   cookie current_staff_id.
  *
- * Cookie-based auth — chưa có login page chính thức. POST chấp nhận staffId
- * để admin switch sang staff user (vd khi test phân quyền).
+ * Trước đây POST chỉ format-check staffId (bất kỳ UUID nào cũng login được,
+ * không hề kiểm tra credential) — đây là lỗ hổng auth nghiêm trọng đã fix.
+ * Bootstrap: staff chưa có password_hash (lần đăng nhập đầu, kể cả admin@local
+ * được seed sẵn) → mật khẩu gõ vào lần đầu sẽ được lưu làm mật khẩu chính thức.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { STAFF_COOKIE_NAME, STAFF_COOKIE_OPTS, getCurrentStaff } from "@/lib/zalo/auth";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
+const KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  "";
 
 export async function GET(req: NextRequest) {
   const { getCurrentStaffStrict } = await import("@/lib/zalo/auth");
@@ -30,13 +41,44 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const staffId = typeof body?.staffId === "string" ? body.staffId.trim() : "";
+  const password = typeof body?.password === "string" ? body.password : "";
   if (!staffId) {
     return NextResponse.json({ error: "staffId required" }, { status: 400 });
   }
-  // Validate UUID đơn giản (không gọi supabase — chỉ format check).
   if (!/^[0-9a-f-]{36}$/i.test(staffId)) {
     return NextResponse.json({ error: "staffId không hợp lệ" }, { status: 400 });
   }
+  if (password.length < 4) {
+    return NextResponse.json({ error: "Mật khẩu cần ít nhất 4 ký tự." }, { status: 400 });
+  }
+  if (!SUPABASE_URL || !KEY) {
+    return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
+  }
+
+  const sb = createClient(SUPABASE_URL, KEY, { auth: { persistSession: false } });
+  const { data: staff, error } = await sb
+    .from("staff")
+    .select("id,is_active,password_hash")
+    .eq("id", staffId)
+    .maybeSingle();
+  if (error || !staff) {
+    return NextResponse.json({ error: "Tài khoản không tồn tại." }, { status: 404 });
+  }
+  if (!staff.is_active) {
+    return NextResponse.json({ error: "Tài khoản đã bị vô hiệu hoá." }, { status: 403 });
+  }
+
+  if (!staff.password_hash) {
+    // Lần đăng nhập đầu tiên cho tài khoản này → set mật khẩu vừa nhập.
+    const password_hash = hashPassword(password);
+    const { error: updateErr } = await sb.from("staff").update({ password_hash }).eq("id", staffId);
+    if (updateErr) {
+      return NextResponse.json({ error: "Không thiết lập được mật khẩu." }, { status: 500 });
+    }
+  } else if (!verifyPassword(password, staff.password_hash)) {
+    return NextResponse.json({ error: "Sai mật khẩu." }, { status: 401 });
+  }
+
   const res = NextResponse.json({ ok: true, staffId });
   res.cookies.set(STAFF_COOKIE_NAME, staffId, STAFF_COOKIE_OPTS);
   return res;

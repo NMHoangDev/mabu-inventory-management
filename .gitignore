@@ -24,6 +24,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+tsout.log
+services/zalo-bridge/bridge-out.log
+services/zalo-bridge/bridge-err.log
 
 # Coverage and caches
 coverage/

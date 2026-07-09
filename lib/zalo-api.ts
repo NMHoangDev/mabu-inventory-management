@@ -653,11 +653,11 @@ export const zaloAuthApi = {
       has_session: !!data.has_session
     };
   },
-  async login(staffId: string): Promise<{ ok: true; staffId: string }> {
+  async login(staffId: string, password: string): Promise<{ ok: true; staffId: string }> {
     const res = await fetch("/api/auth/zalo/me", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staffId }),
+      body: JSON.stringify({ staffId, password }),
       credentials: "include"
     });
     return readJson(res);
@@ -666,6 +666,95 @@ export const zaloAuthApi = {
     const res = await fetch("/api/auth/zalo/me", {
       method: "DELETE",
       credentials: "include"
+    });
+    return readJson(res);
+  }
+};
+
+// ── Forward rules API ("nhóm chính" auto-forward) ───────────────────────────
+// CRUD qua Next.js route /api/zalo/forward-rules (đọc/ghi Supabase trực tiếp).
+// Bridge chỉ đọc bảng này (cache 8s) để tự forward — xem forwardEngine.js.
+
+export type ZaloForwardTarget = {
+  id?: number;
+  rule_id?: number;
+  target_thread_id: string;
+  target_thread_name?: string | null;
+  is_enabled?: boolean;
+};
+
+export type ZaloForwardRule = {
+  id: number;
+  account_id: string;
+  name: string | null;
+  master_thread_id: string;
+  master_thread_name: string | null;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  targets: ZaloForwardTarget[];
+};
+
+export type ZaloForwardLog = {
+  id: number;
+  rule_id: number | null;
+  account_id: string;
+  source_thread_id: string;
+  source_msg_id: string | null;
+  target_thread_id: string;
+  content_type: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+};
+
+export const zaloForwardRulesApi = {
+  async list(accountId: string = ZALO_ACCOUNT_ID): Promise<{ rules: ZaloForwardRule[] }> {
+    const res = await fetch(
+      `/api/zalo/forward-rules?account_id=${encodeURIComponent(accountId)}`,
+      { cache: "no-store" }
+    );
+    return readJson(res);
+  },
+  async create(payload: {
+    account_id?: string;
+    name?: string;
+    master_thread_id: string;
+    master_thread_name?: string;
+    targets: Array<{ target_thread_id: string; target_thread_name?: string }>;
+    is_enabled?: boolean;
+  }): Promise<{ rule: ZaloForwardRule }> {
+    const res = await fetch("/api/zalo/forward-rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: ZALO_ACCOUNT_ID, ...payload })
+    });
+    return readJson(res);
+  },
+  async update(
+    ruleId: number,
+    payload: {
+      name?: string | null;
+      is_enabled?: boolean;
+      master_thread_id?: string;
+      master_thread_name?: string | null;
+      targets?: Array<{ target_thread_id: string; target_thread_name?: string }>;
+    }
+  ): Promise<{ ok: true }> {
+    const res = await fetch(`/api/zalo/forward-rules/${ruleId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    return readJson(res);
+  },
+  async remove(ruleId: number): Promise<{ ok: true }> {
+    const res = await fetch(`/api/zalo/forward-rules/${ruleId}`, { method: "DELETE" });
+    return readJson(res);
+  },
+  async logs(ruleId: number, limit = 30): Promise<{ logs: ZaloForwardLog[] }> {
+    const res = await fetch(`/api/zalo/forward-rules/${ruleId}/logs?limit=${limit}`, {
+      cache: "no-store"
     });
     return readJson(res);
   }

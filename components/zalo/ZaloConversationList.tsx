@@ -1,6 +1,7 @@
 "use client";
 
-import { Loader2, MessageSquare, MessageSquarePlus, RefreshCcw, Search } from "lucide-react";
+import { Loader2, MessageSquare, MessageSquarePlus, RefreshCcw, Search, Send } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ZaloConversation } from "@/lib/zalo-api";
 
@@ -64,6 +65,14 @@ export function ZaloConversationList({
               <MessageSquarePlus className="h-3.5 w-3.5" />
               Broadcast
             </button>
+            <Link
+              href="/zalo/forward-rules"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-blue-500 hover:text-blue-600"
+              title="Cấu hình chuyển tiếp tự động từ nhóm chính"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Chuyển tiếp
+            </Link>
             <button
               onClick={onSync}
               disabled={loading}

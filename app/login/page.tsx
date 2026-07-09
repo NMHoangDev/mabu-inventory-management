@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
@@ -27,17 +27,29 @@ import {
  *   - Họ được phép thao tác với những tài khoản Zalo nào
  *
  * Trang này cho phép:
- *   1) Admin/staff chọn 1 nhân viên có sẵn trong bảng `staff` Supabase
- *   2) Cookie `current_staff_id` được set bởi POST /api/auth/zalo/me
+ *   1) Admin/staff chọn 1 nhân viên có sẵn trong bảng `staff` Supabase, nhập
+ *      mật khẩu (xác thực thật ở POST /api/auth/zalo/me — lần đầu đăng nhập
+ *      cho 1 tài khoản sẽ set mật khẩu vừa nhập làm mật khẩu chính thức)
+ *   2) Cookie `current_staff_id` được set sau khi verify thành công
  *   3) Sau khi login, redirect về `?next=<path>` (mặc định /thong-bao-zalo)
  *
- * Lưu ý:
- *   - Đây là login rút gọn (chỉ chọn user, không password) phục vụ nội bộ
- *     công ty. Sau này có thể thay bằng OAuth Google Workspace hoặc email
- *     magic link.
- *   - Cookie không HttpOnly (client đọc được) để UI biết user hiện tại.
+ * Cookie không HttpOnly (client đọc được) để UI biết user hiện tại.
  */
 export default function ZaloLoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-50">
+          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+        </div>
+      }
+    >
+      <ZaloLoginPageInner />
+    </Suspense>
+  );
+}
+
+function ZaloLoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next") || "/thong-bao-zalo";
@@ -48,6 +60,8 @@ export default function ZaloLoginPage() {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [pendingStaff, setPendingStaff] = useState<StaffRecord | null>(null);
+  const [password, setPassword] = useState("");
 
   // Load staff list + current session.
   useEffect(() => {
@@ -74,13 +88,23 @@ export default function ZaloLoginPage() {
     };
   }, []);
 
-  async function handlePick(staff: StaffRecord) {
-    setSubmitting(staff.id);
+  function handlePick(staff: StaffRecord) {
+    setError(null);
+    setSuccess(null);
+    setPassword("");
+    setPendingStaff(staff);
+  }
+
+  async function handleSubmitPassword() {
+    if (!pendingStaff) return;
+    setSubmitting(pendingStaff.id);
     setError(null);
     setSuccess(null);
     try {
-      await zaloAuthApi.login(staff.id);
-      setSuccess(`Đã đăng nhập với tài khoản "${staff.full_name}".`);
+      await zaloAuthApi.login(pendingStaff.id, password);
+      setSuccess(`Đã đăng nhập với tài khoản "${pendingStaff.full_name}".`);
+      setPendingStaff(null);
+      setPassword("");
       // Reload current session
       const me = await zaloAuthApi.me();
       setCurrent(me.staff);
@@ -236,6 +260,67 @@ export default function ZaloLoginPage() {
           </ul>
         </div>
       </div>
+
+      {pendingStaff ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 px-4 backdrop-blur-sm">
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Đóng"
+            onClick={() => (submitting ? null : setPendingStaff(null))}
+          />
+          <div className="relative w-full max-w-sm rounded-xl border bg-white p-5 shadow-2xl">
+            <div className="mb-1 flex items-center gap-2">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white">
+                {(pendingStaff.full_name || pendingStaff.email).slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-900">
+                  {pendingStaff.full_name || pendingStaff.email}
+                </div>
+                <div className="truncate text-xs text-slate-500">{pendingStaff.email}</div>
+              </div>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleSubmitPassword();
+              }}
+            >
+              <label className="mb-1 mt-4 block text-xs font-medium text-slate-600">Mật khẩu</label>
+              <input
+                autoFocus
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Nhập mật khẩu"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              />
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                Lần đầu đăng nhập cho tài khoản này? Mật khẩu bạn nhập sẽ được lưu làm mật khẩu mới.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingStaff(null)}
+                  disabled={!!submitting}
+                  className="rounded-md border bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={!!submitting || password.length < 4}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
+                  Đăng nhập
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
