@@ -38,6 +38,7 @@ export interface SupplierListRow {
   total_orders: number;
   last_order_at: string | null;
   created_at: string;
+  product_count: number;
 }
 
 function num(value: unknown): number {
@@ -83,12 +84,15 @@ export async function listSuppliers(args?: {
   status?: string;
   page?: number;
   pageSize?: number;
+  /** Chỉ lấy NCC đang cung cấp sản phẩm này (lọc theo product_suppliers). */
+  productId?: string;
 }): Promise<{ rows: SupplierListRow[]; total: number }> {
   if (!isDatabaseConfigured) return { rows: [], total: 0 };
   await ensureDatabase();
   const pool = getPool();
   const q = args?.search?.trim() || "";
   const status = args?.status;
+  const productId = args?.productId?.trim();
   const page = Math.max(1, args?.page ?? 1);
   const pageSize = Math.min(100, Math.max(10, args?.pageSize ?? 20));
   const offset = (page - 1) * pageSize;
@@ -98,27 +102,36 @@ export async function listSuppliers(args?: {
   let paramIdx = 1;
 
   if (q) {
-    whereClause += ` and (name ilike $${paramIdx} or code ilike $${paramIdx} or phone ilike $${paramIdx} or email ilike $${paramIdx})`;
+    whereClause += ` and (s.name ilike $${paramIdx} or s.code ilike $${paramIdx} or s.phone ilike $${paramIdx} or s.email ilike $${paramIdx})`;
     params.push(`%${q}%`);
     paramIdx++;
   }
   if (status) {
-    whereClause += ` and status = $${paramIdx}`;
+    whereClause += ` and s.status = $${paramIdx}`;
     params.push(status);
+    paramIdx++;
+  }
+  if (productId && isUuid(productId)) {
+    whereClause += ` and exists (select 1 from product_suppliers ps where ps.supplier_id = s.id and ps.product_id = $${paramIdx}::uuid)`;
+    params.push(productId);
     paramIdx++;
   }
 
   const countResult = await pool.query(
-    `select count(*)::int as cnt from suppliers ${whereClause}`,
+    `select count(*)::int as cnt from suppliers s ${whereClause}`,
     params
   );
   const total = countResult.rows[0]?.cnt ?? 0;
 
   const rowsResult = await pool.query(
-    `select id, code, name, phone, email, status, total_purchased, total_orders, last_order_at, created_at
-     from suppliers
+    `select s.id, s.code, s.name, s.phone, s.email, s.status, s.total_purchased, s.total_orders, s.last_order_at, s.created_at,
+            coalesce(pc.cnt, 0)::int as product_count
+     from suppliers s
+     left join (
+       select supplier_id, count(*)::int as cnt from product_suppliers group by supplier_id
+     ) pc on pc.supplier_id = s.id
      ${whereClause}
-     order by created_at desc
+     order by s.created_at desc
      limit $${paramIdx} offset $${paramIdx + 1}`,
     [...params, pageSize, offset]
   );
@@ -134,7 +147,8 @@ export async function listSuppliers(args?: {
       total_purchased: num(row.total_purchased),
       total_orders: num(row.total_orders),
       last_order_at: row.last_order_at,
-      created_at: row.created_at
+      created_at: row.created_at,
+      product_count: num(row.product_count)
     })),
     total
   };
@@ -393,4 +407,79 @@ export async function deleteSupplierGroup(id: string): Promise<boolean> {
   // suppliers.group_id có ON DELETE SET NULL — NCC vẫn giữ nguyên, chỉ mất group_id.
   const res = await pool.query(`delete from supplier_groups where id = $1`, [id]);
   return (res.rowCount ?? 0) > 0;
+}
+
+// ─── Sản phẩm cung cấp (product_suppliers, SCHEMA_VERSION 22) ─────────────
+
+export interface SupplierProductRow {
+  product_id: string;
+  sku: string;
+  product_name: string;
+  unit: string;
+  image_url: string;
+  stock: number;
+  supplier_sku: string;
+  cost_price: number | null;
+  is_preferred: boolean;
+}
+
+export async function listProductsForSupplier(supplierId: string): Promise<SupplierProductRow[]> {
+  if (!isDatabaseConfigured || !isUuid(supplierId)) return [];
+  await ensureDatabase();
+  const pool = getPool();
+  const res = await pool.query(
+    `select
+       p.id as product_id,
+       p.sku,
+       p.name as product_name,
+       coalesce(p.unit, '') as unit,
+       coalesce(pi.url, '') as image_url,
+       coalesce(p.stock, 0)::numeric as stock,
+       ps.supplier_sku,
+       ps.cost_price,
+       ps.is_preferred
+     from product_suppliers ps
+     join products p on p.id = ps.product_id
+     left join lateral (
+       select url from product_images where product_id = p.id order by position asc limit 1
+     ) pi on true
+     where ps.supplier_id = $1::uuid
+     order by p.name asc`,
+    [supplierId]
+  );
+  return res.rows.map((row) => ({
+    product_id: row.product_id,
+    sku: str(row.sku),
+    product_name: str(row.product_name),
+    unit: str(row.unit),
+    image_url: str(row.image_url),
+    stock: num(row.stock),
+    supplier_sku: str(row.supplier_sku),
+    cost_price: row.cost_price === null || row.cost_price === undefined ? null : num(row.cost_price),
+    is_preferred: !!row.is_preferred
+  }));
+}
+
+export async function addProductsToSupplier(supplierId: string, productIds: string[]): Promise<void> {
+  if (!isDatabaseConfigured || !isUuid(supplierId)) return;
+  const ids = productIds.filter(isUuid);
+  if (ids.length === 0) return;
+  await ensureDatabase();
+  const pool = getPool();
+  await pool.query(
+    `insert into product_suppliers (product_id, supplier_id)
+     select unnest($2::uuid[]), $1::uuid
+     on conflict (product_id, supplier_id) do nothing`,
+    [supplierId, ids]
+  );
+}
+
+export async function removeProductFromSupplier(supplierId: string, productId: string): Promise<void> {
+  if (!isDatabaseConfigured || !isUuid(supplierId) || !isUuid(productId)) return;
+  await ensureDatabase();
+  const pool = getPool();
+  await pool.query(
+    `delete from product_suppliers where supplier_id = $1::uuid and product_id = $2::uuid`,
+    [supplierId, productId]
+  );
 }

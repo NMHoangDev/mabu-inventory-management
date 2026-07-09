@@ -442,27 +442,23 @@ export async function getSystemStockForCheck(): Promise<SystemStockRow[]> {
   if (!isDatabaseConfigured) return [];
   await ensureDatabase();
   const pool = getPool();
-  // Use sum of inventory_levels (or product.stock_quantity fallback) as "tồn chi nhánh".
+  // products.stock là tồn kho denormalized thật (cập nhật trực tiếp khi
+  // đơn hàng deduct/restore — xem lib/orders/repository.ts). Bảng
+  // product_variants/inventory_levels gần như không được dùng trong hệ
+  // thống này (chỉ vài dòng lịch sử cũ), nên KHÔNG dùng làm nguồn tồn kho.
   const result = await pool.query(`
-    with variant_stock as (
-      select pv.product_id,
-             coalesce(sum(il.quantity), 0)::numeric as stock
-      from product_variants pv
-      left join inventory_levels il on il.variant_id = pv.id
-      group by pv.product_id
-    )
     select
       p.id as product_id,
       p.sku,
       p.name as product_name,
-      coalesce(string_agg(distinct pv.unit, ', '), '') as unit,
-      p.image_url,
-      coalesce(vs.stock, coalesce(p.stock_quantity, 0))::numeric as system_quantity
+      coalesce(p.unit, '') as unit,
+      coalesce(pi.url, '') as image_url,
+      coalesce(p.stock, 0)::numeric as system_quantity
     from products p
-    left join product_variants pv on pv.product_id = p.id
-    left join variant_stock vs on vs.product_id = p.id
+    left join lateral (
+      select url from product_images where product_id = p.id order by position asc limit 1
+    ) pi on true
     where p.status = 'active' or p.status is null
-    group by p.id, vs.stock
     order by p.name asc
   `);
   return result.rows.map((row) => ({

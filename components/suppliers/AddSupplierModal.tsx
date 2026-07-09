@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Package } from "lucide-react";
+import { SupplierProductSearch, type SupplierProductHit } from "@/components/suppliers/SupplierProductSearch";
 
 interface SupplierFormData {
   name: string;
@@ -41,6 +42,9 @@ export function AddSupplierModal({ onClose, onSaved, supplierId }: AddSupplierMo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const [selectedProducts, setSelectedProducts] = useState<Map<string, SupplierProductHit>>(new Map());
+  const [originalProductIds, setOriginalProductIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -67,6 +71,27 @@ export function AddSupplierModal({ onClose, onSaved, supplierId }: AddSupplierMo
         } catch (err) {
           if (!cancelled) setError(err instanceof Error ? err.message : "Không tải được thông tin nhà cung cấp.");
         }
+        try {
+          const res = await fetch(`/api/suppliers/${supplierId}/products`);
+          const rows = await res.json();
+          if (!cancelled && Array.isArray(rows)) {
+            const map = new Map<string, SupplierProductHit>();
+            rows.forEach((row: { product_id: string; product_name: string; sku: string; unit: string; image_url: string }) => {
+              map.set(row.product_id, {
+                id: row.product_id,
+                name: row.product_name,
+                sku: row.sku,
+                unit: row.unit,
+                price: 0,
+                image_url: row.image_url
+              });
+            });
+            setSelectedProducts(map);
+            setOriginalProductIds(new Set(map.keys()));
+          }
+        } catch {
+          /* giữ danh sách sản phẩm rỗng nếu tải lỗi, không chặn việc sửa NCC */
+        }
       } else {
         try {
           const res = await fetch("/api/suppliers/next-code");
@@ -81,6 +106,22 @@ export function AddSupplierModal({ onClose, onSaved, supplierId }: AddSupplierMo
     void load();
     return () => { cancelled = true; };
   }, [isEdit, supplierId]);
+
+  function addSelectedProduct(hit: SupplierProductHit) {
+    setSelectedProducts((prev) => {
+      const next = new Map(prev);
+      next.set(hit.id, hit);
+      return next;
+    });
+  }
+
+  function removeSelectedProduct(id: string) {
+    setSelectedProducts((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  }
 
   function setField(key: keyof SupplierFormData, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -104,6 +145,26 @@ export function AddSupplierModal({ onClose, onSaved, supplierId }: AddSupplierMo
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Không lưu được nhà cung cấp.");
+
+      const savedSupplierId = data.id as string;
+      const selectedIds = new Set(selectedProducts.keys());
+      const toAdd = Array.from(selectedIds).filter((id) => !originalProductIds.has(id));
+      const toRemove = Array.from(originalProductIds).filter((id) => !selectedIds.has(id));
+      if (toAdd.length > 0) {
+        await fetch(`/api/suppliers/${savedSupplierId}/products`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_ids: toAdd })
+        }).catch(() => undefined);
+      }
+      if (toRemove.length > 0) {
+        await Promise.all(
+          toRemove.map((id) =>
+            fetch(`/api/suppliers/${savedSupplierId}/products/${id}`, { method: "DELETE" }).catch(() => undefined)
+          )
+        );
+      }
+
       onSaved({ id: data.id, name: data.name, phone: data.phone ?? "", code: data.code ?? "" });
       onClose();
     } catch (err) {
@@ -241,6 +302,47 @@ export function AddSupplierModal({ onClose, onSaved, supplierId }: AddSupplierMo
                   placeholder="Ghi chú thêm"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">
+                Sản phẩm cung cấp
+              </label>
+              <SupplierProductSearch
+                placeholder="Tìm sản phẩm theo tên hoặc SKU để thêm..."
+                excludeIds={Array.from(selectedProducts.keys())}
+                onSelect={addSelectedProduct}
+              />
+              {selectedProducts.size > 0 ? (
+                <div className="mt-2 border border-slate-200 rounded divide-y max-h-48 overflow-y-auto">
+                  {Array.from(selectedProducts.values()).map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        {p.image_url ? (
+                          <img src={p.image_url} alt="" className="w-8 h-8 object-cover rounded border flex-shrink-0" />
+                        ) : (
+                          <div className="w-8 h-8 bg-slate-100 rounded border flex items-center justify-center text-slate-300 flex-shrink-0">
+                            <Package className="w-4 h-4" />
+                          </div>
+                        )}
+                        <div>
+                          <div className="text-sm font-medium text-slate-800">{p.name}</div>
+                          <div className="text-xs text-slate-500">SKU: {p.sku || "—"}</div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeSelectedProduct(p.id)}
+                        className="text-slate-400 hover:text-red-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-slate-400">Chưa chọn sản phẩm nào.</p>
+              )}
             </div>
           </div>
 

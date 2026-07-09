@@ -86,12 +86,19 @@ export default function NewCostAdjustmentPage() {
     if (!productQuery.trim() && !multiSelect) { setProductResults([]); return; }
     let cancelled = false;
     setProductLoading(true);
-    fetch(`/api/cost-adjustments/products-search?q=${encodeURIComponent(productQuery)}`)
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setProductResults(Array.isArray(d) ? d : []); })
-      .catch(() => { if (!cancelled) setProductResults([]); })
-      .finally(() => { if (!cancelled) setProductLoading(false); });
-    return () => { cancelled = true; };
+    // Debounce 220ms giống /orders/new — tránh bắn 1 request mỗi phím gõ.
+    const timer = setTimeout(() => {
+      fetch(`/api/cost-adjustments/products-search?q=${encodeURIComponent(productQuery)}&limit=20`)
+        .then(async (r) => {
+          const d = await r.json().catch(() => null);
+          if (!r.ok) throw new Error(d?.error ?? "Không tìm được sản phẩm.");
+          return d;
+        })
+        .then((d) => { if (!cancelled) setProductResults(Array.isArray(d) ? d : []); })
+        .catch(() => { if (!cancelled) setProductResults([]); })
+        .finally(() => { if (!cancelled) setProductLoading(false); });
+    }, 220);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [productQuery, multiSelect]);
 
   const visibleProductResults = useMemo(
@@ -314,8 +321,8 @@ export default function NewCostAdjustmentPage() {
               <div className="p-4 border-b border-gray-100">
                 <h2 className="font-semibold text-gray-800">Thông tin sản phẩm</h2>
               </div>
-              <div className="p-4 flex items-center space-x-2">
-                <div className="relative flex-1" ref={productBoxRef}>
+              <div className="p-4 flex items-center space-x-2" ref={productBoxRef}>
+                <div className="relative flex-1">
                   <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
                     <Search className="h-4 w-4" />
                   </span>
@@ -375,6 +382,13 @@ export default function NewCostAdjustmentPage() {
                                 {multiSelect ? (
                                   <input type="checkbox" checked={checked} readOnly className="pointer-events-none" />
                                 ) : null}
+                                {p.image_url ? (
+                                  <img src={p.image_url} alt="" className="w-9 h-9 object-cover rounded border flex-shrink-0" />
+                                ) : (
+                                  <div className="w-9 h-9 bg-gray-100 rounded border flex items-center justify-center text-gray-300 flex-shrink-0">
+                                    <Package className="w-4 h-4" />
+                                  </div>
+                                )}
                                 <div>
                                   <div className="text-sm font-medium text-gray-800">{p.product_name}</div>
                                   <div className="text-xs text-gray-500">
@@ -414,6 +428,7 @@ export default function NewCostAdjustmentPage() {
                   <thead className="bg-gray-50 border-y border-gray-200 text-gray-500 font-medium">
                     <tr>
                       <th className="px-6 py-3 text-left w-16">STT</th>
+                      <th className="px-6 py-3 text-left w-16">Ảnh</th>
                       <th className="px-6 py-3 text-left">Tên sản phẩm</th>
                       <th className="px-6 py-3 text-right">Giá vốn hiện tại</th>
                       <th className="px-6 py-3 text-right">Chênh lệch</th>
@@ -425,7 +440,7 @@ export default function NewCostAdjustmentPage() {
                   <tbody className="divide-y">
                     {items.length === 0 ? (
                       <tr>
-                        <td className="py-20 text-center" colSpan={7}>
+                        <td className="py-20 text-center" colSpan={8}>
                           <div className="flex flex-col items-center justify-center space-y-4">
                             <div className="bg-gray-100 p-6 rounded-full">
                               <Package className="h-16 w-16 text-gray-300" />
@@ -448,6 +463,15 @@ export default function NewCostAdjustmentPage() {
                         return (
                           <tr key={it.rowKey} className="hover:bg-gray-50">
                             <td className="px-6 py-3 text-slate-500">{idx + 1}</td>
+                            <td className="px-6 py-3">
+                              {it.image_url ? (
+                                <img src={it.image_url} alt="" className="w-10 h-10 object-cover rounded border" />
+                              ) : (
+                                <div className="w-10 h-10 bg-gray-100 rounded border flex items-center justify-center text-gray-300">
+                                  <Package className="w-5 h-5" />
+                                </div>
+                              )}
+                            </td>
                             <td className="px-6 py-3">
                               <div className="font-medium text-gray-800">{it.product_name}</div>
                               <div className="text-xs text-gray-500">{it.sku ? `SKU: ${it.sku}` : "—"}</div>

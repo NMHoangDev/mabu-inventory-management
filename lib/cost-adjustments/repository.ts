@@ -356,26 +356,57 @@ export interface ProductCostSearchHit {
   current_cost: number;
 }
 
-export async function searchProductsForCostAdjustment(query: string): Promise<ProductCostSearchHit[]> {
+export async function searchProductsForCostAdjustment(
+  query: string,
+  limit = 20
+): Promise<ProductCostSearchHit[]> {
   if (!isDatabaseConfigured) return [];
   await ensureDatabase();
   const pool = getPool();
-  const q = `%${query.trim()}%`;
+  const q = query.trim();
+  // Search không dấu + chịu lỗi gõ thiếu/sai chữ, đồng bộ với
+  // /api/orders/search-products (xem route đó để biết lý do từng điều kiện).
+  const qNorm = q
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^\w\sÀ-ɏḀ-ỿ]/g, "");
+  const qRaw = `%${q}%`;
+  const qAcc = `%${qNorm}%`;
+  const safeLimit = Math.min(50, Math.max(1, limit));
   const result = await pool.query(
     `select
        p.id as product_id,
        p.sku,
        p.name as product_name,
-       coalesce(string_agg(distinct pv.unit, ', '), '') as unit,
-       p.image_url,
-       coalesce(min(pv.cost_price), coalesce(p.cost_price, 0))::numeric as current_cost
+       coalesce(p.unit, '') as unit,
+       coalesce(pi.url, '') as image_url,
+       coalesce(p.cost_price, 0)::numeric as current_cost
      from products p
-     left join product_variants pv on pv.product_id = p.id
-     where p.sku ilike $1 or p.name ilike $1
-     group by p.id
-     order by p.name asc
-     limit 20`,
-    [q]
+     left join lateral (
+       select url from product_images where product_id = p.id order by position asc limit 1
+     ) pi on true
+     where p.status = 'active'
+       and (
+         $1 = ''
+         or p.sku ilike $2
+         or p.name ilike $2
+         or coalesce(p.barcode,'') ilike $2
+         or p.search_text ilike $3
+         or ($1 <> '' and similarity(coalesce(p.search_text, ''), $4) > 0.25)
+       )
+     order by
+       case
+         when lower(p.sku) = lower($1) then 0
+         when coalesce(p.barcode,'') = $1 then 0
+         when lower(p.name) like lower($1 || '%') then 1
+         when lower(p.sku) like lower($1 || '%') then 1
+         else 2
+       end,
+       similarity(coalesce(p.search_text, ''), $4) desc,
+       p.name asc
+     limit $5`,
+    [q, qRaw, qAcc, qNorm, safeLimit]
   );
   return result.rows.map((row) => ({
     product_id: row.product_id,

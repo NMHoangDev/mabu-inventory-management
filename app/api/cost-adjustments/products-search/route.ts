@@ -8,9 +8,10 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const q = url.searchParams.get("q") ?? "";
+    const limit = Math.min(50, Number(url.searchParams.get("limit") ?? 20));
     // Query rỗng → trả về danh sách sản phẩm đầu tiên (dùng cho chế độ "chọn
     // nhiều" duyệt sản phẩm mà không cần gõ tìm kiếm). ILIKE '%%' khớp mọi tên.
-    const rows = await searchProductsForCostAdjustment(q);
+    const rows = await searchProductsForCostAdjustment(q, limit);
     return NextResponse.json(rows);
   } catch (error) {
     return NextResponse.json(

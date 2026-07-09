@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Loader2, Download, Upload, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { Plus, Loader2, Download, Upload, ChevronLeft, ChevronRight, Pencil, Trash2, Eye, X } from "lucide-react";
 import { downloadCsv } from "@/lib/shared/csv-export";
 import { AddSupplierModal } from "@/invoice-flow-manager-fe/components/suppliers/AddSupplierModal";
+import { SupplierProductSearch, type SupplierProductHit } from "@/components/suppliers/SupplierProductSearch";
 
 interface SupplierRow {
   id: string;
@@ -16,6 +18,7 @@ interface SupplierRow {
   total_orders: number;
   last_order_at: string | null;
   created_at: string;
+  product_count: number;
 }
 
 const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
@@ -41,6 +44,7 @@ export default function SuppliersPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [productFilter, setProductFilter] = useState<SupplierProductHit | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 400);
@@ -56,6 +60,7 @@ export default function SuppliersPage() {
         pageSize: String(pageSize)
       });
       if (debouncedSearch) params.set("search", debouncedSearch);
+      if (productFilter) params.set("productId", productFilter.id);
       const res = await fetch(`/api/suppliers?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Không tải được.");
@@ -66,7 +71,7 @@ export default function SuppliersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedSearch]);
+  }, [page, pageSize, debouncedSearch, productFilter]);
 
   useEffect(() => {
     fetchSuppliers();
@@ -74,7 +79,7 @@ export default function SuppliersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, productFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -201,6 +206,27 @@ export default function SuppliersPage() {
             </div>
           </div>
 
+          <div className="px-4 pb-4 border-b">
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Lọc theo sản phẩm (tìm nhà cung cấp đang cung cấp sản phẩm này)
+            </label>
+            {productFilter ? (
+              <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 rounded px-3 py-2 text-sm">
+                Đang lọc: <span className="font-medium">{productFilter.name}</span>
+                {productFilter.sku ? <span className="text-blue-500">(SKU: {productFilter.sku})</span> : null}
+                <button onClick={() => setProductFilter(null)} className="hover:text-red-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <SupplierProductSearch
+                placeholder="Tìm theo tên sản phẩm hoặc mã SKU..."
+                className="max-w-lg"
+                onSelect={(hit) => setProductFilter(hit)}
+              />
+            )}
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-gray-50 text-gray-700 font-medium">
@@ -223,14 +249,15 @@ export default function SuppliersPage() {
                   <th className="p-4 cursor-pointer select-none">
                     Số điện thoại
                   </th>
+                  <th className="p-4 text-right">Số SP cung cấp</th>
                   <th className="p-4">Trạng thái</th>
-                  <th className="p-4 w-24 text-right">Thao tác</th>
+                  <th className="p-4 w-32 text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="p-12 text-center text-gray-500">
+                    <td colSpan={9} className="p-12 text-center text-gray-500">
                       <div className="flex items-center justify-center gap-2">
                         <Loader2 className="w-5 h-5 animate-spin" /> Đang tải danh sách…
                       </div>
@@ -238,12 +265,12 @@ export default function SuppliersPage() {
                   </tr>
                 ) : error ? (
                   <tr>
-                    <td colSpan={8} className="p-12 text-center text-red-600">{error}</td>
+                    <td colSpan={9} className="p-12 text-center text-red-600">{error}</td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-12 text-center text-gray-500">
-                      {total === 0 && !search
+                    <td colSpan={9} className="p-12 text-center text-gray-500">
+                      {total === 0 && !search && !productFilter
                         ? "Chưa có nhà cung cấp nào. Bấm \"Thêm nhà cung cấp\" để bắt đầu."
                         : "Không tìm thấy nhà cung cấp nào phù hợp."}
                     </td>
@@ -252,11 +279,20 @@ export default function SuppliersPage() {
                   rows.map((row) => (
                     <tr key={row.id} className="hover:bg-blue-50 transition-colors">
                       <td className="p-4"><input type="checkbox" className="rounded text-blue-600" /></td>
-                      <td className="p-4 text-blue-500 font-medium">{row.code || "—"}</td>
-                      <td className="p-4 text-slate-800">{row.name}</td>
+                      <td className="p-4 text-blue-500 font-medium">
+                        <Link href={`/suppliers/${row.id}`} className="hover:underline">
+                          {row.code || "—"}
+                        </Link>
+                      </td>
+                      <td className="p-4 text-slate-800">
+                        <Link href={`/suppliers/${row.id}`} className="hover:underline">
+                          {row.name}
+                        </Link>
+                      </td>
                       <td className="p-4 text-slate-500">Khác</td>
                       <td className="p-4 text-slate-500">{row.email || "—"}</td>
                       <td className="p-4 text-slate-500">{row.phone || "—"}</td>
+                      <td className="p-4 text-right tabular-nums text-slate-600">{row.product_count}</td>
                       <td className="p-4">
                         <span className="text-green-600 text-xs font-semibold">
                           Đang giao dịch
@@ -264,6 +300,13 @@ export default function SuppliersPage() {
                       </td>
                       <td className="p-4">
                         <div className="flex items-center justify-end gap-1">
+                          <Link
+                            href={`/suppliers/${row.id}`}
+                            title="Xem chi tiết"
+                            className="p-1.5 rounded text-slate-500 hover:bg-slate-100 hover:text-blue-600"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Link>
                           <button
                             type="button"
                             onClick={() => openEditModal(row.id)}

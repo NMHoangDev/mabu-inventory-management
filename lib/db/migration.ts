@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 21; // Bumped: storefront (customers.password_hash + customer_sessions, site_settings), orders.payment_method, orders.fulfillment_status thêm confirmed/packing, backfill products.slug
+const SCHEMA_VERSION = 22; // Bumped: product_suppliers (liên kết NCC ↔ sản phẩm cung cấp)
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -1083,6 +1083,27 @@ async function migrate() {
     -- qua toggle "Hiển thị trên website" ở trang sửa sản phẩm (Task P4).
     update products set published_at = created_at
       where status = 'active' and published_at is null and created_at < '2026-07-10'::timestamptz;
+  `);
+
+  // 19. Liên kết Nhà cung cấp ↔ Sản phẩm — trước đây chỉ suy ra được "NCC nào
+  // từng bán SP nào" qua lịch sử purchase_orders/goods_receipts, không có
+  // bảng catalog trực tiếp để trang /suppliers quản lý "NCC này đang cung cấp
+  // mặt hàng gì trong kho hiện tại".
+  await client.query(`
+    create table if not exists product_suppliers (
+      id            uuid primary key default gen_random_uuid(),
+      product_id    uuid not null references products(id) on delete cascade,
+      supplier_id   uuid not null references suppliers(id) on delete cascade,
+      supplier_sku  text default '',
+      cost_price    numeric(18,2),
+      is_preferred  boolean not null default false,
+      note          text default '',
+      created_at    timestamptz not null default now(),
+      updated_at    timestamptz not null default now(),
+      unique (product_id, supplier_id)
+    );
+    create index if not exists idx_product_suppliers_product  on product_suppliers(product_id);
+    create index if not exists idx_product_suppliers_supplier on product_suppliers(supplier_id);
   `);
 } finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);

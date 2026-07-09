@@ -14,9 +14,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const search = url.searchParams.get("search") ?? undefined;
     const status = url.searchParams.get("status") ?? undefined;
+    const productId = url.searchParams.get("productId") ?? undefined;
     const page = Number(url.searchParams.get("page")) || 1;
     const pageSize = Number(url.searchParams.get("pageSize")) || 20;
-    const result = await listSuppliers({ search, status, page, pageSize });
+    const result = await listSuppliers({ search, status, page, pageSize, productId });
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
