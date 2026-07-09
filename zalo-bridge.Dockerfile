@@ -36,12 +36,13 @@ WORKDIR /app
 RUN addgroup -g 1001 -S nodejs \
     && adduser -S bridge -u 1001
 
-# Chỉ copy node_modules + source từ stage `deps`
+# Chỉ copy node_modules + source từ stage `deps`. routes/services/utils
+# KHÔNG copy riêng — code bridge thật nằm hết trong src/routes,src/services,
+# src/utils; các thư mục top-level routes/services/utils cùng tên chỉ là thư
+# mục rác rỗng còn sót lại cục bộ (không track git) — COPY chúng làm build
+# fail "no such file or directory" trên máy không có thư mục rác đó.
 COPY --from=deps --chown=bridge:nodejs /app/node_modules ./node_modules
 COPY --from=deps --chown=bridge:nodejs /app/src ./src
-COPY --from=deps --chown=bridge:nodejs /app/routes ./routes
-COPY --from=deps --chown=bridge:nodejs /app/services ./services
-COPY --from=deps --chown=bridge:nodejs /app/utils ./utils
 COPY --from=deps --chown=bridge:nodejs /app/zca-js ./zca-js
 COPY --from=deps --chown=bridge:nodejs /app/package.json ./package.json
 
