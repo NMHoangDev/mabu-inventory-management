@@ -236,6 +236,11 @@ export interface ProductInput {
   theme_template?: string;
   status?: string;
   image_url?: string;
+  slug?: string;
+  seo_title?: string;
+  seo_description?: string;
+  // true → set published_at = now() (hiển thị trên website); false → null (ẩn).
+  published?: boolean;
   variants?: {
     title: string;
     sku: string;
@@ -492,6 +497,27 @@ export async function updateProduct(id: string, input: ProductInput) {
   try {
     await client.query("begin");
 
+    // PATCH ở đây phải hỗ trợ payload CHỈ chứa vài field (ví dụ trang
+    // /products/pricing chỉ gửi {cost_price, compare_at_price, price}) —
+    // trước đây hàm này ghi đè thẳng input.<field> không coalesce, khiến
+    // name = undefined → null, vi phạm not-null constraint và toàn bộ PATCH
+    // giá thất bại. Luôn lấy dữ liệu hiện có làm nền trước khi ghi.
+    const existingRes = await client.query(`select * from products where id = $1`, [id]);
+    if (existingRes.rows.length === 0) {
+      await client.query("rollback");
+      return null;
+    }
+    const existing = existingRes.rows[0];
+
+    const name = input.name ?? existing.name;
+    const sku = input.sku ?? existing.sku;
+    const price = input.price ?? Number(existing.price ?? 0);
+    const costPrice = input.cost_price ?? Number(existing.cost_price ?? 0);
+    const unit = input.unit ?? existing.unit ?? "cái";
+    const imageUrl = input.image_url ?? existing.image_url ?? "";
+    const published =
+      input.published !== undefined ? input.published : existing.published_at !== null;
+
     // 1. Update product main details
     await client.query(`
       update products set
@@ -513,52 +539,54 @@ export async function updateProduct(id: string, input: ProductInput) {
         tags = $16,
         sales_channels = $17,
         theme_template = $18,
+        slug = $19,
+        seo_title = $20,
+        seo_description = $21,
+        published_at = case when $22 then coalesce(published_at, now()) else null end,
         updated_at = now()
-      where id = $19
+      where id = $23
     `, [
-      input.name,
-      input.sku,
-      input.barcode || "",
-      input.unit || "cái",
-      input.description || "",
-      input.price ?? 0,
-      input.compare_at_price ?? null,
-      input.cost_price ?? 0,
-      !!input.taxable,
-      input.track_inventory !== false,
-      !!input.allow_negative_stock,
-      !!input.manage_expiry,
-      input.weight ?? 0,
-      input.weight_unit || "g",
-      input.category_id || null,
-      input.tags || [],
-      input.sales_channels || [],
-      input.theme_template || "product",
+      name,
+      sku,
+      input.barcode ?? existing.barcode ?? "",
+      unit,
+      input.description ?? existing.description ?? "",
+      price,
+      input.compare_at_price ?? existing.compare_at_price ?? null,
+      costPrice,
+      input.taxable !== undefined ? !!input.taxable : existing.taxable,
+      input.track_inventory !== undefined ? input.track_inventory !== false : existing.track_inventory,
+      input.allow_negative_stock !== undefined ? !!input.allow_negative_stock : existing.allow_negative_stock,
+      input.manage_expiry !== undefined ? !!input.manage_expiry : existing.manage_expiry,
+      input.weight ?? existing.weight ?? 0,
+      input.weight_unit ?? existing.weight_unit ?? "g",
+      input.category_id !== undefined ? input.category_id : existing.category_id,
+      input.tags ?? existing.tags ?? [],
+      input.sales_channels ?? existing.sales_channels ?? [],
+      input.theme_template ?? existing.theme_template ?? "product",
+      input.slug ?? existing.slug,
+      input.seo_title ?? existing.seo_title,
+      input.seo_description ?? existing.seo_description,
+      published,
       id
     ]);
 
-    // 2. Upsert product_catalog for mapping consistency
-    await client.query(`
-      insert into product_catalog (
-        sku, input_name, invoice_name, retail_name, unit, sale_price, image_url, product_id, created_at, updated_at
-      ) values ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
-      on conflict (sku) do update set
-        input_name = excluded.input_name,
-        retail_name = excluded.retail_name,
-        unit = excluded.unit,
-        sale_price = excluded.sale_price,
-        image_url = excluded.image_url,
-        updated_at = now()
-    `, [
-      input.sku,
-      input.name,
-      input.name,
-      input.name,
-      input.unit || "cái",
-      input.price ?? 0,
-      input.image_url || "",
-      id
-    ]);
+    // 2. Upsert product_catalog for mapping consistency (chỉ khi có sku —
+    // sku có thể null/rỗng với sản phẩm không dùng cho luồng scan hoá đơn).
+    if (sku) {
+      await client.query(`
+        insert into product_catalog (
+          sku, input_name, invoice_name, retail_name, unit, sale_price, image_url, product_id, created_at, updated_at
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+        on conflict (sku) do update set
+          input_name = excluded.input_name,
+          retail_name = excluded.retail_name,
+          unit = excluded.unit,
+          sale_price = excluded.sale_price,
+          image_url = excluded.image_url,
+          updated_at = now()
+      `, [sku, name, name, name, unit, price, imageUrl, id]);
+    }
 
     // 3. Update main variant price/cost
     await client.query(`
@@ -567,7 +595,7 @@ export async function updateProduct(id: string, input: ProductInput) {
         cost_price = $2,
         updated_at = now()
       where product_id = $3 and position = 1
-    `, [input.price ?? 0, input.cost_price ?? 0, id]);
+    `, [price, costPrice, id]);
 
     // 4. Update image in product_images
     if (input.image_url) {
@@ -587,8 +615,9 @@ export async function updateProduct(id: string, input: ProductInput) {
     }
 
     await client.query("commit");
-    await logActivity("product", `Cập nhật sản phẩm ${input.name} (ID: ${id})`);
-    return { id, ...input };
+    await logActivity("product", `Cập nhật sản phẩm ${name} (ID: ${id})`);
+    const finalRes = await pool.query(`select * from products where id = $1`, [id]);
+    return finalRes.rows[0];
   } catch (error) {
     await client.query("rollback");
     console.error("Failed to update product:", error);

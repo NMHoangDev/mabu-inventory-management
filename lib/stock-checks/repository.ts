@@ -1,5 +1,6 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
+import { applyInventoryLevelDelta } from "../inventory/receipts";
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -219,11 +220,12 @@ export async function createStockCheck(input: CreateStockCheckInput): Promise<St
 
     const stats = recomputeStats(items);
 
+    const status = input.status ?? "draft";
     const orderResult = await client.query(
       `insert into stock_checks (
         code, branch, staff, note, tags, status,
-        total_items, matched_items, variance_items
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        total_items, matched_items, variance_items, completed_at
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       returning *`,
       [
         code,
@@ -231,10 +233,11 @@ export async function createStockCheck(input: CreateStockCheckInput): Promise<St
         str(input.staff),
         str(input.note),
         input.tags ?? [],
-        input.status ?? "draft",
+        status,
         stats.total,
         stats.matched,
-        stats.variance
+        stats.variance,
+        status === "balanced" ? new Date().toISOString() : null
       ]
     );
 
@@ -263,6 +266,12 @@ export async function createStockCheck(input: CreateStockCheckInput): Promise<St
       );
     }
 
+    // Cân bằng NGAY khi tạo phiếu với status='balanced' — tách biệt khỏi chờ
+    // gọi PATCH /status sau. Xem applyStockCheckVariance() phía trên.
+    if (status === "balanced") {
+      await applyStockCheckVariance(client, newRow.id, code);
+    }
+
     await client.query("commit");
 
     const result = await getStockCheck(newRow.id);
@@ -271,6 +280,150 @@ export async function createStockCheck(input: CreateStockCheckInput): Promise<St
   } catch (err) {
     await client.query("rollback").catch(() => undefined);
     throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// transitionStockCheckStatus
+// ──────────────────────────────────────────────────────────────────────
+//
+// "Cân bằng kiểm kê" (status → balanced) là hành động DUY NHẤT áp chênh
+// lệch (variance = actual - system) vào tồn kho thật — trước đây phiếu kiểm
+// hàng chỉ lưu số liệu, KHÔNG có bước nào đụng vào products.stock, nên toàn
+// bộ mục đích "kiểm rồi sửa tồn" chưa từng thực sự chạy. Idempotent qua
+// stock_check_items.stock_applied_at (giống pattern goods_receipt_items).
+// Balanced/cancelled là trạng thái CUỐI — không hoàn tác (khác goods-receipts
+// vì "chênh lệch kiểm kê" không có 1 khái niệm "hoàn lại" rõ nghĩa như nhập
+// hàng; muốn sửa số thì tạo phiếu kiểm mới).
+// Áp chênh lệch (variance = actual - system) vào tồn kho cho các item CHƯA
+// áp (`stock_applied_at IS NULL`). Idempotent. Dùng lại ở CẢ 2 nơi:
+//   1. createStockCheck — khi tạo phiếu với status='balanced' ngay từ đầu
+//      ("Cân bằng luôn" ở trang tạo mới). Trước đây KHÔNG gọi gì cả — status
+//      hiển thị "balanced" nhưng tồn kho chưa từng được sửa theo số kiểm thực tế.
+//   2. transitionStockCheckStatus — khi cân bằng sau khi phiếu đã ở trạng
+//      thái khác (draft/in_progress).
+async function applyStockCheckVariance(
+  client: any,
+  stockCheckId: string,
+  stockCheckCode: string
+): Promise<{ stockApplied: boolean }> {
+  let stockApplied = false;
+  const itemsRes = await client.query(
+    `select id, product_id, variance, stock_applied_at
+       from stock_check_items
+      where stock_check_id = $1::uuid
+      order by position asc`,
+    [stockCheckId]
+  );
+
+  for (const item of itemsRes.rows) {
+    if (item.stock_applied_at) continue;
+    const productId = item.product_id ? String(item.product_id) : null;
+    const delta = Number(item.variance ?? 0);
+    if (!productId || delta === 0) {
+      await client.query(
+        `update stock_check_items set stock_applied_at = now() where id = $1`,
+        [String(item.id)]
+      );
+      continue;
+    }
+
+    await client.query(
+      `update products
+          set stock = greatest(0, coalesce(stock, 0) + $2),
+              stock_updated_at = now(),
+              updated_at = now()
+        where id = $1`,
+      [productId, delta]
+    );
+    await applyInventoryLevelDelta(
+      client,
+      productId,
+      delta,
+      `(Kiểm kê ${stockCheckCode} · item ${String(item.id).slice(0, 8)})`
+    );
+    await client.query(
+      `update stock_check_items set stock_applied_at = now() where id = $1`,
+      [String(item.id)]
+    );
+    stockApplied = true;
+    console.info(
+      `[stock] ${delta > 0 ? "+" : ""}${delta} → product ${productId} (Kiểm kê ${stockCheckCode} · item ${String(item.id).slice(0, 8)})`
+    );
+  }
+
+  return { stockApplied };
+}
+
+export async function transitionStockCheckStatus(input: {
+  stockCheckId: string;
+  nextStatus: "in_progress" | "balanced" | "cancelled";
+}): Promise<{ success: boolean; message: string; stockApplied?: boolean }> {
+  if (!isDatabaseConfigured) {
+    return { success: false, message: "Database chưa cấu hình." };
+  }
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const scRes = await client.query(
+      `select id, status, code from stock_checks where id = $1::uuid`,
+      [input.stockCheckId]
+    );
+    if (scRes.rows.length === 0) {
+      await client.query("rollback");
+      return { success: false, message: "Không tìm thấy phiếu kiểm hàng." };
+    }
+    const sc = scRes.rows[0];
+    const cur = String(sc.status);
+    const next = input.nextStatus;
+    const allowed: Record<string, string[]> = {
+      draft: ["in_progress", "balanced", "cancelled"],
+      in_progress: ["balanced", "cancelled"],
+      balanced: [],
+      cancelled: []
+    };
+    if (!allowed[cur]?.includes(next)) {
+      await client.query("rollback");
+      return { success: false, message: `Không thể đổi từ "${cur}" sang "${next}".` };
+    }
+
+    let stockApplied = false;
+    if (next === "balanced") {
+      const result = await applyStockCheckVariance(client, input.stockCheckId, String(sc.code));
+      stockApplied = result.stockApplied;
+    }
+
+    await client.query(
+      `update stock_checks
+          set status = $2,
+              completed_at = case when $2 = 'balanced' then now() else completed_at end,
+              updated_at = now()
+        where id = $1`,
+      [input.stockCheckId, next]
+    );
+
+    await client.query("commit");
+
+    const msg =
+      next === "balanced"
+        ? "Đã cân bằng kiểm kê. Đã áp chênh lệch vào tồn kho."
+        : next === "cancelled"
+          ? "Đã hủy phiếu kiểm hàng."
+          : `Đã chuyển trạng thái sang "${next}".`;
+    return { success: true, message: msg, stockApplied };
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    console.error("transitionStockCheckStatus failed:", err);
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Lỗi không xác định"
+    };
   } finally {
     client.release();
   }

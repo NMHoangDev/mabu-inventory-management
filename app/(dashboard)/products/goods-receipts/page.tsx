@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import {
   Loader2,
   Plus,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 
 type ReceiptStatus = "pending" | "in_progress" | "completed" | "cancelled";
-type OrderStatusType = "pending" | "in_progress" | "completed" | "cancelled";
+type PaymentStatus = "unpaid" | "partial" | "paid";
 
 interface GoodsReceiptRow {
   id: string;
@@ -25,26 +26,29 @@ interface GoodsReceiptRow {
   staff: string;
   received_at: string;
   receipt_status: ReceiptStatus;
-  order_status: OrderStatusType;
+  payment_status: PaymentStatus;
   total_cost: number;
   total_quantity: number;
+  paid: number;
   created_at: string;
 }
 
 type TabKey = "all" | "in_progress" | "completed";
 
+// "Trạng thái" = trạng thái NHẬP HÀNG (hàng đã về kho / tồn kho đã cộng chưa)
+// — hoàn toàn tách biệt khỏi thanh toán cho NCC (xem PAYMENT_META).
 const RECEIPT_META: Record<ReceiptStatus, { label: string; className: string }> = {
   pending: { label: "Chưa nhập", className: "bg-slate-100 text-slate-600" },
   in_progress: { label: "Đang giao dịch", className: "bg-orange-100 text-orange-700" },
-  completed: { label: "Hoàn thành", className: "bg-green-100 text-green-700" },
+  completed: { label: "Đã nhập hàng", className: "bg-green-100 text-green-700" },
   cancelled: { label: "Đã hủy", className: "bg-red-100 text-red-700" }
 };
 
-const ORDER_META: Record<OrderStatusType, { label: string; className: string }> = {
-  pending: { label: "Chưa nhập", className: "bg-slate-100 text-slate-600" },
-  in_progress: { label: "Đang giao dịch", className: "bg-orange-100 text-orange-700" },
-  completed: { label: "Đã nhập", className: "bg-green-100 text-green-700" },
-  cancelled: { label: "Đã hủy", className: "bg-red-100 text-red-700" }
+// "Trạng thái thanh toán" — TÁCH RIÊNG khỏi trạng thái nhập hàng ở trên.
+const PAYMENT_META: Record<PaymentStatus, { label: string; className: string }> = {
+  unpaid: { label: "Chưa thanh toán", className: "bg-slate-100 text-slate-600" },
+  partial: { label: "Thanh toán 1 phần", className: "bg-amber-100 text-amber-700" },
+  paid: { label: "Đã thanh toán", className: "bg-emerald-100 text-emerald-700" }
 };
 
 function formatDateTime(iso: string): string {
@@ -122,9 +126,6 @@ export default function GoodsReceiptsListPage() {
         <h1 className="text-lg font-semibold text-slate-800">Danh sách đơn nhập hàng</h1>
         <div className="flex items-center gap-6 text-sm text-slate-600">
           <button className="flex items-center gap-1 hover:text-blue-600">
-            <FileText className="w-4 h-4" /> Tư vấn thuế
-          </button>
-          <button className="flex items-center gap-1 hover:text-blue-600">
             <FileText className="w-4 h-4" /> Trợ giúp
           </button>
           <div className="flex items-center gap-2">
@@ -137,7 +138,21 @@ export default function GoodsReceiptsListPage() {
 
       <div className="p-4 bg-white border-b flex items-center justify-between flex-shrink-0">
         <div className="flex gap-4">
-          <button className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600">
+          <button
+            onClick={() =>
+              downloadCsv(`don-nhap-hang-${Date.now()}.csv`, filtered, [
+                { label: "Mã đơn nhập", value: (r) => r.code },
+                { label: "Ngày nhập", value: (r) => formatDateTime(r.received_at || r.created_at) },
+                { label: "Trạng thái nhập", value: (r) => RECEIPT_META[r.receipt_status]?.label ?? r.receipt_status },
+                { label: "Trạng thái thanh toán", value: (r) => PAYMENT_META[r.payment_status]?.label ?? r.payment_status },
+                { label: "Chi nhánh nhập", value: (r) => r.branch || "Chi nhánh mặc định" },
+                { label: "Nhà cung cấp", value: (r) => r.supplier_name },
+                { label: "Nhân viên tạo", value: (r) => r.staff },
+                { label: "Giá trị đơn", value: (r) => r.total_cost },
+              ])
+            }
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600"
+          >
             <Download className="w-4 h-4" /> Xuất file
           </button>
           <button className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600">
@@ -196,9 +211,6 @@ export default function GoodsReceiptsListPage() {
           <select className="border-slate-300 rounded-md text-sm py-2 px-3">
             <option>Sản phẩm</option>
           </select>
-          <button className="flex items-center gap-1 border border-slate-300 rounded-md text-sm py-2 px-3 hover:bg-slate-50">
-            <Settings className="w-4 h-4" /> Bộ lọc khác
-          </button>
           <button className="text-slate-400 text-sm py-2 px-3 cursor-not-allowed">Lưu bộ lọc</button>
         </div>
       </div>
@@ -218,8 +230,8 @@ export default function GoodsReceiptsListPage() {
                 <th className="p-3 w-8"></th>
                 <th className="p-3 text-slate-600 font-semibold">Mã đơn nhập</th>
                 <th className="p-3 text-slate-600 font-semibold">Ngày nhập ▼</th>
-                <th className="p-3 text-slate-600 font-semibold text-center">Trạng thái</th>
                 <th className="p-3 text-slate-600 font-semibold text-center">Trạng thái nhập</th>
+                <th className="p-3 text-slate-600 font-semibold text-center">Trạng thái thanh toán</th>
                 <th className="p-3 text-slate-600 font-semibold">Chi nhánh nhập</th>
                 <th className="p-3 text-slate-600 font-semibold">Nhà cung cấp</th>
                 <th className="p-3 text-slate-600 font-semibold">Nhân viên tạo</th>
@@ -238,7 +250,7 @@ export default function GoodsReceiptsListPage() {
               ) : (
                 pageRows.map((row) => {
                   const rMeta = RECEIPT_META[row.receipt_status] ?? RECEIPT_META.pending;
-                  const oMeta = ORDER_META[row.order_status] ?? ORDER_META.pending;
+                  const pMeta = PAYMENT_META[row.payment_status] ?? PAYMENT_META.unpaid;
                   return (
                     <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                       <td className="p-3"><input type="checkbox" className="rounded border-slate-300" /></td>
@@ -255,8 +267,8 @@ export default function GoodsReceiptsListPage() {
                         </span>
                       </td>
                       <td className="p-3 text-center">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${oMeta.className}`}>
-                          {oMeta.label}
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${pMeta.className}`}>
+                          {pMeta.label}
                         </span>
                       </td>
                       <td className="p-3">{row.branch || "Chi nhánh mặc định"}</td>

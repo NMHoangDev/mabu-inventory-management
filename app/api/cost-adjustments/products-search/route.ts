@@ -8,7 +8,8 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const q = url.searchParams.get("q") ?? "";
-    if (!q.trim()) return NextResponse.json([]);
+    // Query rỗng → trả về danh sách sản phẩm đầu tiên (dùng cho chế độ "chọn
+    // nhiều" duyệt sản phẩm mà không cần gõ tìm kiếm). ILIKE '%%' khớp mọi tên.
     const rows = await searchProductsForCostAdjustment(q);
     return NextResponse.json(rows);
   } catch (error) {

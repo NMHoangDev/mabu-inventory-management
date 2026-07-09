@@ -69,6 +69,14 @@ const STATUS_LABEL: Record<string, string> = {
   completed: "Hoàn tất",
   cancelled: "Huỷ bỏ",
 };
+
+const SOURCE_LABEL: Record<string, string> = {
+  store: "Tại cửa hàng",
+  facebook: "Facebook",
+  website: "Website",
+  zalo: "Zalo",
+  other: "Khác",
+};
 const STATUS_CLASS: Record<string, string> = {
   new: "bg-blue-100 text-blue-700",
   processing: "bg-blue-100 text-blue-700",
@@ -90,13 +98,17 @@ const PAY_CLASS: Record<string, string> = {
 };
 
 const SHIP_LABEL: Record<string, string> = {
-  unshipped: "Chưa giao",
+  unshipped: "Chưa xử lý",
+  confirmed: "Đã xác nhận",
+  packing: "Đang đóng gói",
   shipping: "Đang giao",
   shipped: "Đã giao",
   returned: "Đã trả hàng",
 };
 const SHIP_CLASS: Record<string, string> = {
   unshipped: "bg-gray-100 text-gray-600",
+  confirmed: "bg-blue-100 text-blue-700",
+  packing: "bg-purple-100 text-purple-700",
   shipping: "bg-orange-100 text-orange-700",
   shipped: "bg-green-100 text-green-700",
   returned: "bg-gray-100 text-gray-500",
@@ -158,6 +170,7 @@ export default function OrdersPage() {
   const [dateFilter, setDateFilter] = useState<string>("today");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [shipmentFilter, setShipmentFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -168,6 +181,7 @@ export default function OrdersPage() {
       if (tab === "returned") params.set("fulfillment_status", "returned");
       if (paymentFilter !== "all") params.set("payment_status", paymentFilter);
       if (shipmentFilter !== "all") params.set("fulfillment_status", shipmentFilter);
+      if (sourceFilter !== "all") params.set("source", sourceFilter);
       params.set("page", String(page));
       params.set("page_size", String(pageSize));
 
@@ -183,7 +197,7 @@ export default function OrdersPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, tab, page, pageSize, paymentFilter, shipmentFilter]);
+  }, [search, tab, page, pageSize, paymentFilter, shipmentFilter, sourceFilter]);
 
   useEffect(() => {
     fetchOrders();
@@ -191,7 +205,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [tab, search, paymentFilter, shipmentFilter]);
+  }, [tab, search, paymentFilter, shipmentFilter, sourceFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -275,9 +289,13 @@ export default function OrdersPage() {
               value={shipmentFilter}
               onChange={setShipmentFilter}
             />
-            <button className="p-2 border border-[#c0c6d6] rounded-lg hover:bg-[#ebf5ff] transition-colors" title="Lọc thêm">
-              <Filter className="w-5 h-5" />
-            </button>
+            <FilterDropdown
+              icon={<Filter className="w-5 h-5" />}
+              label={sourceFilter === "all" ? "Nguồn đơn" : SOURCE_LABEL[sourceFilter] ?? "Nguồn đơn"}
+              options={[{ v: "all", l: "Tất cả" }, ...Object.keys(SOURCE_LABEL).map((k) => ({ v: k, l: SOURCE_LABEL[k] }))]}
+              value={sourceFilter}
+              onChange={setSourceFilter}
+            />
             <button
               onClick={() => router.push("/orders/new")}
               className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"

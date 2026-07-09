@@ -248,33 +248,43 @@ export async function fetchPurchaseByTime(range: DateRange): Promise<{
   if (timeData?.daily) {
     return {
       daily: timeData.daily,
-      suppliers: supplierData?.suppliers ?? mockSupplierData(),
-      products: productData?.products ?? mockProductData(),
-      orders: orderData?.orders ?? mockOrderData(),
+      suppliers: supplierData?.suppliers ?? [],
+      products: productData?.products ?? [],
+      orders: orderData?.orders ?? [],
     };
   }
 
-  // Fallback to goods-receipts API
+  // Fallback to goods-receipts API — daily tính thật từ list receipts, không
+  // còn suppliers/products giả (mockSupplierData/mockProductData) như trước.
   const receipts = await apiFetch<any[]>("/api/goods-receipts");
   if (receipts) {
     const dailyMap = new Map<string, { receipt_count: number; total_amount: number }>();
+    const supplierMap = new Map<string, { receipt_count: number; total_amount: number; total_paid: number }>();
     for (const r of receipts) {
       const day = (r.received_at ?? r.created_at ?? "").slice(0, 10);
       if (!dailyMap.has(day)) dailyMap.set(day, { receipt_count: 0, total_amount: 0 });
       const d = dailyMap.get(day)!;
       d.receipt_count++;
       d.total_amount += r.total_cost ?? 0;
+
+      const name = r.supplier_name ?? "Không xác định";
+      if (!supplierMap.has(name)) supplierMap.set(name, { receipt_count: 0, total_amount: 0, total_paid: 0 });
+      const s = supplierMap.get(name)!;
+      s.receipt_count++;
+      s.total_amount += r.total_cost ?? 0;
+      s.total_paid += r.paid ?? 0;
     }
     const daily = Array.from(dailyMap.entries()).sort().map(([day, v]) => ({ day, receipt_count: v.receipt_count, total_amount: v.total_amount }));
-    return { daily, suppliers: mockSupplierData(), products: mockProductData(), orders: receipts.map((r: any) => ({ code: r.code, supplier_name: r.supplier_name, staff: r.staff, received_at: r.received_at, receipt_status: r.receipt_status, total: r.total_cost, paid: r.paid ?? 0, unpaid: (r.total_cost ?? 0) - (r.paid ?? 0), item_count: 0 })) };
+    const suppliers = Array.from(supplierMap.entries()).map(([supplier_name, v]) => ({ supplier_name, receipt_count: v.receipt_count, total_amount: v.total_amount, total_paid: v.total_paid, unpaid: v.total_amount - v.total_paid }));
+    return {
+      daily,
+      suppliers,
+      products: [],
+      orders: receipts.map((r: any) => ({ code: r.code, supplier_name: r.supplier_name, staff: r.staff, received_at: r.received_at, receipt_status: r.receipt_status, total: r.total_cost, paid: r.paid ?? 0, unpaid: (r.total_cost ?? 0) - (r.paid ?? 0), item_count: 0 }))
+    };
   }
 
-  return {
-    daily: mockDailyData(range.from, range.to),
-    suppliers: mockSupplierData(),
-    products: mockProductData(),
-    orders: mockOrderData(),
-  };
+  return { daily: [], suppliers: [], products: [], orders: [] };
 }
 
 export async function fetchPurchaseBySupplier(range: DateRange): Promise<{
@@ -303,10 +313,18 @@ export async function fetchPurchaseBySupplier(range: DateRange): Promise<{
       s.total_paid += r.paid ?? 0;
     }
     const suppliers = Array.from(supplierMap.entries()).map(([supplier_name, v]) => ({ supplier_name, receipt_count: v.receipt_count, total_amount: v.total_amount, total_paid: v.total_paid, unpaid: v.total_amount - v.total_paid }));
-    return { suppliers, daily: mockDailyData(range.from, range.to).map((d) => ({ day: d.day, total_amount: d.total_amount })) };
+    // daily tính thật từ chính list receipts vừa tải (fallback path — API
+    // group_by=supplier lỗi nhưng /api/goods-receipts vẫn tải được).
+    const dailyMap = new Map<string, number>();
+    for (const r of receipts) {
+      const day = (r.received_at ?? r.created_at ?? "").slice(0, 10);
+      dailyMap.set(day, (dailyMap.get(day) ?? 0) + (r.total_cost ?? 0));
+    }
+    const daily = Array.from(dailyMap.entries()).sort().map(([day, total_amount]) => ({ day, total_amount }));
+    return { suppliers, daily };
   }
 
-  return { suppliers: mockSupplierData(), daily: mockDailyData(range.from, range.to).map((d) => ({ day: d.day, total_amount: d.total_amount })) };
+  return { suppliers: [], daily: [] };
 }
 
 export async function fetchPurchaseByProduct(range: DateRange): Promise<{
@@ -314,13 +332,21 @@ export async function fetchPurchaseByProduct(range: DateRange): Promise<{
   daily: { day: string; total_qty: number; total_amount: number }[];
 }> {
   const params = new URLSearchParams({ date_from: range.from, date_to: range.to });
-  const data = await apiFetch<any>(`/api/reports/purchases?${params}&group_by=product`);
+  const [data, timeData] = await Promise.all([
+    apiFetch<any>(`/api/reports/purchases?${params}&group_by=product`),
+    apiFetch<any>(`/api/reports/purchases?${params}&group_by=time`),
+  ]);
 
   if (data?.products) {
-    return { products: data.products, daily: mockDailyData(range.from, range.to).map((d) => ({ day: d.day, total_qty: d.receipt_count * 10, total_amount: d.total_amount })) };
+    // daily lấy từ group_by=time (thật) — trước đây luôn là mockDailyData()
+    // dù nhánh "products" đã tải thành công.
+    return {
+      products: data.products,
+      daily: (timeData?.daily ?? []).map((d: any) => ({ day: d.day, total_qty: d.total_qty ?? 0, total_amount: d.total_amount }))
+    };
   }
 
-  return { products: mockProductData(), daily: mockDailyData(range.from, range.to).map((d) => ({ day: d.day, total_qty: d.receipt_count * 10, total_amount: d.total_amount })) };
+  return { products: [], daily: [] };
 }
 
 export async function fetchPurchaseByOrder(range: DateRange): Promise<{
@@ -371,26 +397,40 @@ export async function fetchPaymentByStaff(range: DateRange): Promise<{
   staff: { name: string; role: string; order_count: number; total: number; paid: number; unpaid: number }[];
   summary: { total_amount: number; total_paid: number; total_unpaid: number };
 }> {
+  // Trước đây group_by=payment_staff CHƯA từng được cài ở API (chỉ có trong
+  // comment) — order_count luôn là Math.round(1 + Math.random()*20), hoặc tệ
+  // hơn là rơi thẳng về danh sách viết cứng "Nguyễn Văn A"... Giờ API đã có
+  // nhánh payment_staff thật (xem app/api/reports/purchases/route.ts).
+  const params = new URLSearchParams({ date_from: range.from, date_to: range.to });
+  const data = await apiFetch<any>(`/api/reports/purchases?${params}&group_by=payment_staff`);
+  if (data?.staff) {
+    const staff = data.staff as { name: string; role: string; order_count: number; total: number; paid: number; unpaid: number }[];
+    return {
+      staff,
+      summary: {
+        total_amount: staff.reduce((s, st) => s + st.total, 0),
+        total_paid: staff.reduce((s, st) => s + st.paid, 0),
+        total_unpaid: staff.reduce((s, st) => s + st.unpaid, 0)
+      }
+    };
+  }
+
   const receipts = await apiFetch<any[]>("/api/goods-receipts");
   if (receipts) {
-    const staffMap = new Map<string, { name: string; total: number; paid: number }>();
+    const staffMap = new Map<string, { name: string; order_count: number; total: number; paid: number }>();
     for (const r of receipts) {
-      const name = r.staff ?? "Không xác định";
-      if (!staffMap.has(name)) staffMap.set(name, { name, total: 0, paid: 0 });
+      const name = r.staff || "Không xác định";
+      if (!staffMap.has(name)) staffMap.set(name, { name, order_count: 0, total: 0, paid: 0 });
       const s = staffMap.get(name)!;
+      s.order_count++;
       s.total += r.total_cost ?? 0;
       s.paid += r.paid ?? 0;
     }
-    const staff = Array.from(staffMap.entries()).map(([name, v]) => ({ name, role: "Nhân viên", order_count: Math.round(1 + Math.random() * 20), total: v.total, paid: v.paid, unpaid: v.total - v.paid }));
+    const staff = Array.from(staffMap.entries()).map(([name, v]) => ({ name, role: "Nhân viên", order_count: v.order_count, total: v.total, paid: v.paid, unpaid: v.total - v.paid }));
     return { staff, summary: { total_amount: staff.reduce((s, st) => s + st.total, 0), total_paid: staff.reduce((s, st) => s + st.paid, 0), total_unpaid: staff.reduce((s, st) => s + st.unpaid, 0) } };
   }
 
-  const mockStaff = [
-    { name: "Nguyễn Văn A", role: "Nhân viên kho", order_count: 15, total: 200e6, paid: 140e6, unpaid: 60e6 },
-    { name: "Trần Thị B", role: "Nhân viên mua hàng", order_count: 12, total: 150e6, paid: 105e6, unpaid: 45e6 },
-    { name: "Lê Văn C", role: "Quản lý kho", order_count: 10, total: 120e6, paid: 84e6, unpaid: 36e6 },
-  ];
-  return { staff: mockStaff, summary: { total_amount: 470e6, total_paid: 329e6, total_unpaid: 141e6 } };
+  return { staff: [], summary: { total_amount: 0, total_paid: 0, total_unpaid: 0 } };
 }
 
 export async function fetchPaymentByMethod(range: DateRange): Promise<{
@@ -549,17 +589,20 @@ export async function fetchInOutBalance(range: DateRange): Promise<{
   const data = await apiFetch<any>(`/api/reports/inventory?${params}&group_by=in_out`);
 
   if (data?.items) {
+    // Trước đây: daily luôn là mockDailyData() ngẫu nhiên, total_export luôn
+    // = 0, total_beginning/total_ending luôn = 1000 — bất kể dữ liệu thật.
+    // Giờ API /api/reports/inventory?group_by=in_out đã tính thật cả 2.
     return {
       items: data.items,
-      daily: mockDailyData(range.from, range.to).map((d) => ({ day: d.day, import: d.receipt_count * 10, export: Math.round(d.receipt_count * 8), ending: d.receipt_count * 50 })),
-      summary: { total_beginning: 1000, total_import: data.items.reduce((s: number, i: any) => s + (i.import_qty ?? 0), 0), total_export: 0, total_ending: 1000 },
+      daily: Array.isArray(data.daily) ? data.daily.map((d: any) => ({ day: d.day, import: d.import, export: d.export, ending: null })) : [],
+      summary: data.summary ?? { total_beginning: 0, total_import: 0, total_export: 0, total_ending: 0 },
     };
   }
 
   return {
-    items: mockProductData().slice(0, 10).map((p) => ({ ...p, beginning_balance: Math.round(p.total_qty * 0.8), import_qty: Math.round(p.total_qty * 0.2), export_qty: Math.round(p.total_qty * 0.15), ending_balance: Math.round(p.total_qty * 0.85) })),
-    daily: mockDailyData(range.from, range.to).map((d) => ({ day: d.day, import: d.receipt_count * 10, export: Math.round(d.receipt_count * 8), ending: d.receipt_count * 50 })),
-    summary: { total_beginning: 1000, total_import: 500, total_export: 300, total_ending: 1200 },
+    items: [],
+    daily: [],
+    summary: { total_beginning: 0, total_import: 0, total_export: 0, total_ending: 0 },
   };
 }
 

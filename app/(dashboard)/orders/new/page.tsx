@@ -30,7 +30,9 @@ interface Product {
   name: string;
   sku: string;
   unit: string;
-  price: number;
+  price: number; // giá lẻ
+  cost_price: number; // giá vốn
+  wholesale_price: number; // giá sĩ
   image_url: string;
 }
 
@@ -42,14 +44,32 @@ interface Customer {
   email: string;
 }
 
+type PriceTier = "cost" | "wholesale" | "retail";
+
+const TIER_LABELS: Record<PriceTier, string> = {
+  cost: "Giá vốn",
+  wholesale: "Giá sĩ",
+  retail: "Giá lẻ",
+};
+
 interface CartItem {
   product_id: string;
   product_name: string;
   product_sku: string;
   unit: string;
   image_url: string;
-  unit_price: number;
+  price_cost: number;
+  price_wholesale: number;
+  price_retail: number;
+  price_tier: PriceTier;
   quantity: number;
+}
+
+// Đơn giá thực tế của 1 line = giá theo price_tier đang chọn (vốn/sĩ/lẻ).
+function tierPrice(item: CartItem): number {
+  if (item.price_tier === "cost") return item.price_cost;
+  if (item.price_tier === "wholesale") return item.price_wholesale;
+  return item.price_retail;
 }
 
 const SOURCES = [
@@ -131,6 +151,10 @@ export default function NewOrderPage() {
 
   const productInputRef = useRef<HTMLInputElement | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
+  // Ref theo product_id — dùng để nhảy focus tới đúng ô số lượng / nút chọn
+  // giá của dòng vừa thêm (xem addProduct + updateQty onKeyDown).
+  const qtyInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const tierButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   // ── Customer actions ───────────────────────────────────────────────────
   const pickCustomer = useCallback((c: Customer) => {
@@ -161,7 +185,10 @@ export default function NewOrderPage() {
           product_sku: p.sku,
           unit: p.unit,
           image_url: p.image_url,
-          unit_price: p.price,
+          price_cost: p.cost_price,
+          price_wholesale: p.wholesale_price,
+          price_retail: p.price,
+          price_tier: "retail" as PriceTier,
           quantity: 1,
         },
       ];
@@ -169,7 +196,22 @@ export default function NewOrderPage() {
     setProductSearch("");
     setProductResults([]);
     setProductHighlight(0);
-    setTimeout(() => productInputRef.current?.focus(), 0);
+    // UX: sau khi thêm SP, nhảy thẳng vào ô số lượng của ĐÚNG dòng vừa thêm
+    // (không refocus vào ô tìm SP nữa) để user gõ số lượng ngay — Enter ở ô
+    // số lượng sẽ tiếp tục nhảy qua nút chọn giá (xem input số lượng bên dưới).
+    setTimeout(() => {
+      const el = qtyInputRefs.current[p.id];
+      el?.focus();
+      el?.select();
+    }, 0);
+    // Ghi nhớ tìm kiếm: tăng use_count cho sản phẩm này — lần search sau với
+    // từ khóa khớp sản phẩm đã thêm sẽ được ưu tiên lên trước. Fire-and-forget,
+    // không chặn UI nếu lỗi.
+    void fetch("/api/orders/search-products/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_id: p.id }),
+    }).catch(() => undefined);
   }, []);
 
   const updateQty = (productId: string, qty: number) => {
@@ -180,11 +222,15 @@ export default function NewOrderPage() {
     setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, quantity: qty } : c)));
   };
 
+  const setTier = (productId: string, tier: PriceTier) => {
+    setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, price_tier: tier } : c)));
+  };
+
   const removeItem = (productId: string) => {
     setCart((prev) => prev.filter((c) => c.product_id !== productId));
   };
 
-  const subtotal = useMemo(() => cart.reduce((s, c) => s + c.quantity * c.unit_price, 0), [cart]);
+  const subtotal = useMemo(() => cart.reduce((s, c) => s + c.quantity * tierPrice(c), 0), [cart]);
   const total = useMemo(() => Math.max(0, subtotal - discount + shippingFee), [subtotal, discount, shippingFee]);
 
   const submit = async (status: "new" | "completed") => {
@@ -217,7 +263,7 @@ export default function NewOrderPage() {
           unit: c.unit,
           image_url: c.image_url,
           quantity: c.quantity,
-          unit_price: c.unit_price,
+          unit_price: tierPrice(c),
         })),
       };
       const res = await fetch("/api/orders", {
@@ -239,9 +285,9 @@ export default function NewOrderPage() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)] bg-[#f4f6f8] overflow-hidden">
+    <div className="flex flex-col min-h-screen bg-[#f4f6f8]">
       {/* Top app bar */}
-      <header className="h-14 bg-white border-b border-[#c0c6d6] flex justify-between items-center px-6 flex-shrink-0">
+      <header className="h-14 bg-white border-b border-[#c0c6d6] flex justify-between items-center px-6 shrink-0 sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <Link href="/orders" className="flex items-center text-[#005baf] hover:bg-[#ebf5ff] p-2 rounded transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -263,7 +309,7 @@ export default function NewOrderPage() {
       </header>
 
       {/* Main workspace */}
-      <main className="flex-1 flex gap-4 p-6 overflow-hidden">
+      <main className="flex-1 flex gap-4 p-6">
         {/* Left column */}
         <div className="flex-1 flex flex-col gap-4 min-w-0">
           {/* Customer search */}
@@ -371,6 +417,7 @@ export default function NewOrderPage() {
                       <th className="p-2 pl-4 text-xs font-semibold text-[#404754] uppercase tracking-wider w-12">STT</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider">Sản phẩm</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Số lượng</th>
+                      <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Loại giá</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Đơn giá</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Thành tiền</th>
                       <th className="p-2 pr-4 w-10"></th>
@@ -407,11 +454,23 @@ export default function NewOrderPage() {
                               <Minus className="w-3 h-3" />
                             </button>
                             <input
+                              ref={(el) => {
+                                qtyInputRefs.current[c.product_id] = el;
+                              }}
                               type="text"
                               value={c.quantity}
                               onChange={(e) => {
                                 const v = parseInt(e.target.value || "0", 10);
                                 updateQty(c.product_id, isNaN(v) ? 0 : v);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              onKeyDown={(e) => {
+                                // UX: sau khi gõ số lượng, Enter nhảy tiếp qua nút
+                                // chọn loại giá (vốn/sĩ/lẻ) của ĐÚNG dòng này.
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  tierButtonRefs.current[c.product_id]?.focus();
+                                }
                               }}
                               className="w-12 text-center border-none text-xs focus:ring-0"
                             />
@@ -423,8 +482,48 @@ export default function NewOrderPage() {
                             </button>
                           </div>
                         </td>
-                        <td className="p-4 text-right text-sm">{fmtMoney(c.unit_price)}</td>
-                        <td className="p-4 text-right text-sm font-semibold">{fmtMoney(c.unit_price * c.quantity)}</td>
+                        <td className="p-4 text-right">
+                          <div className="inline-flex gap-1 justify-end" role="group" aria-label="Chọn loại giá">
+                            {(["cost", "wholesale", "retail"] as PriceTier[]).map((tier, tierIdx, arr) => (
+                              <button
+                                key={tier}
+                                type="button"
+                                // Ref gắn vào nút đang ACTIVE — ô số lượng nhảy Enter
+                                // tới đây nên phải luôn là nút đang chọn của dòng này.
+                                ref={
+                                  c.price_tier === tier
+                                    ? (el) => {
+                                        tierButtonRefs.current[c.product_id] = el;
+                                      }
+                                    : undefined
+                                }
+                                onClick={() => setTier(c.product_id, tier)}
+                                onKeyDown={(e) => {
+                                  // ← → để duyệt nhanh giữa 3 loại giá cùng dòng.
+                                  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                                    e.preventDefault();
+                                    const dir = e.key === "ArrowRight" ? 1 : -1;
+                                    const nextTier = arr[(tierIdx + dir + arr.length) % arr.length];
+                                    setTier(c.product_id, nextTier);
+                                    (e.currentTarget.parentElement?.children[
+                                      (tierIdx + dir + arr.length) % arr.length
+                                    ] as HTMLButtonElement | undefined)?.focus();
+                                  }
+                                }}
+                                title={TIER_LABELS[tier]}
+                                className={`px-1.5 py-1 rounded text-[10px] font-semibold transition-colors ${
+                                  c.price_tier === tier
+                                    ? "bg-[#005baf] text-white"
+                                    : "bg-[#ebf5ff] text-[#005baf] hover:bg-[#d9eafa]"
+                                }`}
+                              >
+                                {tier === "cost" ? "Vốn" : tier === "wholesale" ? "Sĩ" : "Lẻ"}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-4 text-right text-sm">{fmtMoney(tierPrice(c))}</td>
+                        <td className="p-4 text-right text-sm font-semibold">{fmtMoney(tierPrice(c) * c.quantity)}</td>
                         <td className="p-4 text-right">
                           <button
                             onClick={() => removeItem(c.product_id)}

@@ -272,3 +272,125 @@ export async function deleteSupplier(id: string): Promise<void> {
   const pool = getPool();
   await pool.query(`delete from suppliers where id = $1::uuid`, [id]);
 }
+
+// ─── Groups (mirror lib/customers/repository.ts's customer_groups) ─────────
+// Trước đây /suppliers/groups là trang tĩnh "đang xây dựng", không có API
+// nào cả. suppliers.group_id + bảng supplier_groups mới thêm cùng migration
+// SCHEMA_VERSION 20.
+
+export interface SupplierGroup {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SupplierGroupWithCount extends SupplierGroup {
+  supplier_count: number;
+}
+
+export interface SupplierGroupInput {
+  name: string;
+  code?: string;
+  type?: string;
+  description?: string;
+}
+
+function slugifySupplierGroupCode(name: string, fallback: string) {
+  const s = name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 6);
+  return s || fallback;
+}
+
+export async function getSupplierGroupsWithCount(): Promise<SupplierGroupWithCount[]> {
+  if (!isDatabaseConfigured) return [];
+  await ensureDatabase();
+  const pool = getPool();
+  const res = await pool.query(`
+    select
+      g.id, g.name, g.code, g.type, g.description, g.created_at, g.updated_at,
+      coalesce(s.cnt, 0)::int as supplier_count
+    from supplier_groups g
+    left join (
+      select group_id, count(*)::int as cnt
+      from suppliers
+      where group_id is not null
+      group by group_id
+    ) s on s.group_id = g.id
+    order by g.created_at asc
+  `);
+  return res.rows as SupplierGroupWithCount[];
+}
+
+export async function createSupplierGroup(input: SupplierGroupInput): Promise<SupplierGroupWithCount> {
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+
+    let code = (input.code || "").trim();
+    if (!code) {
+      const c = await client.query(
+        `select count(*)::int as cnt from supplier_groups where code like $1`,
+        [`${slugifySupplierGroupCode(input.name, "NCC")}%`]
+      );
+      const suffix = c.rows[0].cnt + 1;
+      code = `${slugifySupplierGroupCode(input.name, "NCC")}${suffix.toString().padStart(3, "0")}`;
+    }
+
+    const res = await client.query(
+      `insert into supplier_groups (name, code, type, description, created_at, updated_at)
+       values ($1, $2, $3, $4, now(), now())
+       returning *`,
+      [input.name.trim(), code, input.type || "Cố định", input.description || ""]
+    );
+
+    await client.query("commit");
+    return { ...(res.rows[0] as SupplierGroup), supplier_count: 0 };
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateSupplierGroup(
+  id: string,
+  input: SupplierGroupInput
+): Promise<SupplierGroupWithCount | null> {
+  await ensureDatabase();
+  const pool = getPool();
+  await pool.query(
+    `update supplier_groups set
+       name = $2, code = $3, type = $4, description = $5, updated_at = now()
+     where id = $1`,
+    [id, input.name.trim(), input.code || "", input.type || "Cố định", input.description || ""]
+  );
+  const res = await pool.query(
+    `select g.*, coalesce(s.cnt, 0)::int as supplier_count
+       from supplier_groups g
+       left join (select group_id, count(*)::int as cnt from suppliers where group_id is not null group by group_id) s
+         on s.group_id = g.id
+      where g.id = $1`,
+    [id]
+  );
+  if (res.rows.length === 0) return null;
+  return res.rows[0] as SupplierGroupWithCount;
+}
+
+export async function deleteSupplierGroup(id: string): Promise<boolean> {
+  await ensureDatabase();
+  const pool = getPool();
+  // suppliers.group_id có ON DELETE SET NULL — NCC vẫn giữ nguyên, chỉ mất group_id.
+  const res = await pool.query(`delete from supplier_groups where id = $1`, [id]);
+  return (res.rowCount ?? 0) > 0;
+}

@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import {
   ChevronLeft,
   ChevronRight,
-  FileText,
   HelpCircle,
   Loader2,
   Plus,
@@ -93,9 +93,6 @@ export default function ReceiptVouchersPage() {
         <h1 className="text-lg font-medium text-slate-800">Phiếu thu</h1>
         <div className="flex items-center gap-6 text-sm text-slate-600">
           <button className="flex items-center gap-1.5 hover:text-blue-600">
-            <FileText className="w-4 h-4" /> Tư vấn thuế
-          </button>
-          <button className="flex items-center gap-1.5 hover:text-blue-600">
             <HelpCircle className="w-4 h-4" /> Trợ giúp
           </button>
           <div className="flex items-center gap-2 border-l pl-4">
@@ -108,7 +105,21 @@ export default function ReceiptVouchersPage() {
 
       <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-4 text-sm text-slate-600">
-          <button className="flex items-center gap-2 hover:text-blue-600">
+          <button
+            onClick={() =>
+              downloadCsv(`phieu-thu-${Date.now()}.csv`, rows, [
+                { label: "Ngày tạo", value: (r) => formatDateTime(r.created_at) },
+                { label: "Mã phiếu", value: (r) => r.code },
+                { label: "Loại phiếu", value: (r) => r.payment_category || "Tự động" },
+                { label: "Trạng thái", value: (r) => STATUS_META[r.status]?.label ?? r.status },
+                { label: "Số tiền thu", value: (r) => r.amount },
+                { label: "Nhóm người nộp", value: (r) => r.group_name },
+                { label: "Chứng từ gốc", value: (r) => r.reference_code },
+                { label: "Tên người nộp", value: (r) => r.person_name },
+              ])
+            }
+            className="flex items-center gap-2 hover:text-blue-600"
+          >
             <Upload className="w-4 h-4" /> Xuất file
           </button>
         </div>

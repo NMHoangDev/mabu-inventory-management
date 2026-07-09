@@ -4,6 +4,7 @@ import os from "node:os";
 import { isDatabaseConfigured, getPool, logActivity } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { getSupabaseDataClient, isSupabaseDataConfigured, SHIPPING_TABLES } from "./supabase";
+import { runTrigger } from "../automations/engine";
 
 // ──────────────────────────────────────────────────────────────────────
 // Types
@@ -883,14 +884,72 @@ export async function createShipping(input: ShippingInput, initialEvent?: { stat
   return jsonCreateShipping(input, initialEvent);
 }
 
+// Trạng thái vận đơn → trạng thái giao hàng của ĐƠN HÀNG gốc (orders.fulfillment_status).
+// Trước đây đổi trạng thái vận đơn không hề đồng bộ ngược lại đơn hàng — đơn
+// hàng vẫn hiện "Chưa giao" dù vận đơn đã "Đã giao". Chỉ map các status có
+// nghĩa rõ ràng; các status trung gian (packing/awaiting_pickup) giữ nguyên
+// fulfillment_status hiện tại, không cần cập nhật.
+const SHIPPING_TO_ORDER_FULFILLMENT: Record<string, "unshipped" | "shipping" | "shipped" | "returned"> = {
+  shipping: "shipping",
+  delivered: "shipped",
+  returning: "returned",
+  returned: "returned",
+  cancelled: "unshipped",
+  failed: "unshipped"
+};
+
+async function syncOrderFulfillmentStatus(orderId: string | null | undefined, shippingStatus: string): Promise<void> {
+  if (!orderId) return;
+  const next = SHIPPING_TO_ORDER_FULFILLMENT[shippingStatus];
+  if (!next) return;
+  if (!isDatabaseConfigured) return;
+  try {
+    const pool = getPool();
+    const res = await pool.query(
+      `update orders set fulfillment_status = $2, updated_at = now() where id = $1::uuid
+       returning id, code, total, customer_name, customer_phone`,
+      [orderId, next]
+    );
+    const order = res.rows[0];
+    if (!order) return;
+    const payload = {
+      order: {
+        id: order.id,
+        code: order.code,
+        total: Number(order.total),
+        customer_name: order.customer_name,
+        customer_phone: order.customer_phone,
+      },
+    };
+    if (next === "shipped") {
+      runTrigger("order.shipped", payload).catch((e) => console.warn("[automations] order.shipped failed:", e));
+    }
+    if (shippingStatus === "delivered") {
+      runTrigger("shipping.delivered", payload).catch((e) => console.warn("[automations] shipping.delivered failed:", e));
+    }
+    if (shippingStatus === "returned") {
+      runTrigger("shipping.returned", payload).catch((e) => console.warn("[automations] shipping.returned failed:", e));
+    }
+  } catch (e) {
+    console.warn(`syncOrderFulfillmentStatus failed (order=${orderId}, status=${shippingStatus}):`, e);
+  }
+}
+
 export async function updateShipping(id: string, input: Partial<ShippingInput>, event?: { status: string; description: string; location: string }): Promise<Shipping | null> {
+  let result: Shipping | null = null;
   if (isSupabaseDataConfigured()) {
-    try { return await supabaseUpdateShipping(id, input, event); } catch (e) { console.warn("supabaseUpdateShipping failed:", e); }
+    try { result = await supabaseUpdateShipping(id, input, event); } catch (e) { console.warn("supabaseUpdateShipping failed:", e); }
   }
-  if (isDatabaseConfigured) {
-    try { return await pgUpdateShipping(id, input, event); } catch (e) { console.warn("pgUpdateShipping failed:", e); }
+  if (!result && isDatabaseConfigured) {
+    try { result = await pgUpdateShipping(id, input, event); } catch (e) { console.warn("pgUpdateShipping failed:", e); }
   }
-  return jsonUpdateShipping(id, input, event);
+  if (!result) {
+    result = await jsonUpdateShipping(id, input, event);
+  }
+  if (result && input.status) {
+    await syncOrderFulfillmentStatus(result.order_id, input.status);
+  }
+  return result;
 }
 
 export async function deleteShipping(id: string): Promise<boolean> {

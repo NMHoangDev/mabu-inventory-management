@@ -88,7 +88,18 @@ export interface Customer {
   updated_at: string;
   group_name?: string;
   default_address?: CustomerAddress;
+  has_account?: boolean;
 }
+
+// Cột thật của bảng customers, liệt kê rõ (không dùng `c.*`) để KHÔNG bao giờ
+// vô tình trả password_hash ra API — trang quản lý khách hàng chỉ cần biết
+// "đã có tài khoản web hay chưa" qua has_account, không cần/được thấy hash.
+const CUSTOMER_COLUMNS = `
+  c.id, c.code, c.name, c.phone, c.email, c.gender, c.birthday, c.company,
+  c.tax_code, c.website, c.description, c.tags, c.group_id, c.assigner_id,
+  c.total_spent, c.total_orders, c.total_debt, c.birth_day, c.birth_month,
+  c.last_order_at, c.created_at, c.updated_at, (c.password_hash is not null) as has_account
+`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -101,6 +112,14 @@ function parseDate(raw: unknown): string {
 
 function cell(val: unknown): string {
   return val == null ? "" : String(val);
+}
+
+// `insert/select ... returning *` vẫn phải chạm password_hash thật (không chỉ
+// null) khi khách đã đăng ký web rồi được admin sửa hồ sơ — xoá field này
+// khỏi object trước khi trả ra, tương tự lý do CUSTOMER_COLUMNS tồn tại.
+function stripPasswordHash<T extends Record<string, unknown>>(row: T): Omit<T, "password_hash"> & { has_account: boolean } {
+  const { password_hash, ...rest } = row as Record<string, unknown> & { password_hash?: string | null };
+  return { ...(rest as Omit<T, "password_hash">), has_account: Boolean(password_hash) };
 }
 
 // ─── Groups ──────────────────────────────────────────────────────────────────
@@ -299,7 +318,7 @@ export async function getCustomers(opts: {
 
   const res = await pool.query(`
     select
-      c.*,
+      ${CUSTOMER_COLUMNS},
       cg.name as group_name,
       ca.id          as addr_id,
       ca.recipient_name as addr_recipient_name,
@@ -446,7 +465,7 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
       birthMonth,
     ]);
 
-    const customer = row.rows[0] as Customer;
+    const customer = stripPasswordHash(row.rows[0]) as Customer;
 
     if (hasAddress) {
       for (const addr of input.addresses!) {
@@ -576,7 +595,7 @@ export async function updateCustomer(id: string, input: CustomerInput): Promise<
     await logActivity("customer", `Cập nhật khách hàng ${input.name} (ID: ${id})`);
 
     const row = await pool.query(`select * from customers where id = $1`, [id]);
-    return row.rows[0] as Customer;
+    return stripPasswordHash(row.rows[0]) as Customer;
   } catch (err) {
     await client.query("rollback");
     throw err;
@@ -614,7 +633,7 @@ export async function getCustomerById(id: string): Promise<Customer | null> {
   const pool = getPool();
   const res = await pool.query(`
     select
-      c.*,
+      ${CUSTOMER_COLUMNS},
       cg.name as group_name,
       ca.id          as addr_id,
       ca.recipient_name as addr_recipient_name,

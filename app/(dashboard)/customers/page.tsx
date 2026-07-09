@@ -10,7 +10,9 @@ import {
   Upload,
   X,
   Users,
+  KeyRound,
 } from "lucide-react";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import { CustomerAddress, CustomerFormData, CustomerFormModal } from "./CustomerFormModal";
 
 interface Customer {
@@ -36,6 +38,7 @@ interface Customer {
   created_at: string;
   updated_at: string;
   default_address?: CustomerAddress;
+  has_account?: boolean;
 }
 
 interface CustomerGroup {
@@ -71,6 +74,7 @@ export default function CustomersPage() {
   const [editCustomer, setEditCustomer] = useState<Partial<CustomerFormData & { id: string }> | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [resettingId, setResettingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
 
@@ -179,6 +183,23 @@ export default function CustomersPage() {
     }
   }
 
+  async function handleResetPassword(customer: Customer) {
+    if (!window.confirm(`Đặt lại mật khẩu tài khoản website của "${customer.name}"? Khách sẽ cần đăng ký lại mật khẩu mới bằng đúng số điện thoại này.`)) return;
+    setResettingId(customer.id);
+    try {
+      const res = await fetch(`/api/customers/${customer.id}/reset-password`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Đặt lại mật khẩu thất bại.");
+      }
+      await fetchCustomers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Đặt lại mật khẩu thất bại.");
+    } finally {
+      setResettingId(null);
+    }
+  }
+
   function openEdit(customer: Customer) {
     setEditCustomer({
       ...customer,
@@ -201,7 +222,19 @@ export default function CustomersPage() {
       {/* Action toolbar */}
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <button className="flex items-center gap-2 text-sm text-gray-600 hover:text-blue-600 transition">
+          <button
+            onClick={() =>
+              downloadCsv(`khach-hang-${Date.now()}.csv`, sorted, [
+                { label: "Mã khách hàng", value: (r) => r.code },
+                { label: "Tên khách hàng", value: (r) => r.name },
+                { label: "Số điện thoại", value: (r) => r.phone },
+                { label: "Nhóm khách hàng", value: (r) => r.group_name },
+                { label: "Công nợ hiện tại", value: (r) => r.total_debt },
+                { label: "Tổng chi tiêu", value: (r) => r.total_spent },
+              ])
+            }
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-blue-600 transition"
+          >
             <Download className="w-4 h-4" />
             Xuất file
           </button>
@@ -302,6 +335,7 @@ export default function CustomersPage() {
                 </th>
                 <th className="px-4 py-3 font-semibold">Số điện thoại</th>
                 <th className="px-4 py-3 font-semibold">Nhóm khách hàng</th>
+                <th className="px-4 py-3 font-semibold">Tài khoản web</th>
                 <th className="px-4 py-3 font-semibold text-right">
                   <button
                     onClick={() => toggleSort("total_spent")}
@@ -321,7 +355,7 @@ export default function CustomersPage() {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
                     <div className="flex items-center justify-center gap-2">
                       <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -333,11 +367,11 @@ export default function CustomersPage() {
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-red-500">{error}</td>
+                  <td colSpan={8} className="px-4 py-12 text-center text-red-500">{error}</td>
                 </tr>
               ) : pageSlice.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
                     <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
                     <p>Không tìm thấy khách hàng nào.</p>
                   </td>
@@ -378,6 +412,25 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-4 py-3 text-right text-gray-700">
                       {c.total_spent > 0 ? fmt(c.total_spent) : ""}
+                    </td>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      {c.has_account ? (
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                            Đã có
+                          </span>
+                          <button
+                            onClick={() => handleResetPassword(c)}
+                            disabled={resettingId === c.id}
+                            title="Đặt lại mật khẩu tài khoản website"
+                            className="text-gray-400 hover:text-blue-600 disabled:opacity-50"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 text-xs">Chưa có</span>
+                      )}
                     </td>
                   </tr>
                 ))

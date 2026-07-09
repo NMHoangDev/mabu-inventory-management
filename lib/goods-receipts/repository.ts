@@ -1,5 +1,6 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
+import { addStockForGoodsReceiptItems } from "../inventory/receipts";
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -7,6 +8,9 @@ function isUuid(value: string): boolean {
 
 export type GoodsReceiptStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type OrderStatusType = "pending" | "in_progress" | "completed" | "cancelled";
+// Trạng thái thanh toán — TÁCH RIÊNG khỏi receipt_status/order_status (trạng
+// thái nhập hàng/tồn kho). Derive giống orders.payment_status.
+export type GoodsReceiptPaymentStatus = "unpaid" | "partial" | "paid";
 
 export interface GoodsReceiptItem {
   id?: string;
@@ -41,6 +45,7 @@ export interface GoodsReceipt {
   tags: string[];
   receipt_status: GoodsReceiptStatus;
   order_status: OrderStatusType;
+  payment_status: GoodsReceiptPaymentStatus;
   subtotal: number;
   discount: number;
   tax: number;
@@ -64,8 +69,10 @@ export interface GoodsReceiptListRow {
   received_at: string;
   receipt_status: GoodsReceiptStatus;
   order_status: OrderStatusType;
+  payment_status: GoodsReceiptPaymentStatus;
   total_cost: number;
   total_quantity: number;
+  paid: number;
   created_at: string;
 }
 
@@ -94,8 +101,10 @@ function rowToListRow(row: any): GoodsReceiptListRow {
     received_at: row.received_at,
     receipt_status: row.receipt_status,
     order_status: row.order_status,
+    payment_status: row.payment_status ?? "unpaid",
     total_cost: num(row.total_cost),
     total_quantity: num(row.total_quantity),
+    paid: num(row.paid),
     created_at: row.created_at
   };
 }
@@ -117,6 +126,7 @@ function rowToReceipt(row: any, items: any[]): GoodsReceipt {
     tags: Array.isArray(row.tags) ? row.tags : [],
     receipt_status: row.receipt_status,
     order_status: row.order_status,
+    payment_status: row.payment_status ?? "unpaid",
     subtotal: num(row.subtotal),
     discount: num(row.discount),
     tax: num(row.tax),
@@ -152,8 +162,8 @@ export async function listGoodsReceipts(): Promise<GoodsReceiptListRow[]> {
   const pool = getPool();
   const result = await pool.query(`
     select id, code, supplier_id, supplier_name, branch, staff,
-           received_at, receipt_status, order_status, total_cost, total_quantity,
-           created_at
+           received_at, receipt_status, order_status, payment_status, paid,
+           total_cost, total_quantity, created_at
     from goods_receipts
     order by created_at desc
   `);
@@ -270,8 +280,9 @@ export async function createGoodsReceipt(input: CreateGoodsReceiptInput): Promis
         purchase_order_id, purchase_order_code,
         branch, staff, received_at, expected_date,
         note, tags, receipt_status, order_status,
-        subtotal, discount, tax, total_cost, total_quantity, paid, payment_method
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+        subtotal, discount, tax, total_cost, total_quantity, paid, payment_method,
+        completed_at
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
       returning *`,
       [
         code,
@@ -294,7 +305,8 @@ export async function createGoodsReceipt(input: CreateGoodsReceiptInput): Promis
         totalCost,
         totalQty,
         paid,
-        str(input.payment_method, "cash")
+        str(input.payment_method, "cash"),
+        receiptStatus === "completed" ? new Date().toISOString() : null
       ]
     );
 
@@ -324,6 +336,15 @@ export async function createGoodsReceipt(input: CreateGoodsReceiptInput): Promis
           item.note
         ]
       );
+    }
+
+    // Cộng tồn kho NGAY khi tạo đơn với trạng thái "completed" (nút "Tạo &
+    // nhập hàng" — hàng đã về, tách biệt hoàn toàn khỏi thanh toán). Trước
+    // đây bug: status hiển thị "Hoàn thành" ngay nhưng tồn kho KHÔNG được
+    // cộng, vì logic cộng tồn kho chỉ tồn tại trong transitionGoodsReceiptStatus
+    // (endpoint PATCH /status riêng) — không được gọi ở đây.
+    if (receiptStatus === "completed") {
+      await addStockForGoodsReceiptItems(client, newRow.id, code);
     }
 
     // Update purchase_order status if linked

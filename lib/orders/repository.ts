@@ -1,10 +1,22 @@
 import { ensureDatabase } from "../db/migration";
 import { getPool, isDatabaseConfigured, logActivity } from "../db/connection";
+import { applyInventoryLevelDelta } from "../inventory/receipts";
+import { runTrigger, type RuleTrigger } from "../automations/engine";
+
+function fireAutomation(trigger: RuleTrigger, payload: Record<string, any>) {
+  runTrigger(trigger, payload).catch((e) => console.warn(`[automations] ${trigger} failed:`, e));
+}
 
 export type OrderStatus = "new" | "processing" | "completed" | "cancelled";
 export type PaymentStatus = "unpaid" | "partial" | "paid" | "refunded";
-export type FulfillmentStatus = "unshipped" | "shipping" | "shipped" | "returned";
+// "confirmed"/"packing" thêm cho luồng xử lý đơn website: xác nhận → đóng gói
+// → đang giao → đã giao, trước khi giao cho đơn vị vận chuyển/tự giao.
+export type FulfillmentStatus = "unshipped" | "confirmed" | "packing" | "shipping" | "shipped" | "returned";
 export type OrderSource = "store" | "facebook" | "website" | "zalo" | "other";
+// COD: payment_status chỉ chuyển "paid" khi fulfillment_status đạt "shipped"
+// (thu tiền lúc giao xong). bank_transfer/card: khách trả trước, payment_status
+// có thể "paid" ngay cả khi fulfillment_status còn "unshipped" (chưa giao).
+export type PaymentMethod = "cod" | "bank_transfer" | "card" | "cash";
 
 export interface OrderItem {
   id: string;
@@ -27,6 +39,7 @@ export interface Order {
   status: OrderStatus;
   payment_status: PaymentStatus;
   fulfillment_status: FulfillmentStatus;
+  payment_method: PaymentMethod;
   source: OrderSource;
   branch: string;
   staff: string;
@@ -58,6 +71,7 @@ export interface OrderInput {
   status?: OrderStatus;
   payment_status?: PaymentStatus;
   fulfillment_status?: FulfillmentStatus;
+  payment_method?: PaymentMethod;
   source?: OrderSource;
   branch?: string;
   staff?: string;
@@ -86,6 +100,7 @@ function rowToOrder(row: any, items: OrderItem[] = []): Order {
     status: row.status,
     payment_status: row.payment_status,
     fulfillment_status: row.fulfillment_status,
+    payment_method: row.payment_method,
     source: row.source,
     branch: row.branch,
     staff: row.staff,
@@ -115,6 +130,26 @@ function rowToItem(row: any): OrderItem {
   };
 }
 
+// ── Trừ/hoàn tồn kho khi đơn hàng chuyển sang/ra khỏi "completed" ───────────
+// Mirror transitionGoodsReceiptStatus (lib/inventory/receipts.ts): cập nhật
+// cả products.stock (denormalized, dùng cho dashboard/báo cáo) lẫn
+// inventory_levels (nguồn UI "Khả dụng" ở /products) qua applyInventoryLevelDelta.
+async function deductStockForItem(client: any, productId: string, qty: number, logTag: string) {
+  await client.query(
+    `update products set stock = greatest(0, coalesce(stock, 0) - $2), stock_updated_at = now(), updated_at = now() where id = $1`,
+    [productId, qty]
+  );
+  await applyInventoryLevelDelta(client, productId, -qty, logTag);
+}
+
+async function restoreStockForItem(client: any, productId: string, qty: number, logTag: string) {
+  await client.query(
+    `update products set stock = coalesce(stock, 0) + $2, stock_updated_at = now(), updated_at = now() where id = $1`,
+    [productId, qty]
+  );
+  await applyInventoryLevelDelta(client, productId, qty, logTag);
+}
+
 async function generateOrderCode(): Promise<string> {
   const pool = getPool();
   const today = new Date();
@@ -141,7 +176,7 @@ export async function getOrderStats(): Promise<OrderStats> {
   const [pending, awaitingPay, awaitingShip, completedToday, revenue] = await Promise.all([
     pool.query(`select count(*)::int as c from orders where status = 'new'`),
     pool.query(`select count(*)::int as c from orders where payment_status in ('unpaid', 'partial') and status != 'cancelled'`),
-    pool.query(`select count(*)::int as c from orders where fulfillment_status in ('unshipped', 'shipping') and status != 'cancelled'`),
+    pool.query(`select count(*)::int as c from orders where fulfillment_status in ('unshipped', 'confirmed', 'packing', 'shipping') and status != 'cancelled'`),
     pool.query(`select count(*)::int as c from orders where status = 'completed' and updated_at >= $1`, [todayStart]),
     pool.query(`select coalesce(sum(total), 0)::numeric as s from orders where status != 'cancelled' and created_at >= $1`, [todayStart]),
   ]);
@@ -160,6 +195,8 @@ export interface OrderListFilters {
   status?: OrderStatus | "all";
   payment_status?: PaymentStatus | "all";
   fulfillment_status?: FulfillmentStatus | "all";
+  source?: OrderSource | "all";
+  customer_id?: string;
   date_from?: string;
   date_to?: string;
   page?: number;
@@ -198,6 +235,14 @@ export async function listOrders(filters: OrderListFilters = {}): Promise<OrderL
   if (filters.fulfillment_status && filters.fulfillment_status !== "all") {
     where.push(`o.fulfillment_status = $${i++}`);
     params.push(filters.fulfillment_status);
+  }
+  if (filters.source && filters.source !== "all") {
+    where.push(`o.source = $${i++}`);
+    params.push(filters.source);
+  }
+  if (filters.customer_id) {
+    where.push(`o.customer_id = $${i++}`);
+    params.push(filters.customer_id);
   }
   if (filters.date_from) {
     where.push(`o.created_at >= $${i++}`);
@@ -282,11 +327,11 @@ export async function createOrder(input: OrderInput): Promise<Order> {
     const orderRes = await client.query(
       `insert into orders (
         code, customer_id, customer_name, customer_phone,
-        status, payment_status, fulfillment_status,
+        status, payment_status, fulfillment_status, payment_method,
         source, branch, staff, note,
         subtotal, discount, shipping_fee, total, paid,
         created_at, updated_at
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now(),now())
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),now())
       returning *`,
       [
         code,
@@ -296,6 +341,7 @@ export async function createOrder(input: OrderInput): Promise<Order> {
         input.status ?? "new",
         paymentStatus,
         input.fulfillment_status ?? "unshipped",
+        input.payment_method ?? "cod",
         input.source ?? "store",
         input.branch ?? "Chi nhánh chính",
         input.staff ?? "",
@@ -335,6 +381,16 @@ export async function createOrder(input: OrderInput): Promise<Order> {
       items.push(rowToItem(itemRes.rows[0]));
     }
 
+    // Trừ tồn kho ngay nếu đơn được tạo với status "completed" (nút "Thanh
+    // toán (F10)" ở trang tạo đơn) — mirror transitionGoodsReceiptStatus.
+    if (order.status === "completed") {
+      for (const it of items) {
+        if (!it.product_id || it.quantity <= 0) continue;
+        await deductStockForItem(client, it.product_id, it.quantity, `(Đơn ${code})`);
+        await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
+      }
+    }
+
     // Update customer stats
     // Trước khi cộng stats, verify customer tồn tại — nếu id không match, UPDATE
     // silently no-op và stats sẽ bị lệch (mỗi đơn sẽ "tăng" total của 1 customer ảo).
@@ -360,6 +416,22 @@ export async function createOrder(input: OrderInput): Promise<Order> {
 
     await client.query("commit");
     await logActivity("order", `Tạo đơn hàng ${code} - ${order.customer_name} - ${total.toLocaleString("vi-VN")}đ`);
+
+    const orderPayload = {
+      order: {
+        id: order.id,
+        code: order.code,
+        total,
+        paid,
+        source: order.source,
+        staff: order.staff,
+        customer_name: order.customer_name,
+        customer_phone: order.customer_phone,
+      },
+    };
+    fireAutomation("order.created", orderPayload);
+    if (paymentStatus === "paid") fireAutomation("order.paid", orderPayload);
+
     return rowToOrder(order, items);
   } catch (err) {
     await client.query("rollback");
@@ -383,8 +455,36 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
       return null;
     }
     const existing = existingRes.rows[0];
+    const wasCompleted = existing.status === "completed";
+    const resultStatus: OrderStatus = input.status ?? existing.status;
 
-    const subtotal = (input.items ?? []).reduce((s, it) => s + it.quantity * it.unit_price, 0);
+    // Đơn đang "completed" đã được trừ tồn trước đó → hoàn lại toàn bộ theo
+    // số lượng hiện có trước khi áp thay đổi (item mới/status mới). Nếu sau
+    // đó vẫn "completed", sẽ trừ lại đúng số lượng mới ở cuối hàm — tránh
+    // cộng dồn/lệch khi user chỉnh số lượng của 1 đơn đã hoàn tất.
+    const existingItemsRes = await client.query(
+      `select id, product_id, quantity from order_items where order_id = $1`,
+      [id]
+    );
+    const existingItems = existingItemsRes.rows as Array<{
+      id: string;
+      product_id: string | null;
+      quantity: number;
+    }>;
+    if (wasCompleted) {
+      for (const it of existingItems) {
+        if (!it.product_id || Number(it.quantity) <= 0) continue;
+        await restoreStockForItem(client, it.product_id, Number(it.quantity), `(sửa đơn ${existing.code})`);
+      }
+    }
+
+    // Không dùng `(input.items ?? []).reduce(...)` — khi input.items không
+    // truyền (chỉ đổi status/payment...), subtotal phải giữ nguyên giá trị cũ
+    // thay vì bị reset về 0 (bug cũ: PATCH chỉ đổi status qua updateOrder sẽ
+    // xoá sạch subtotal/total của đơn).
+    const subtotal = input.items
+      ? input.items.reduce((s, it) => s + it.quantity * it.unit_price, 0)
+      : Number(existing.subtotal);
     const discount = input.discount ?? Number(existing.discount);
     const shippingFee = input.shipping_fee ?? Number(existing.shipping_fee);
     const total = Math.max(0, subtotal - discount + shippingFee);
@@ -400,15 +500,16 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
         status = $5,
         payment_status = $6,
         fulfillment_status = $7,
-        source = $8,
-        branch = $9,
-        staff = $10,
-        note = $11,
-        subtotal = $12,
-        discount = $13,
-        shipping_fee = $14,
-        total = $15,
-        paid = $16,
+        payment_method = $8,
+        source = $9,
+        branch = $10,
+        staff = $11,
+        note = $12,
+        subtotal = $13,
+        discount = $14,
+        shipping_fee = $15,
+        total = $16,
+        paid = $17,
         updated_at = now()
        where id = $1`,
       [
@@ -419,6 +520,7 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
         input.status ?? existing.status,
         paymentStatus,
         input.fulfillment_status ?? existing.fulfillment_status,
+        input.payment_method ?? existing.payment_method,
         input.source ?? existing.source,
         input.branch ?? existing.branch,
         input.staff ?? existing.staff,
@@ -431,16 +533,19 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
       ]
     );
 
+    let finalItems: Array<{ id: string; product_id: string | null; quantity: number }> = existingItems;
     if (input.items) {
       await client.query(`delete from order_items where order_id = $1`, [id]);
+      const inserted: Array<{ id: string; product_id: string | null; quantity: number }> = [];
       let pos = 1;
       for (const it of input.items) {
         const lineTotal = it.quantity * it.unit_price;
-        await client.query(
+        const itemRes = await client.query(
           `insert into order_items (
             order_id, product_id, product_name, product_sku, unit, image_url,
             quantity, unit_price, line_total, position, created_at
-          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())`,
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+          returning id, product_id, quantity`,
           [
             id,
             it.product_id,
@@ -454,11 +559,39 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
             pos++,
           ]
         );
+        inserted.push(itemRes.rows[0]);
       }
+      finalItems = inserted;
+    }
+
+    if (resultStatus === "completed") {
+      for (const it of finalItems) {
+        if (!it.product_id || Number(it.quantity) <= 0) continue;
+        await deductStockForItem(client, it.product_id, Number(it.quantity), `(sửa đơn ${existing.code})`);
+        await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
+      }
+    } else if (wasCompleted && !input.items) {
+      // Rời khỏi "completed" mà không thay item — đã hoàn tồn ở trên, reset
+      // marker để nếu sau này quay lại "completed" sẽ trừ lại đúng cách.
+      await client.query(`update order_items set stock_deducted_at = NULL where order_id = $1`, [id]);
     }
 
     await client.query("commit");
     await logActivity("order", `Cập nhật đơn hàng ${existing.code}`);
+
+    if (paymentStatus === "paid" && existing.payment_status !== "paid") {
+      fireAutomation("order.paid", {
+        order: {
+          id,
+          code: existing.code,
+          total,
+          paid,
+          customer_name: input.customer_name ?? existing.customer_name,
+          customer_phone: input.customer_phone ?? existing.customer_phone,
+        },
+      });
+    }
+
     return await getOrder(id);
   } catch (err) {
     await client.query("rollback");
@@ -468,37 +601,266 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
   }
 }
 
-export async function updateOrderStatus(id: string, status: OrderStatus): Promise<boolean> {
-  if (!isDatabaseConfigured) return false;
+/**
+ * Chuyển trạng thái đơn hàng, kèm trừ/hoàn tồn kho khi đi vào/ra khỏi
+ * "completed" — mirror transitionGoodsReceiptStatus (lib/inventory/receipts.ts).
+ * Idempotent theo order_items.stock_deducted_at (bỏ qua item đã trừ khi trừ
+ * lại, chỉ hoàn item đã trừ khi rollback).
+ */
+export async function transitionOrderStatus(input: {
+  orderId: string;
+  nextStatus: OrderStatus;
+}): Promise<{ success: boolean; message: string }> {
+  if (!isDatabaseConfigured) return { success: false, message: "Database chưa cấu hình." };
   await ensureDatabase();
   const pool = getPool();
-  const res = await pool.query(
-    `update orders set status = $2, updated_at = now() where id = $1`,
-    [id, status]
-  );
-  if ((res.rowCount ?? 0) > 0) {
-    await logActivity("order", `Cập nhật trạng thái đơn hàng ${id} → ${status}`);
-    return true;
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+
+    const orderRes = await client.query(`select id, code, status from orders where id = $1`, [input.orderId]);
+    if (orderRes.rows.length === 0) {
+      await client.query("rollback");
+      return { success: false, message: "Không tìm thấy đơn hàng." };
+    }
+    const order = orderRes.rows[0];
+    const cur: OrderStatus = order.status;
+    const next = input.nextStatus;
+
+    if (cur !== next) {
+      if (next === "completed") {
+        const itemsRes = await client.query(
+          `select id, product_id, quantity, stock_deducted_at from order_items where order_id = $1`,
+          [input.orderId]
+        );
+        for (const it of itemsRes.rows) {
+          if (it.stock_deducted_at) continue;
+          if (!it.product_id || Number(it.quantity) <= 0) continue;
+          await deductStockForItem(client, it.product_id, Number(it.quantity), `(Đơn ${order.code})`);
+          await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
+        }
+      } else if (cur === "completed") {
+        const itemsRes = await client.query(
+          `select id, product_id, quantity
+             from order_items where order_id = $1 and stock_deducted_at is not null`,
+          [input.orderId]
+        );
+        for (const it of itemsRes.rows) {
+          if (!it.product_id || Number(it.quantity) <= 0) continue;
+          await restoreStockForItem(client, it.product_id, Number(it.quantity), `(rollback đơn ${order.code})`);
+          await client.query(`update order_items set stock_deducted_at = NULL where id = $1`, [it.id]);
+        }
+      }
+    }
+
+    await client.query(`update orders set status = $2, updated_at = now() where id = $1`, [input.orderId, next]);
+    await client.query("commit");
+    await logActivity("order", `Cập nhật trạng thái đơn hàng ${order.code} → ${next}`);
+    return { success: true, message: `Đã cập nhật trạng thái sang "${next}".` };
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    return { success: false, message: err instanceof Error ? err.message : "Lỗi không xác định" };
+  } finally {
+    client.release();
   }
-  return false;
+}
+
+export async function updateOrderStatus(id: string, status: OrderStatus): Promise<boolean> {
+  const result = await transitionOrderStatus({ orderId: id, nextStatus: status });
+  return result.success;
+}
+
+// Các bước kế tiếp hợp lệ cho từng trạng thái xử lý đơn — dùng cho nút bấm
+// "chuyển bước tiếp theo" ở trang chi tiết đơn hàng. "returned" chỉ cho phép
+// từ "shipping"/"shipped" (hàng đã ra khỏi kho/đang hoặc đã tới tay khách rồi
+// mới có khái niệm "hoàn"), không cho phép quay lại từ "returned".
+const FULFILLMENT_TRANSITIONS: Record<FulfillmentStatus, FulfillmentStatus[]> = {
+  unshipped: ["confirmed"],
+  confirmed: ["packing"],
+  packing: ["shipping"],
+  shipping: ["shipped", "returned"],
+  shipped: ["returned"],
+  returned: [],
+};
+
+/**
+ * Chuyển bước xử lý đơn (unshipped→confirmed→packing→shipping→shipped),
+ * dùng cho đơn KHÔNG có vận đơn liên kết ở module Shipping (ví dụ đơn website
+ * tự giao, không qua đối tác vận chuyển) — xem STOREFRONT_PLAN.md mục 6.
+ * Nếu đơn có `shippings` liên kết, nên cập nhật trạng thái ở module Shipping
+ * (tự đồng bộ ngược qua `syncOrderFulfillmentStatus`) thay vì gọi hàm này để
+ * tránh 2 nơi cùng ghi đè `orders.fulfillment_status`.
+ *
+ * COD: khi đạt "shipped", tự chuyển payment_status → "paid" (thu tiền lúc
+ * giao xong). bank_transfer/card: không tự đổi payment_status — khách đã trả
+ * trước hoặc nhân viên xác nhận thủ công độc lập với bước giao hàng.
+ */
+export async function transitionFulfillmentStatus(input: {
+  orderId: string;
+  nextStatus: FulfillmentStatus;
+}): Promise<{ success: boolean; message: string }> {
+  if (!isDatabaseConfigured) return { success: false, message: "Database chưa cấu hình." };
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+
+    const orderRes = await client.query(
+      `select id, code, fulfillment_status, payment_status, payment_method, customer_name, customer_phone, total
+         from orders where id = $1`,
+      [input.orderId]
+    );
+    if (orderRes.rows.length === 0) {
+      await client.query("rollback");
+      return { success: false, message: "Không tìm thấy đơn hàng." };
+    }
+    const order = orderRes.rows[0];
+    const cur: FulfillmentStatus = order.fulfillment_status;
+    const next = input.nextStatus;
+
+    if (cur === next) {
+      await client.query("rollback");
+      return { success: true, message: `Đơn đang ở trạng thái "${next}".` };
+    }
+    if (!FULFILLMENT_TRANSITIONS[cur]?.includes(next)) {
+      await client.query("rollback");
+      return { success: false, message: `Không thể chuyển từ "${cur}" sang "${next}".` };
+    }
+
+    const autoPaid = next === "shipped" && order.payment_method === "cod" && order.payment_status !== "paid";
+    if (autoPaid) {
+      await client.query(
+        `update orders set fulfillment_status = $2, payment_status = 'paid', paid = total, updated_at = now() where id = $1`,
+        [input.orderId, next]
+      );
+    } else {
+      await client.query(`update orders set fulfillment_status = $2, updated_at = now() where id = $1`, [
+        input.orderId,
+        next,
+      ]);
+    }
+
+    await client.query("commit");
+    await logActivity("order", `Cập nhật xử lý đơn hàng ${order.code} → ${next}${autoPaid ? " (COD đã thu tiền)" : ""}`);
+
+    const payload = {
+      order: {
+        id: order.id,
+        code: order.code,
+        total: Number(order.total),
+        customer_name: order.customer_name,
+        customer_phone: order.customer_phone,
+      },
+    };
+    if (next === "shipped") fireAutomation("order.shipped", payload);
+    if (next === "returned") fireAutomation("shipping.returned", payload);
+    if (autoPaid) fireAutomation("order.paid", { order: { ...payload.order, paid: Number(order.total) } });
+
+    return { success: true, message: `Đã chuyển sang "${next}".` };
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    return { success: false, message: err instanceof Error ? err.message : "Lỗi không xác định" };
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * "Xác nhận đơn" — dùng cho đơn `status='new'` (điển hình: đơn khách đặt trên
+ * website, chưa qua ai duyệt). Gộp 2 việc vào 1 transaction: (a) chuyển
+ * OrderStatus → "completed" để trừ tồn kho (mirror transitionOrderStatus),
+ * (b) chuyển FulfillmentStatus "unshipped" → "confirmed" để bắt đầu pipeline
+ * xử lý giao hàng. Không dùng 2 hàm transitionOrderStatus/transitionFulfillmentStatus
+ * riêng lẻ ở đây vì mỗi hàm tự mở/commit transaction riêng — làm gộp để đảm
+ * bảo tính atomic (trừ kho và bắt đầu xử lý đơn phải cùng thành công hoặc
+ * cùng rollback).
+ */
+export async function confirmOrder(orderId: string): Promise<{ success: boolean; message: string }> {
+  if (!isDatabaseConfigured) return { success: false, message: "Database chưa cấu hình." };
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+
+    const orderRes = await client.query(
+      `select id, code, status, fulfillment_status from orders where id = $1`,
+      [orderId]
+    );
+    if (orderRes.rows.length === 0) {
+      await client.query("rollback");
+      return { success: false, message: "Không tìm thấy đơn hàng." };
+    }
+    const order = orderRes.rows[0];
+    if (order.status !== "new") {
+      await client.query("rollback");
+      return { success: false, message: `Chỉ xác nhận được đơn ở trạng thái "new" (đơn đang ở "${order.status}").` };
+    }
+    if (order.fulfillment_status !== "unshipped") {
+      await client.query("rollback");
+      return { success: false, message: `Đơn đã qua bước xử lý (đang ở "${order.fulfillment_status}").` };
+    }
+
+    const itemsRes = await client.query(
+      `select id, product_id, quantity, stock_deducted_at from order_items where order_id = $1`,
+      [orderId]
+    );
+    for (const it of itemsRes.rows) {
+      if (it.stock_deducted_at) continue;
+      if (!it.product_id || Number(it.quantity) <= 0) continue;
+      await deductStockForItem(client, it.product_id, Number(it.quantity), `(Đơn ${order.code})`);
+      await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
+    }
+
+    await client.query(
+      `update orders set status = 'completed', fulfillment_status = 'confirmed', updated_at = now() where id = $1`,
+      [orderId]
+    );
+
+    await client.query("commit");
+    await logActivity("order", `Xác nhận đơn hàng ${order.code}`);
+    return { success: true, message: "Đã xác nhận đơn hàng." };
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    return { success: false, message: err instanceof Error ? err.message : "Lỗi không xác định" };
+  } finally {
+    client.release();
+  }
 }
 
 export async function deleteOrder(id: string): Promise<boolean> {
   if (!isDatabaseConfigured) return false;
   await ensureDatabase();
   const pool = getPool();
-  // Lấy customer_id + total TRƯỚC khi xóa để hoàn lại stats. Nếu không, stats
-  // (total_orders, total_spent) sẽ bị lệch dần sau mỗi lần xóa đơn.
-  const before = await pool.query(
-    `select customer_id, total from orders where id = $1::uuid limit 1`,
-    [id]
-  );
-  if (before.rows.length === 0) return false;
-  const { customer_id, total } = before.rows[0];
-  const res = await pool.query(`delete from orders where id = $1::uuid`, [id]);
-  if ((res.rowCount ?? 0) > 0) {
-    if (customer_id) {
-      await pool
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    // Lấy customer_id + total + status TRƯỚC khi xóa để hoàn lại stats/tồn kho.
+    const before = await client.query(
+      `select customer_id, total, status from orders where id = $1::uuid limit 1`,
+      [id]
+    );
+    if (before.rows.length === 0) {
+      await client.query("rollback");
+      return false;
+    }
+    const { customer_id, total, status } = before.rows[0];
+
+    if (status === "completed") {
+      const itemsRes = await client.query(
+        `select product_id, quantity from order_items where order_id = $1 and stock_deducted_at is not null`,
+        [id]
+      );
+      for (const it of itemsRes.rows) {
+        if (!it.product_id || Number(it.quantity) <= 0) continue;
+        await restoreStockForItem(client, it.product_id, Number(it.quantity), `(xoá đơn ${id})`);
+      }
+    }
+
+    const res = await client.query(`delete from orders where id = $1::uuid`, [id]);
+    if ((res.rowCount ?? 0) > 0 && customer_id) {
+      await client
         .query(
           `update customers set
              total_orders = greatest(coalesce(total_orders, 0) - 1, 0),
@@ -511,7 +873,15 @@ export async function deleteOrder(id: string): Promise<boolean> {
           console.warn(`[deleteOrder] rollback customer stats failed:`, err);
         });
     }
-    await logActivity("order", `Xoá đơn hàng ${id}`);
+    await client.query("commit");
+    if ((res.rowCount ?? 0) > 0) {
+      await logActivity("order", `Xoá đơn hàng ${id}`);
+    }
+    return (res.rowCount ?? 0) > 0;
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
   }
-  return (res.rowCount ?? 0) > 0;
 }

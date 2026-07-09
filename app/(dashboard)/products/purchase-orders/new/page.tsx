@@ -92,7 +92,8 @@ export default function NewPurchaseOrderPage() {
   });
 
   const [branch, setBranch] = useState("Chi nhánh mặc định");
-  const [staff, setStaff] = useState("NA");
+  const [staff, setStaff] = useState("");
+  const [staffOptions, setStaffOptions] = useState<{ id: string; full_name: string }[]>([]);
   const [expectedDate, setExpectedDate] = useState<string>("");
   const [note, setNote] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -110,6 +111,13 @@ export default function NewPurchaseOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    fetch("/api/staff")
+      .then((r) => r.json())
+      .then((d) => setStaffOptions(Array.isArray(d?.staff) ? d.staff : []))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!supplierQuery.trim()) {
@@ -521,9 +529,10 @@ export default function NewPurchaseOrderPage() {
                   onChange={(e) => setStaff(e.target.value)}
                   className="w-full border-slate-300 rounded text-sm bg-slate-50 py-2 px-3"
                 >
-                  <option>NA</option>
-                  <option>PHAN VĂN VŨ</option>
-                  <option>Khác</option>
+                  <option value="">-- Chọn nhân viên --</option>
+                  {staffOptions.map((s) => (
+                    <option key={s.id} value={s.full_name}>{s.full_name}</option>
+                  ))}
                 </select>
               </div>
               <div>

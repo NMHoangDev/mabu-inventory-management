@@ -922,7 +922,7 @@ export async function confirmScanReceiptWithOptions(
 // `quantity` theo `delta` (>0 khi nhập, <0 khi rollback). Đồng thời
 // cập nhật kèm `products.stock` để các màn-đồ-thị khác (dashboard,
 // báo cáo) vẫn nhìn thấy tồn.
-async function applyInventoryLevelDelta(
+export async function applyInventoryLevelDelta(
   client: any,
   productId: string,
   delta: number,
@@ -1010,6 +1010,110 @@ async function applyInventoryLevelDelta(
   return { variantId, locationId, before, after, updated: true };
 }
 
+// Cộng tồn kho cho các item CHƯA được cộng (`stock_added_at IS NULL`) của 1
+// đơn nhập hàng. Idempotent — gọi nhiều lần chỉ cộng phần chưa cộng.
+//
+// Tách ra từ transitionGoodsReceiptStatus để dùng lại ở CẢ 2 nơi:
+//   1. createGoodsReceipt (lib/goods-receipts/repository.ts) — khi tạo đơn
+//      với receipt_status = 'completed' ngay từ đầu ("Tạo & nhập hàng"), phải
+//      cộng tồn kho NGAY trong transaction tạo đơn. Trước đây KHÔNG gọi hàm
+//      nào cả — status hiển thị "Hoàn thành" nhưng tồn kho không hề được
+//      cộng, và nút cộng tồn kho thủ công (transitionStatus) lại bị ẩn trên
+//      UI đúng lúc status đã completed → tồn kho không bao giờ được cộng.
+//   2. transitionGoodsReceiptStatus — khi đổi trạng thái sang 'completed' sau
+//      khi đơn đã tồn tại ở trạng thái khác (pending/in_progress).
+export async function addStockForGoodsReceiptItems(
+  client: any,
+  goodsReceiptId: string,
+  goodsReceiptCode: string
+): Promise<{ stockAdded: boolean }> {
+  let stockAdded = false;
+  const itemsRes = await client.query(
+    `select gri.id, gri.product_id, gri.received_qty, gri.sku, gri.product_name,
+            gri.purchase_order_item_id, gri.unit_cost, gri.stock_added_at
+       from goods_receipt_items gri
+      where gri.goods_receipt_id = $1::uuid
+      order by gri.position asc`,
+    [goodsReceiptId]
+  );
+
+  for (const item of itemsRes.rows) {
+    if (item.stock_added_at) continue;
+    let productId: string | null = item.product_id ? String(item.product_id) : null;
+
+    if (!productId) {
+      const sku = String(item.sku ?? "").trim();
+      if (sku) {
+        const found = await client.query(
+          `select id from products where sku = $1 limit 1`,
+          [sku]
+        );
+        if (found.rows.length > 0) productId = String(found.rows[0].id);
+      }
+      if (!productId) {
+        const cleanName = cleanInvoiceProductName(String(item.product_name ?? "").trim())
+          || String(item.product_name ?? "").trim()
+          || `Sản phẩm nhập từ GR ${String(item.id).slice(0, 8)}`;
+        const unitCost = Number(item.unit_cost ?? 0);
+        const stubCode = sku || `AUTO-${String(item.id).slice(0, 8).toUpperCase()}`;
+        try {
+          const inserted = await client.query(
+            `insert into products
+              (name, sku, unit, cost_price, price, track_inventory, status)
+             values ($1, $2, '', $3, 0, true, 'active')
+             returning id`,
+            [cleanName, stubCode || null, unitCost]
+          );
+          productId = String(inserted.rows[0].id);
+        } catch (err) {
+          console.warn(
+            `Không tạo được product stub cho GR item ${String(item.id)}:`,
+            err instanceof Error ? err.message : err
+          );
+          continue;
+        }
+      }
+      if (productId) {
+        await client.query(
+          `update goods_receipt_items set product_id = $2::uuid where id = $1`,
+          [String(item.id), productId]
+        );
+      }
+    }
+    if (!productId) continue;
+
+    const qty = Number(item.received_qty ?? 0);
+    if (qty <= 0) continue;
+
+    await client.query(
+      `update products
+          set stock = coalesce(stock, 0) + $2,
+              last_restocked_at = now(),
+              stock_updated_at = now(),
+              updated_at = now()
+        where id = $1`,
+      [productId, qty]
+    );
+    // Đồng bộ sang inventory_levels để UI "Khả dụng" thấy tồn kho.
+    await applyInventoryLevelDelta(
+      client,
+      productId,
+      qty,
+      `(GR ${goodsReceiptCode} · item ${String(item.id).slice(0, 8)})`
+    );
+    await client.query(
+      `update goods_receipt_items set stock_added_at = now() where id = $1`,
+      [String(item.id)]
+    );
+    stockAdded = true;
+    console.info(
+      `[stock] +${qty} → product ${productId} (GR ${goodsReceiptCode} · item ${String(item.id).slice(0, 8)})`
+    );
+  }
+
+  return { stockAdded };
+}
+
 export async function transitionGoodsReceiptStatus(input: {
   goodsReceiptId: string;
   nextStatus: "pending" | "in_progress" | "completed" | "cancelled";
@@ -1062,88 +1166,8 @@ export async function transitionGoodsReceiptStatus(input: {
     // ──────────────────────────────────────────────────────────────────────
 
     if (next === "completed") {
-      const itemsRes = await client.query(
-        `select gri.id, gri.product_id, gri.received_qty, gri.sku, gri.product_name,
-                gri.purchase_order_item_id, gri.unit_cost, gri.stock_added_at
-           from goods_receipt_items gri
-          where gri.goods_receipt_id = $1::uuid
-          order by gri.position asc`,
-        [input.goodsReceiptId]
-      );
-
-      for (const item of itemsRes.rows) {
-        if (item.stock_added_at) continue;
-        let productId: string | null = item.product_id ? String(item.product_id) : null;
-
-        if (!productId) {
-          const sku = String(item.sku ?? "").trim();
-          if (sku) {
-            const found = await client.query(
-              `select id from products where sku = $1 limit 1`,
-              [sku]
-            );
-            if (found.rows.length > 0) productId = String(found.rows[0].id);
-          }
-          if (!productId) {
-            const cleanName = cleanInvoiceProductName(String(item.product_name ?? "").trim())
-              || String(item.product_name ?? "").trim()
-              || `Sản phẩm nhập từ GR ${String(item.id).slice(0, 8)}`;
-            const unitCost = Number(item.unit_cost ?? 0);
-            const stubCode = sku || `AUTO-${String(item.id).slice(0, 8).toUpperCase()}`;
-            try {
-              const inserted = await client.query(
-                `insert into products
-                  (name, sku, unit, cost_price, price, track_inventory, status)
-                 values ($1, $2, '', $3, 0, true, 'active')
-                 returning id`,
-                [cleanName, stubCode || null, unitCost]
-              );
-              productId = String(inserted.rows[0].id);
-            } catch (err) {
-              console.warn(
-                `Không tạo được product stub cho GR item ${String(item.id)}:`,
-                err instanceof Error ? err.message : err
-              );
-              continue;
-            }
-          }
-          if (productId) {
-            await client.query(
-              `update goods_receipt_items set product_id = $2::uuid where id = $1`,
-              [String(item.id), productId]
-            );
-          }
-        }
-        if (!productId) continue;
-
-        const qty = Number(item.received_qty ?? 0);
-        if (qty <= 0) continue;
-
-        await client.query(
-          `update products
-              set stock = coalesce(stock, 0) + $2,
-                  last_restocked_at = now(),
-                  stock_updated_at = now(),
-                  updated_at = now()
-            where id = $1`,
-          [productId, qty]
-        );
-        // Đồng bộ sang inventory_levels để UI "Khả dụng" thấy tồn kho.
-        await applyInventoryLevelDelta(
-          client,
-          productId,
-          qty,
-          `(GR ${String(gr.code)} · item ${String(item.id).slice(0, 8)})`
-        );
-        await client.query(
-          `update goods_receipt_items set stock_added_at = now() where id = $1`,
-          [String(item.id)]
-        );
-        stockAdded = true;
-        console.info(
-          `[stock] +${qty} → product ${productId} (GR ${String(gr.code)} · item ${String(item.id).slice(0, 8)})`
-        );
-      }
+      const result = await addStockForGoodsReceiptItems(client, input.goodsReceiptId, String(gr.code));
+      stockAdded = result.stockAdded;
     } else if (cur === "completed") {
       // Chiều đi ngược: hoàn lại tồn kho và reset `stock_added_at` để có thể
       // cộng lại ở lần complete kế tiếp. Chỉ xử lý các item đã cộng
@@ -1241,6 +1265,65 @@ export async function transitionGoodsReceiptStatus(input: {
   } catch (err) {
     await client.query("rollback").catch(() => undefined);
     console.error("transitionGoodsReceiptStatus failed:", err);
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Lỗi không xác định"
+    };
+  } finally {
+    client.release();
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// updateGoodsReceiptPayment
+// ──────────────────────────────────────────────────────────────────────
+//
+// Thanh toán cho NCC — HOÀN TOÀN TÁCH BIỆT khỏi receipt_status/tồn kho (xem
+// addStockForGoodsReceiptItems ở trên). payment_status derive giống
+// orders.payment_status (lib/orders/repository.ts): so `paid` với `total_cost`.
+export async function updateGoodsReceiptPayment(input: {
+  goodsReceiptId: string;
+  paid: number;
+  paymentMethod: "cash" | "bank_transfer" | "card";
+}): Promise<{ success: boolean; message: string; paymentStatus?: string }> {
+  if (!isDatabaseConfigured) {
+    return { success: false, message: "Database chưa cấu hình." };
+  }
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    const grRes = await client.query(
+      `select id, total_cost from goods_receipts where id = $1::uuid`,
+      [input.goodsReceiptId]
+    );
+    if (grRes.rows.length === 0) {
+      return { success: false, message: "Không tìm thấy đơn nhập hàng." };
+    }
+    const totalCost = Number(grRes.rows[0].total_cost ?? 0);
+    const paid = Math.max(0, Number(input.paid) || 0);
+    const paymentStatus = paid >= totalCost && totalCost > 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
+
+    await client.query(
+      `update goods_receipts
+          set paid = $2,
+              payment_method = $3,
+              payment_status = $4,
+              updated_at = now()
+        where id = $1`,
+      [input.goodsReceiptId, paid, input.paymentMethod, paymentStatus]
+    );
+
+    const msg =
+      paymentStatus === "paid"
+        ? "Đã thanh toán đủ cho nhà cung cấp."
+        : paymentStatus === "partial"
+          ? "Đã ghi nhận thanh toán một phần."
+          : "Đã cập nhật thanh toán.";
+    return { success: true, message: msg, paymentStatus };
+  } catch (err) {
+    console.error("updateGoodsReceiptPayment failed:", err);
     return {
       success: false,
       message: err instanceof Error ? err.message : "Lỗi không xác định"

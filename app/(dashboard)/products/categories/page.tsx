@@ -30,6 +30,8 @@ export default function ProductCategoriesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   // Form states for creation
   const [name, setName] = useState("");
@@ -71,6 +73,18 @@ export default function ProductCategoriesPage() {
       return matchesSearch && matchesType && matchesChannel;
     });
   }, [categories, searchQuery, typeFilter, channelFilter]);
+
+  // Footer trước đây luôn hiện "1" cùng nút prev/next disabled vĩnh viễn dù
+  // filteredCategories có bao nhiêu dòng — chưa từng phân trang thật.
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, typeFilter, channelFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredCategories.length / pageSize));
+  const pagedCategories = useMemo(
+    () => filteredCategories.slice((page - 1) * pageSize, page * pageSize),
+    [filteredCategories, page]
+  );
 
   // Handle submit new category
   const handleSubmit = async () => {
@@ -522,7 +536,7 @@ export default function ProductCategoriesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredCategories.map((cat) => (
+                {pagedCategories.map((cat) => (
                   <tr key={cat.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-4">
                       <input type="checkbox" className="rounded border-slate-300 text-primary focus:ring-primary" disabled />
@@ -575,16 +589,26 @@ export default function ProductCategoriesPage() {
         {/* Footer info pagination */}
         <div className="px-4 py-4 border-t flex items-center justify-between text-xs text-slate-500 bg-slate-50/20">
           <div>
-            Hiển thị 1 đến {filteredCategories.length} trên tổng {filteredCategories.length} kết quả
+            {filteredCategories.length === 0
+              ? "Không có kết quả"
+              : `Hiển thị ${(page - 1) * pageSize + 1} đến ${Math.min(page * pageSize, filteredCategories.length)} trên tổng ${filteredCategories.length} kết quả`}
           </div>
           <div className="flex items-center gap-2">
-            <button className="w-7 h-7 flex items-center justify-center rounded border bg-white cursor-not-allowed opacity-50">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="w-7 h-7 flex items-center justify-center rounded border bg-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
+            >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
             <button className="w-7 h-7 flex items-center justify-center bg-primary text-white rounded font-semibold text-xs">
-              1
+              {page}
             </button>
-            <button className="w-7 h-7 flex items-center justify-center rounded border bg-white cursor-not-allowed opacity-50">
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="w-7 h-7 flex items-center justify-center rounded border bg-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
+            >
               <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>

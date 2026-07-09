@@ -2,17 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import {
   Download,
   Plus,
   Search,
-  Filter,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   Star,
   MessageCircle,
-  Calculator,
   HelpCircle,
   Settings,
 } from "lucide-react";
@@ -69,6 +68,11 @@ const STATUS_BADGE: Record<ShippingStatus, { bg: string; text: string; border: s
   returned: { bg: "bg-slate-100", text: "text-slate-600", border: "border-slate-200", label: "Hủy - đã nhận" },
   failed: { bg: "bg-red-50", text: "text-red-700", border: "border-red-100", label: "Giao thất bại" },
 };
+
+// Trước đây filter này ghi nhãn "Chi nhánh" nhưng lại lọc theo field `partner`
+// (đối tác vận chuyển) với chỉ 2 giá trị hardcode — sai cả nhãn và thiếu các
+// đối tác thật (mirror PARTNERS ở shipping/orders/new/page.tsx).
+const PARTNERS = ["NINJA VAN", "JNT Express", "GHN", "GHTK", "Viettel Post", "Chành Lộc Hà"];
 
 const fmt = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
@@ -131,10 +135,6 @@ export default function ShippingListPage() {
         <h1 className="text-xl font-semibold text-slate-800">Danh sách vận đơn</h1>
         <div className="flex items-center gap-6 text-slate-500">
           <div className="flex items-center gap-1 cursor-pointer hover:text-[#0088FF]">
-            <Calculator className="w-4 h-4" />
-            <span className="text-sm">Tư vấn thuế</span>
-          </div>
-          <div className="flex items-center gap-1 cursor-pointer hover:text-[#0088FF]">
             <HelpCircle className="w-4 h-4" />
             <span className="text-sm">Trợ giúp</span>
           </div>
@@ -150,7 +150,22 @@ export default function ShippingListPage() {
       <section className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-[#f0f2f5]">
         {/* Action row */}
         <div className="flex justify-between items-center">
-          <button className="flex items-center gap-2 text-slate-600 hover:text-[#0088FF]">
+          <button
+            onClick={() =>
+              downloadCsv(`van-don-${Date.now()}.csv`, shippings, [
+                { label: "Mã vận đơn", value: (r) => r.tracking_code },
+                { label: "Khách hàng", value: (r) => r.customer_name },
+                { label: "SĐT", value: (r) => r.customer_phone },
+                { label: "Địa chỉ", value: (r) => r.shipping_address },
+                { label: "Đối tác", value: (r) => r.partner },
+                { label: "Trạng thái", value: (r) => STATUS_BADGE[r.status]?.label ?? r.status },
+                { label: "Tiền COD", value: (r) => r.cod_amount },
+                { label: "Phí vận chuyển", value: (r) => r.shipping_fee },
+                { label: "Ngày tạo", value: (r) => fmtDate(r.created_at) },
+              ])
+            }
+            className="flex items-center gap-2 text-slate-600 hover:text-[#0088FF]"
+          >
             <Download className="w-4 h-4" />
             <span className="text-sm font-medium">Xuất file</span>
           </button>
@@ -212,17 +227,12 @@ export default function ShippingListPage() {
             <FilterSelect
               value={partner}
               options={[
-                { v: "all", l: "Chi nhánh" },
-                { v: "NINJA VAN", l: "Chi nhánh HCM" },
-                { v: "JNT Express", l: "Chi nhánh HN" },
+                { v: "all", l: "Đối tác vận chuyển" },
+                ...PARTNERS.map((p) => ({ v: p, l: p })),
               ]}
               onChange={setPartner}
             />
-            <button className="flex items-center gap-2 px-4 py-2 border border-slate-300 rounded text-sm text-slate-600 hover:bg-slate-50">
-              <span>Bộ lọc khác</span>
-              <Filter className="w-4 h-4 text-slate-400" />
-            </button>
-            <button className="px-4 py-2 bg-slate-100 text-slate-400 rounded text-sm cursor-not-allowed">
+            <button className="px-4 py-2 bg-slate-100 text-slate-400 rounded text-sm cursor-not-allowed" disabled title="Sắp ra mắt">
               Lưu bộ lọc
             </button>
           </div>

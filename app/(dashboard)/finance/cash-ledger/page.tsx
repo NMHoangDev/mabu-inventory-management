@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import {
   Calendar,
   ChevronDown,
@@ -9,7 +10,6 @@ import {
   Loader2,
   MessageCircle,
   Search,
-  SlidersHorizontal,
   TrendingDown,
   TrendingUp
 } from "lucide-react";
@@ -116,12 +116,6 @@ export default function CashLedgerPage() {
         <div className="flex items-center gap-6 text-sm text-gray-600">
           <button className="flex items-center gap-1.5 hover:text-blue-600">
             <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-            </svg>
-            Tư vấn thuế
-          </button>
-          <button className="flex items-center gap-1.5 hover:text-blue-600">
-            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             Trợ giúp
@@ -162,7 +156,22 @@ export default function CashLedgerPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <button className="flex items-center text-gray-600 text-sm hover:text-blue-600">
+          <button
+            onClick={() =>
+              downloadCsv(`so-quy-${Date.now()}.csv`, rows, [
+                { label: "Ngày ghi nhận", value: (r) => (r.recorded_date ? formatDate(r.recorded_date) : "") },
+                { label: "Ngày tạo", value: (r) => formatDateTime(r.created_at) },
+                { label: "Mã phiếu", value: (r) => r.code },
+                { label: "Loại", value: (r) => (r.voucher_type === "receipt" ? "Thu" : "Chi") },
+                { label: "Người tạo", value: (r) => r.created_by },
+                { label: "HTTT", value: (r) => r.payment_method },
+                { label: "Thu", value: (r) => (r.voucher_type === "receipt" ? r.amount : "") },
+                { label: "Chi", value: (r) => (r.voucher_type === "payment" ? r.amount : "") },
+                { label: "Ghi chú", value: (r) => r.note },
+              ])
+            }
+            className="flex items-center text-gray-600 text-sm hover:text-blue-600"
+          >
             <Download className="w-4 h-4 mr-1.5" />
             Xuất file
           </button>
@@ -274,10 +283,6 @@ export default function CashLedgerPage() {
               </select>
               <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-3 text-gray-400 pointer-events-none" />
             </div>
-            <button className="flex items-center px-4 py-2 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50">
-              <span>Bộ lọc khác</span>
-              <SlidersHorizontal className="w-4 h-4 ml-2" />
-            </button>
           </div>
         </div>
 

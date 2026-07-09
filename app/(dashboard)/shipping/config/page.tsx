@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   Info,
   HelpCircle,
-  Receipt,
   ChevronDown,
   MapPinOff,
   MapPin as MapPinIcon,
@@ -117,6 +116,7 @@ export default function ShippingConfigPage() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [showRestrictedZones, setShowRestrictedZones] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,6 +125,12 @@ export default function ShippingConfigPage() {
       const data = await res.json();
       setSettings(data.settings);
       setForm(data.settings);
+      // Trước đây feeRules luôn khởi tạo = DEFAULT_FEES, không hề đọc từ
+      // server — mọi chỉnh sửa mất ngay khi rời trang. Giờ đọc từ
+      // settings.fee_rules thật; chỉ dùng DEFAULT_FEES làm ví dụ mẫu cho lần
+      // đầu chưa từng lưu (mảng rỗng).
+      const savedRules: FeeRule[] | undefined = data.settings?.fee_rules;
+      setFeeRules(savedRules && savedRules.length > 0 ? savedRules : DEFAULT_FEES);
     } catch (e) {
       console.error(e);
     } finally {
@@ -144,7 +150,7 @@ export default function ShippingConfigPage() {
       const res = await fetch("/api/shipping/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, fee_rules: feeRules }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -218,10 +224,6 @@ export default function ShippingConfigPage() {
           <h1 className="text-xl font-bold text-slate-900">Cấu hình vận chuyển</h1>
         </div>
         <div className="flex items-center gap-3 text-slate-500">
-          <div className="flex items-center gap-1.5 text-slate-500 cursor-pointer hover:text-[#005baf]">
-            <Receipt className="w-5 h-5" />
-            <span className="text-sm">Tư vấn thuế</span>
-          </div>
           <div className="flex items-center gap-1.5 text-slate-500 cursor-pointer hover:text-[#005baf]">
             <HelpCircle className="w-5 h-5" />
             <span className="text-sm">Trợ giúp</span>
@@ -399,14 +401,23 @@ export default function ShippingConfigPage() {
                 </div>
 
                 <div className="pt-3 space-y-3">
-                  <a className="flex items-center gap-2 text-[#005baf] font-medium hover:underline text-sm" href="#">
+                  <button
+                    type="button"
+                    onClick={() => setShowRestrictedZones((v) => !v)}
+                    className="flex items-center gap-2 text-[#005baf] font-medium hover:underline text-sm"
+                  >
                     <MapPinOff className="w-5 h-5" />
                     Cấu hình khu vực không giao hàng
-                  </a>
-                  <a className="flex items-center gap-2 text-[#005baf] font-medium hover:underline text-sm" href="#">
-                    <MapPinIcon className="w-5 h-5" />
-                    Cấu hình địa chỉ lấy hàng
-                  </a>
+                  </button>
+                  {showRestrictedZones ? (
+                    <textarea
+                      value={form.restricted_zones}
+                      onChange={(e) => setForm({ ...form, restricted_zones: e.target.value })}
+                      placeholder="Mỗi khu vực 1 dòng, vd: Côn Đảo, Lý Sơn, Trường Sa..."
+                      rows={3}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#005baf] focus:outline-none"
+                    />
+                  ) : null}
                 </div>
               </div>
             </div>

@@ -15,7 +15,18 @@ import {
   SvgLineChart,
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
-import { fetchInventorySummary, fetchInventoryDetail } from "@/services/reportService";
+import { fetchInventorySummary, fetchInventoryDetail, fetchInOutBalance } from "@/services/reportService";
+
+// Không có bảng ledger lịch sử nên không thể vẽ "tồn kho tuyệt đối theo
+// ngày" một cách trung thực — thay bằng biến động luỹ kế (nhập - xuất cộng
+// dồn từ đầu kỳ), tính hoàn toàn từ số liệu thật (daily.import/export).
+function cumulativeNet(daily: { import: number; export: number }[]): number[] {
+  let running = 0;
+  return daily.map((d) => {
+    running += (d.import || 0) - (d.export || 0);
+    return running;
+  });
+}
 
 const STATUS_STYLE: Record<string, string> = {
   active: "text-green-600 bg-green-50",
@@ -33,7 +44,7 @@ export default function InventorySummaryPage() {
   const [data, setData] = useState<{
     summary: { total_products: number; total_stock: number; total_value: number };
     detail: { items: any[]; summary: { total_quantity: number; total_reserved: number; total_value: number } };
-    daily: { day: string; import: number; export: number; balance: number }[];
+    daily: { day: string; import: number; export: number }[];
   } | null>(null);
 
   const load = useCallback(async () => {
@@ -42,14 +53,15 @@ export default function InventorySummaryPage() {
       const range = period === "custom" && dateFrom && dateTo
         ? { from: dateFrom, to: dateTo }
         : getDateRange(period);
-      const [summary, detail] = await Promise.all([
+      // Nhập/xuất theo ngày lấy từ /api/reports/inventory?group_by=in_out —
+      // trước đây trang này tự sinh 14 điểm Math.random() không liên quan gì
+      // tới dữ liệu thật, kể cả khi 2 fetch phía trên đã tải xong.
+      const [summary, detail, inOut] = await Promise.all([
         fetchInventorySummary(),
         fetchInventoryDetail(range),
+        fetchInOutBalance(range),
       ]);
-      const daily = Array.from({ length: 14 }, (_, i) => {
-        const d = new Date(); d.setDate(d.getDate() - (13 - i));
-        return { day: d.toISOString().slice(0, 10), import: Math.round(20 + Math.random() * 80), export: Math.round(15 + Math.random() * 70), balance: Math.round(100 + Math.random() * 200) };
-      });
+      const daily = inOut.daily.map((d: any) => ({ day: d.day, import: d.import ?? 0, export: d.export ?? 0 }));
       setData({ summary, detail, daily });
     } catch (e) {
       console.error(e);
@@ -113,10 +125,10 @@ export default function InventorySummaryPage() {
                 />
               </div>
               <div className="bg-white rounded-lg border border-gray-100 p-5 shadow-sm">
-                <h3 className="font-semibold text-gray-800 text-sm mb-4">Tồn kho theo ngày</h3>
+                <h3 className="font-semibold text-gray-800 text-sm mb-4">Biến động tồn kho luỹ kế (nhập − xuất)</h3>
                 <SvgLineChart
                   labels={d.daily.map((pt) => formatDate(pt.day))}
-                  datasets={[{ label: "Tồn kho", data: d.daily.map((pt) => pt.balance), color: "#0088ff" }]}
+                  datasets={[{ label: "Biến động luỹ kế", data: cumulativeNet(d.daily), color: "#0088ff" }]}
                   height={180}
                 />
               </div>

@@ -17,7 +17,8 @@ export async function GET(request: Request) {
     // Enum values phải khớp với types trong lib/orders/repository.ts
     const ORDER_STATUSES = ["new", "processing", "completed", "cancelled", "all"] as const;
     const PAYMENT_STATUSES = ["unpaid", "partial", "paid", "refunded", "all"] as const;
-    const FULFILLMENT_STATUSES = ["unshipped", "shipping", "shipped", "returned", "all"] as const;
+    const FULFILLMENT_STATUSES = ["unshipped", "confirmed", "packing", "shipping", "shipped", "returned", "all"] as const;
+    const SOURCES = ["store", "facebook", "website", "zalo", "other", "all"] as const;
     function pickEnum<T extends readonly string[]>(values: T, raw: string | null): T[number] | undefined {
       if (!raw) return undefined;
       return (values as readonly string[]).includes(raw) ? (raw as T[number]) : undefined;
@@ -25,13 +26,14 @@ export async function GET(request: Request) {
     const status = pickEnum(ORDER_STATUSES, url.searchParams.get("status"));
     const payment_status = pickEnum(PAYMENT_STATUSES, url.searchParams.get("payment_status"));
     const fulfillment_status = pickEnum(FULFILLMENT_STATUSES, url.searchParams.get("fulfillment_status"));
+    const source = pickEnum(SOURCES, url.searchParams.get("source"));
     const date_from = url.searchParams.get("date_from") ?? undefined;
     const date_to = url.searchParams.get("date_to") ?? undefined;
     const page = Number(url.searchParams.get("page") ?? 1);
     const page_size = Number(url.searchParams.get("page_size") ?? 20);
 
     const [list, stats] = await Promise.all([
-      listOrders({ search, status, payment_status, fulfillment_status, date_from, date_to, page, page_size }),
+      listOrders({ search, status, payment_status, fulfillment_status, source, date_from, date_to, page, page_size }),
       getOrderStats(),
     ]);
 
@@ -61,7 +63,8 @@ const createSchema = z.object({
   customer_phone: z.string().optional(),
   status: z.enum(["new", "processing", "completed", "cancelled"]).optional(),
   payment_status: z.enum(["unpaid", "partial", "paid", "refunded"]).optional(),
-  fulfillment_status: z.enum(["unshipped", "shipping", "shipped", "returned"]).optional(),
+  fulfillment_status: z.enum(["unshipped", "confirmed", "packing", "shipping", "shipped", "returned"]).optional(),
+  payment_method: z.enum(["cod", "bank_transfer", "card", "cash"]).optional(),
   source: z.enum(["store", "facebook", "website", "zalo", "other"]).optional(),
   branch: z.string().optional(),
   staff: z.string().optional(),

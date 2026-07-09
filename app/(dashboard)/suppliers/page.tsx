@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Loader2, Download, Upload, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Loader2, Download, Upload, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import { AddSupplierModal } from "@/invoice-flow-manager-fe/components/suppliers/AddSupplierModal";
 
 interface SupplierRow {
@@ -38,6 +39,8 @@ export default function SuppliersPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [showModal, setShowModal] = useState(false);
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 400);
@@ -78,19 +81,51 @@ export default function SuppliersPage() {
   const startIdx = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const endIdx = Math.min(safePage * pageSize, total);
 
-  function handleCreated(supplier: { id: string; name: string; phone: string; code: string }) {
+  const [notice, setNotice] = useState("");
+
+  function handleSaved(supplier: { id: string; name: string; phone: string; code: string }) {
+    const wasEditing = !!editingSupplierId;
     fetchSuppliers();
-    setNotice(`Đã thêm nhà cung cấp "${supplier.name}" (${supplier.code}).`);
+    setNotice(
+      wasEditing
+        ? `Đã cập nhật nhà cung cấp "${supplier.name}".`
+        : `Đã thêm nhà cung cấp "${supplier.name}" (${supplier.code}).`
+    );
+    setEditingSupplierId(null);
   }
 
-  const [notice, setNotice] = useState("");
+  function openCreateModal() {
+    setEditingSupplierId(null);
+    setShowModal(true);
+  }
+
+  function openEditModal(id: string) {
+    setEditingSupplierId(id);
+    setShowModal(true);
+  }
+
+  async function handleDelete(row: SupplierRow) {
+    if (!confirm(`Xoá nhà cung cấp "${row.name}"? Hành động này không thể hoàn tác.`)) return;
+    setDeletingId(row.id);
+    try {
+      const res = await fetch(`/api/suppliers/${row.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Không xoá được nhà cung cấp.");
+      setNotice(`Đã xoá nhà cung cấp "${row.name}".`);
+      fetchSuppliers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Có lỗi khi xoá nhà cung cấp.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white px-6 py-4 border-b flex justify-between items-center flex-shrink-0">
         <h1 className="text-2xl font-semibold text-slate-800">Nhà cung cấp</h1>
         <div className="flex gap-3">
-          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2" onClick={() => setShowModal(true)}>
+          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2" onClick={openCreateModal}>
             <Plus className="w-4 h-4" /> Thêm nhà cung cấp
           </button>
           <button className="bg-white border hover:bg-gray-50 text-gray-700 px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2">
@@ -100,7 +135,19 @@ export default function SuppliersPage() {
       </header>
 
       <div className="bg-white px-6 py-2 border-b flex items-center gap-6 text-sm text-gray-600 flex-shrink-0">
-        <button className="flex items-center gap-1 hover:text-blue-600">
+        <button
+          onClick={() =>
+            downloadCsv(`nha-cung-cap-${Date.now()}.csv`, rows, [
+              { label: "Mã nhà cung cấp", value: (r) => r.code },
+              { label: "Tên nhà cung cấp", value: (r) => r.name },
+              { label: "Nhóm", value: () => "Khác" },
+              { label: "Email", value: (r) => r.email },
+              { label: "Số điện thoại", value: (r) => r.phone },
+              { label: "Trạng thái", value: () => "Đang giao dịch" },
+            ])
+          }
+          className="flex items-center gap-1 hover:text-blue-600"
+        >
           <Download className="w-4 h-4" /> Xuất file
         </button>
         <button className="flex items-center gap-1 hover:text-blue-600">
@@ -177,12 +224,13 @@ export default function SuppliersPage() {
                     Số điện thoại
                   </th>
                   <th className="p-4">Trạng thái</th>
+                  <th className="p-4 w-24 text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="p-12 text-center text-gray-500">
+                    <td colSpan={8} className="p-12 text-center text-gray-500">
                       <div className="flex items-center justify-center gap-2">
                         <Loader2 className="w-5 h-5 animate-spin" /> Đang tải danh sách…
                       </div>
@@ -190,11 +238,11 @@ export default function SuppliersPage() {
                   </tr>
                 ) : error ? (
                   <tr>
-                    <td colSpan={7} className="p-12 text-center text-red-600">{error}</td>
+                    <td colSpan={8} className="p-12 text-center text-red-600">{error}</td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-12 text-center text-gray-500">
+                    <td colSpan={8} className="p-12 text-center text-gray-500">
                       {total === 0 && !search
                         ? "Chưa có nhà cung cấp nào. Bấm \"Thêm nhà cung cấp\" để bắt đầu."
                         : "Không tìm thấy nhà cung cấp nào phù hợp."}
@@ -202,7 +250,7 @@ export default function SuppliersPage() {
                   </tr>
                 ) : (
                   rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-blue-50 transition-colors cursor-pointer">
+                    <tr key={row.id} className="hover:bg-blue-50 transition-colors">
                       <td className="p-4"><input type="checkbox" className="rounded text-blue-600" /></td>
                       <td className="p-4 text-blue-500 font-medium">{row.code || "—"}</td>
                       <td className="p-4 text-slate-800">{row.name}</td>
@@ -213,6 +261,31 @@ export default function SuppliersPage() {
                         <span className="text-green-600 text-xs font-semibold">
                           Đang giao dịch
                         </span>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(row.id)}
+                            title="Sửa"
+                            className="p-1.5 rounded text-slate-500 hover:bg-slate-100 hover:text-blue-600"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(row)}
+                            disabled={deletingId === row.id}
+                            title="Xoá"
+                            className="p-1.5 rounded text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                          >
+                            {deletingId === row.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -281,8 +354,12 @@ export default function SuppliersPage() {
 
       {showModal && (
         <AddSupplierModal
-          onClose={() => setShowModal(false)}
-          onCreated={handleCreated}
+          onClose={() => {
+            setShowModal(false);
+            setEditingSupplierId(null);
+          }}
+          onSaved={handleSaved}
+          supplierId={editingSupplierId}
         />
       )}
 

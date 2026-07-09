@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import {
   Loader2,
   Plus,
@@ -142,9 +143,6 @@ export default function StockChecksListPage() {
         <h1 className="text-lg font-semibold text-slate-800">Danh sách phiếu kiểm hàng</h1>
         <div className="flex items-center gap-6 text-sm text-slate-600">
           <button className="flex items-center gap-1 hover:text-blue-600">
-            <FileText className="w-4 h-4" /> Tư vấn thuế
-          </button>
-          <button className="flex items-center gap-1 hover:text-blue-600">
             <FileText className="w-4 h-4" /> Trợ giúp
           </button>
           <div className="flex items-center gap-2">
@@ -159,7 +157,21 @@ export default function StockChecksListPage() {
 
       <div className="p-4 bg-white border-b flex items-center justify-between flex-shrink-0">
         <div className="flex gap-4">
-          <button className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600">
+          <button
+            onClick={() =>
+              downloadCsv(`kiem-hang-${Date.now()}.csv`, filtered, [
+                { label: "Mã phiếu", value: (r) => r.code },
+                { label: "Ngày tạo", value: (r) => formatDateTime(r.created_at) },
+                { label: "Trạng thái", value: (r) => STATUS_META[r.status]?.label ?? r.status },
+                { label: "Chi nhánh", value: (r) => r.branch || "Chi nhánh mặc định" },
+                { label: "Nhân viên kiểm", value: (r) => r.staff },
+                { label: "Tổng SP", value: (r) => r.total_items },
+                { label: "Khớp", value: (r) => r.matched_items },
+                { label: "Lệch", value: (r) => r.variance_items },
+              ])
+            }
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600"
+          >
             <Download className="w-4 h-4" /> Xuất file
           </button>
           <button className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600">

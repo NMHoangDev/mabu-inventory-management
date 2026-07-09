@@ -252,6 +252,74 @@ export async function GET(request: Request) {
         limit 50
       `, params);
 
+      // Xuất kho thật (trước đây LUÔN = 0, hardcoded ở services/reportService.ts)
+      // — tính từ order_items đã thực sự trừ tồn (stock_deducted_at is not null).
+      const exportWhere: string[] = [];
+      const exportParams: (string | number)[] = [];
+      let ep = 1;
+      if (dateFrom) { exportWhere.push(`o.created_at >= $${ep++}`); exportParams.push(dateFrom); }
+      if (dateTo) { exportWhere.push(`o.created_at <= $${ep++}::date + interval '1 day'`); exportParams.push(dateTo); }
+      const exportWhereSQL = exportWhere.length ? `where ${exportWhere.join(" and ")} and oi.stock_deducted_at is not null` : `where oi.stock_deducted_at is not null`;
+      const exportRes = await pool.query(
+        `select coalesce(sum(oi.quantity), 0)::numeric as export_qty
+           from order_items oi
+           join orders o on o.id = oi.order_id
+           ${exportWhereSQL}`,
+        exportParams
+      );
+      const totalExport = num(exportRes.rows[0]?.export_qty);
+      const totalImport = result.rows.reduce((s, r) => s + num(r.import_qty), 0);
+
+      // Xuất theo từng SKU — trước đây bảng "Chi tiết xuất nhập tồn" luôn hiện
+      // NaN ở cột "Xuất trong kỳ" vì items chỉ có import_qty, chưa từng có
+      // export_qty nào được gán (kể cả ở nhánh "dữ liệu thật").
+      const exportBySkuRes = await pool.query(
+        `select oi.product_sku as sku, coalesce(sum(oi.quantity), 0)::numeric as export_qty
+           from order_items oi
+           join orders o on o.id = oi.order_id
+           ${exportWhereSQL}
+           group by oi.product_sku`,
+        exportParams
+      );
+      const exportBySku = new Map(exportBySkuRes.rows.map((r) => [str(r.sku), num(r.export_qty)]));
+
+      // Nhập/xuất theo ngày — trước đây trang FE tự sinh random, giờ tính thật.
+      const dailyImportRes = await pool.query(
+        `select to_char(gr.received_at, 'YYYY-MM-DD') as day, coalesce(sum(gri.received_qty), 0)::numeric as qty
+           from goods_receipt_items gri
+           join goods_receipts gr on gr.id = gri.goods_receipt_id
+           ${whereSQL}
+           group by 1`,
+        params
+      );
+      const dailyExportRes = await pool.query(
+        `select to_char(o.created_at, 'YYYY-MM-DD') as day, coalesce(sum(oi.quantity), 0)::numeric as qty
+           from order_items oi
+           join orders o on o.id = oi.order_id
+           ${exportWhereSQL}
+           group by 1`,
+        exportParams
+      );
+      const importByDay = new Map(dailyImportRes.rows.map((r) => [r.day, num(r.qty)]));
+      const exportByDay = new Map(dailyExportRes.rows.map((r) => [r.day, num(r.qty)]));
+      const daily: { day: string; import: number; export: number }[] = [];
+      if (dateFrom && dateTo) {
+        const d0 = new Date(dateFrom);
+        const d1 = new Date(dateTo);
+        for (let d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
+          const key = new Date(d).toISOString().slice(0, 10);
+          daily.push({ day: key, import: importByDay.get(key) ?? 0, export: exportByDay.get(key) ?? 0 });
+        }
+      }
+
+      // Tồn cuối kỳ = tồn hiện tại thật (snapshot). Tồn đầu kỳ suy ra ngược từ
+      // tồn cuối trừ đi biến động thật trong kỳ (đầu kỳ = cuối kỳ - nhập + xuất)
+      // — không có bảng ledger lịch sử nên đây là suy luận từ số liệu thật,
+      // KHÁC với trước đây là hằng số 1000/1000 bất kể input.
+      const stockRes = await pool.query(`select coalesce(sum(stock), 0)::numeric as total from products`);
+      const totalEnding = num(stockRes.rows[0]?.total);
+      const totalBeginning = totalEnding - totalImport + totalExport;
+
       return NextResponse.json({
         items: result.rows.map((r) => ({
           sku: str(r.sku),
@@ -259,7 +327,15 @@ export async function GET(request: Request) {
           category_name: str(r.category_name),
           import_qty: num(r.import_qty),
           import_value: num(r.import_value),
-        }))
+          export_qty: exportBySku.get(str(r.sku)) ?? 0,
+        })),
+        daily,
+        summary: {
+          total_beginning: totalBeginning,
+          total_import: totalImport,
+          total_export: totalExport,
+          total_ending: totalEnding
+        }
       });
     }
 

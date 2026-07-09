@@ -252,6 +252,101 @@ export async function createCostAdjustment(input: CreateCostAdjustmentInput): Pr
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// transitionCostAdjustmentStatus
+// ──────────────────────────────────────────────────────────────────────
+//
+// createCostAdjustment() đã áp giá vốn mới ngay khi tạo với status='completed'.
+// Hàm này phục vụ trường hợp còn lại: phiếu tạo ở 'draft'/'in_progress' rồi
+// sau đó mới "Hoàn thành" (áp giá) hoặc "Hủy" — trước đây route PATCH này
+// chưa từng được tạo dù comment trong createCostAdjustment() đã nhắc tới,
+// nên phiếu draft không có cách nào áp giá được nữa (kẹt vĩnh viễn). Không
+// cần cột "applied_at" như goods-receipts/stock-checks vì máy trạng thái chỉ
+// cho vào 'completed' đúng 1 lần (completed là trạng thái cuối, không quay lại).
+export async function transitionCostAdjustmentStatus(input: {
+  costAdjustmentId: string;
+  nextStatus: "in_progress" | "completed" | "cancelled";
+}): Promise<{ success: boolean; message: string }> {
+  if (!isDatabaseConfigured) {
+    return { success: false, message: "Database chưa cấu hình." };
+  }
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const caRes = await client.query(
+      `select id, status from cost_adjustments where id = $1::uuid`,
+      [input.costAdjustmentId]
+    );
+    if (caRes.rows.length === 0) {
+      await client.query("rollback");
+      return { success: false, message: "Không tìm thấy phiếu điều chỉnh." };
+    }
+    const cur = String(caRes.rows[0].status);
+    const next = input.nextStatus;
+    const allowed: Record<string, string[]> = {
+      draft: ["in_progress", "completed", "cancelled"],
+      in_progress: ["completed", "cancelled"],
+      completed: [],
+      cancelled: []
+    };
+    if (!allowed[cur]?.includes(next)) {
+      await client.query("rollback");
+      return { success: false, message: `Không thể đổi từ "${cur}" sang "${next}".` };
+    }
+
+    if (next === "completed") {
+      const itemsRes = await client.query(
+        `select product_id, new_cost from cost_adjustment_items where cost_adjustment_id = $1::uuid`,
+        [input.costAdjustmentId]
+      );
+      for (const item of itemsRes.rows) {
+        const newCost = Number(item.new_cost);
+        if (!Number.isFinite(newCost) || newCost < 0) continue;
+        if (!isUuid(item.product_id ?? "")) continue;
+        await client.query(
+          `update products set cost_price = $1, updated_at = now() where id = $2::uuid`,
+          [newCost, item.product_id]
+        );
+        await client.query(
+          `update product_variants set cost_price = $1, updated_at = now() where product_id = $2::uuid`,
+          [newCost, item.product_id]
+        );
+      }
+    }
+
+    await client.query(
+      `update cost_adjustments
+          set status = $2,
+              completed_at = case when $2 = 'completed' then now() else completed_at end,
+              updated_at = now()
+        where id = $1`,
+      [input.costAdjustmentId, next]
+    );
+
+    await client.query("commit");
+    const msg =
+      next === "completed"
+        ? "Đã áp giá vốn mới cho các sản phẩm."
+        : next === "cancelled"
+          ? "Đã hủy phiếu điều chỉnh."
+          : `Đã chuyển trạng thái sang "${next}".`;
+    return { success: true, message: msg };
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    console.error("transitionCostAdjustmentStatus failed:", err);
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Lỗi không xác định"
+    };
+  } finally {
+    client.release();
+  }
+}
+
 export interface ProductCostSearchHit {
   product_id: string;
   sku: string;

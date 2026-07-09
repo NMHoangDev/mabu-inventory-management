@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -14,12 +14,29 @@ import {
   DollarSign,
   Weight,
   StickyNote,
+  ShoppingCart,
 } from "lucide-react";
 
 const PARTNERS = ["NINJA VAN", "JNT Express", "GHN", "GHTK", "Viettel Post", "Chành Lộc Hà"];
 
 export default function NewShippingPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewShippingPageInner />
+    </Suspense>
+  );
+}
+
+function NewShippingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Tạo vận đơn từ trang chi tiết đơn hàng (?order_id=...) — trước đây form
+  // này KHÔNG có field order_id nào cả, nên mọi vận đơn tạo ra đều "trôi tự
+  // do", không gắn được với đơn hàng nào. Prefill thêm tên/SĐT/địa chỉ/COD
+  // từ đơn hàng gốc để không phải gõ lại.
+  const orderIdParam = searchParams.get("order_id");
+  const [orderId, setOrderId] = useState<string | null>(orderIdParam);
+  const [orderCode, setOrderCode] = useState<string>("");
   const [form, setForm] = useState({
     customer_name: "",
     customer_phone: "",
@@ -39,6 +56,27 @@ export default function NewShippingPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (!orderIdParam) return;
+    fetch(`/api/orders/${encodeURIComponent(orderIdParam)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((order) => {
+        if (!order) return;
+        setOrderId(order.id);
+        setOrderCode(order.code || "");
+        setForm((f) => ({
+          ...f,
+          customer_name: order.customer_name || f.customer_name,
+          customer_phone: order.customer_phone || f.customer_phone,
+          shipping_address: order.customer_address || f.shipping_address,
+          shipping_fee: order.shipping_fee || f.shipping_fee,
+          cod_amount: order.payment_status === "paid" ? 0 : Math.max(0, (order.total || 0) - (order.paid || 0)),
+          note: order.note ? `Đơn hàng ${order.code}: ${order.note}` : `Đơn hàng ${order.code}`,
+        }));
+      })
+      .catch(() => undefined);
+  }, [orderIdParam]);
+
   const submit = async () => {
     if (!form.customer_name.trim()) {
       setError("Vui lòng nhập tên người nhận.");
@@ -50,7 +88,7 @@ export default function NewShippingPage() {
       const res = await fetch("/api/shippings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, order_id: orderId }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -87,6 +125,13 @@ export default function NewShippingPage() {
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded text-sm">{error}</div>
         )}
+
+        {orderId ? (
+          <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-700">
+            <ShoppingCart className="w-4 h-4" />
+            Vận đơn này sẽ được gắn với đơn hàng <b>#{orderCode || orderId.slice(0, 8)}</b>
+          </div>
+        ) : null}
 
         <section className="bg-white rounded-lg border border-slate-200 p-6 space-y-4">
           <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">

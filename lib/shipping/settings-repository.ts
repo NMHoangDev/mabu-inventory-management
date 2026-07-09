@@ -47,6 +47,7 @@ export interface ShippingSettings {
   delivery_warning_days: number;
   restricted_zones: string;
   pickup_addresses: PickupAddress[];
+  fee_rules: ShippingFeeRule[];
   updated_at: string;
 }
 
@@ -81,6 +82,7 @@ const DEFAULTS: ShippingSettings = {
   delivery_warning_days: 3,
   restricted_zones: "",
   pickup_addresses: [],
+  fee_rules: [],
   updated_at: new Date(0).toISOString(),
 };
 
@@ -98,6 +100,7 @@ function rowToSettings(row: any): ShippingSettings {
     delivery_warning_days: Number(row.delivery_warning_days ?? 3),
     restricted_zones: row.restricted_zones ?? "",
     pickup_addresses: Array.isArray(row.pickup_addresses) ? row.pickup_addresses : [],
+    fee_rules: Array.isArray(row.fee_rules) ? row.fee_rules : [],
     updated_at: row.updated_at ?? new Date().toISOString(),
   };
 }
@@ -146,6 +149,10 @@ async function pgUpdateSettings(update: ShippingSettingsUpdate): Promise<Shippin
     fields.push(`pickup_addresses = $${i++}::jsonb`);
     values.push(JSON.stringify(update.pickup_addresses));
   }
+  if (update.fee_rules !== undefined) {
+    fields.push(`fee_rules = $${i++}::jsonb`);
+    values.push(JSON.stringify(update.fee_rules));
+  }
   fields.push(`updated_at = now()`);
 
   await pool.query(
@@ -190,6 +197,7 @@ async function supabaseUpdateSettings(update: ShippingSettingsUpdate): Promise<S
     if (update[key] !== undefined) payload[key] = update[key];
   }
   if (update.pickup_addresses !== undefined) payload.pickup_addresses = update.pickup_addresses;
+  if (update.fee_rules !== undefined) payload.fee_rules = update.fee_rules;
 
   const { error } = await client.from("shipping_settings").upsert(payload);
   if (error) throw error;

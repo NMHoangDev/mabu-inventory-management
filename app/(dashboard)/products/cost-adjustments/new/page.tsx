@@ -44,7 +44,8 @@ export default function NewCostAdjustmentPage() {
   const [code, setCode] = useState("CPV00001");
   const [codeLoading, setCodeLoading] = useState(true);
   const [branch, setBranch] = useState("Chi nhánh mặc định");
-  const [staff, setStaff] = useState("NA");
+  const [staff, setStaff] = useState("");
+  const [staffOptions, setStaffOptions] = useState<{ id: string; full_name: string }[]>([]);
   const [note, setNote] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
@@ -53,10 +54,20 @@ export default function NewCostAdjustmentPage() {
   const [productQuery, setProductQuery] = useState("");
   const [productResults, setProductResults] = useState<ProductHit[]>([]);
   const [productLoading, setProductLoading] = useState(false);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [multiSelected, setMultiSelected] = useState<Map<string, ProductHit>>(new Map());
   const productBoxRef = useRef<HTMLDivElement | null>(null);
+  const productInputRef = useRef<HTMLInputElement | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/staff")
+      .then((r) => r.json())
+      .then((d) => setStaffOptions(Array.isArray(d?.staff) ? d.staff : []))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +81,9 @@ export default function NewCostAdjustmentPage() {
   }, []);
 
   useEffect(() => {
-    if (!productQuery.trim()) { setProductResults([]); return; }
+    // Chế độ chọn nhiều cho phép duyệt sản phẩm ngay cả khi chưa gõ gì; chế độ
+    // thường bắt buộc gõ tìm kiếm (giữ hành vi cũ).
+    if (!productQuery.trim() && !multiSelect) { setProductResults([]); return; }
     let cancelled = false;
     setProductLoading(true);
     fetch(`/api/cost-adjustments/products-search?q=${encodeURIComponent(productQuery)}`)
@@ -79,12 +92,19 @@ export default function NewCostAdjustmentPage() {
       .catch(() => { if (!cancelled) setProductResults([]); })
       .finally(() => { if (!cancelled) setProductLoading(false); });
     return () => { cancelled = true; };
-  }, [productQuery]);
+  }, [productQuery, multiSelect]);
+
+  const visibleProductResults = useMemo(
+    () => productResults.filter((p) => !items.some((it) => it.product_id === p.product_id)),
+    [productResults, items]
+  );
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (productBoxRef.current && !productBoxRef.current.contains(e.target as Node)) {
         setProductResults([]);
+        setMultiSelect(false);
+        setMultiSelected(new Map());
       }
     }
     document.addEventListener("mousedown", handleClick);
@@ -99,21 +119,56 @@ export default function NewCostAdjustmentPage() {
     setItems((p) => p.filter((it) => it.rowKey !== key));
   }
 
+  function hitToDraftItem(hit: ProductHit): DraftItem {
+    return {
+      rowKey: `adj-${hit.product_id}-${Math.random().toString(36).slice(2, 7)}`,
+      product_id: hit.product_id,
+      sku: hit.sku,
+      product_name: hit.product_name,
+      unit: hit.unit || "",
+      image_url: hit.image_url,
+      current_cost: hit.current_cost ?? 0,
+      new_cost: hit.current_cost ?? 0,
+      note: ""
+    };
+  }
+
   function addProduct(hit: ProductHit) {
-    setItems((prev) => [
-      ...prev,
-      {
-        rowKey: `adj-${hit.product_id}-${Math.random().toString(36).slice(2, 7)}`,
-        product_id: hit.product_id,
-        sku: hit.sku,
-        product_name: hit.product_name,
-        unit: hit.unit || "",
-        image_url: hit.image_url,
-        current_cost: hit.current_cost ?? 0,
-        new_cost: hit.current_cost ?? 0,
-        note: ""
-      }
-    ]);
+    setItems((prev) => [...prev, hitToDraftItem(hit)]);
+    setProductQuery("");
+    setProductResults([]);
+  }
+
+  function openMultiSelect() {
+    setMultiSelect(true);
+    setMultiSelected(new Map());
+    productInputRef.current?.focus();
+  }
+
+  function toggleMultiSelected(hit: ProductHit) {
+    setMultiSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(hit.product_id)) next.delete(hit.product_id);
+      else next.set(hit.product_id, hit);
+      return next;
+    });
+  }
+
+  function toggleSelectAllResults() {
+    setMultiSelected((prev) => {
+      if (visibleProductResults.every((r) => prev.has(r.product_id))) return new Map();
+      const next = new Map(prev);
+      visibleProductResults.forEach((r) => next.set(r.product_id, r));
+      return next;
+    });
+  }
+
+  function commitMultiSelect() {
+    if (multiSelected.size > 0) {
+      setItems((prev) => [...prev, ...Array.from(multiSelected.values()).map(hitToDraftItem)]);
+    }
+    setMultiSelect(false);
+    setMultiSelected(new Map());
     setProductQuery("");
     setProductResults([]);
   }
@@ -245,9 +300,10 @@ export default function NewCostAdjustmentPage() {
                     onChange={(e) => setStaff(e.target.value)}
                     className="border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-sm py-2 bg-gray-50"
                   >
-                    <option>NA</option>
-                    <option>PHAN VĂN VŨ</option>
-                    <option>Khác</option>
+                    <option value="">-- Chọn nhân viên --</option>
+                    {staffOptions.map((s) => (
+                      <option key={s.id} value={s.full_name}>{s.full_name}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -264,40 +320,85 @@ export default function NewCostAdjustmentPage() {
                     <Search className="h-4 w-4" />
                   </span>
                   <input
+                    ref={productInputRef}
                     value={productQuery}
                     onChange={(e) => setProductQuery(e.target.value)}
                     placeholder="Tìm theo tên, mã SKU, hoặc quét mã Barcode...(F3)"
                     className="w-full pl-10 pr-4 py-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-sm"
                   />
-                  {productResults.length > 0 ? (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded shadow-lg z-20 max-h-60 overflow-y-auto">
-                      {productResults.map((p) => (
-                        <button
-                          key={p.product_id}
-                          onClick={() => addProduct(p)}
-                          className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center justify-between"
-                        >
-                          <div>
-                            <div className="text-sm font-medium text-gray-800">{p.product_name}</div>
-                            <div className="text-xs text-gray-500">
-                              SKU: {p.sku || "—"} · Hiện tại: {fmtMoney.format(p.current_cost)}đ
-                            </div>
-                          </div>
-                          <span className="text-blue-500 text-sm">+ Thêm</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : productLoading ? (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded shadow-lg z-20 p-3 text-sm text-gray-500 flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin" /> Đang tìm…
+                  {multiSelect || visibleProductResults.length > 0 ? (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded shadow-lg z-20 max-h-72 overflow-y-auto">
+                      {multiSelect ? (
+                        <div className="sticky top-0 flex items-center justify-between gap-2 border-b bg-gray-50 px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={toggleSelectAllResults}
+                            disabled={visibleProductResults.length === 0}
+                            className="text-xs font-medium text-blue-600 hover:underline disabled:opacity-40"
+                          >
+                            {visibleProductResults.length > 0 &&
+                            visibleProductResults.every((r) => multiSelected.has(r.product_id))
+                              ? "Bỏ chọn tất cả"
+                              : "Chọn tất cả"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={commitMultiSelect}
+                            disabled={multiSelected.size === 0}
+                            className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 disabled:opacity-40"
+                          >
+                            Thêm {multiSelected.size > 0 ? multiSelected.size : ""} sản phẩm
+                          </button>
+                        </div>
+                      ) : null}
+                      {productLoading ? (
+                        <div className="p-3 text-sm text-gray-500 flex items-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Đang tìm…
+                        </div>
+                      ) : visibleProductResults.length === 0 ? (
+                        <div className="px-3 py-6 text-center text-xs text-gray-500">
+                          Không có sản phẩm nào để thêm.
+                        </div>
+                      ) : (
+                        visibleProductResults.map((p) => {
+                          const checked = multiSelected.has(p.product_id);
+                          return (
+                            <button
+                              key={p.product_id}
+                              type="button"
+                              onClick={() => (multiSelect ? toggleMultiSelected(p) : addProduct(p))}
+                              className={`w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center justify-between ${
+                                checked ? "bg-blue-50" : ""
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                {multiSelect ? (
+                                  <input type="checkbox" checked={checked} readOnly className="pointer-events-none" />
+                                ) : null}
+                                <div>
+                                  <div className="text-sm font-medium text-gray-800">{p.product_name}</div>
+                                  <div className="text-xs text-gray-500">
+                                    SKU: {p.sku || "—"} · Hiện tại: {fmtMoney.format(p.current_cost)}đ
+                                  </div>
+                                </div>
+                              </div>
+                              {!multiSelect ? <span className="text-blue-500 text-sm">+ Thêm</span> : null}
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   ) : null}
                 </div>
                 <button
-                  onClick={() => setProductQuery("")}
-                  className="px-4 py-2 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={() => (multiSelect ? setMultiSelect(false) : openMultiSelect())}
+                  className={`px-4 py-2 border rounded text-sm font-medium ${
+                    multiSelect
+                      ? "bg-blue-600 border-blue-600 text-white"
+                      : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                  }`}
                 >
-                  Chọn nhanh
+                  {multiSelect ? `Đang chọn (${multiSelected.size})` : "Chọn nhanh"}
                 </button>
                 <button className="flex items-center px-4 py-2 border border-gray-300 bg-gray-50 rounded text-sm font-medium text-gray-700 hover:bg-gray-100">
                   <span className="mr-2 opacity-60">🔳</span>
@@ -331,7 +432,7 @@ export default function NewCostAdjustmentPage() {
                             </div>
                             <p className="text-gray-500">Phiếu điều chỉnh của bạn chưa có sản phẩm nào</p>
                             <button
-                              onClick={() => setProductQuery("")}
+                              onClick={openMultiSelect}
                               className="px-6 py-2 border border-blue-500 text-blue-500 rounded text-sm font-medium hover:bg-blue-50"
                             >
                               Thêm sản phẩm

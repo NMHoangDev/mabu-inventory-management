@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   Loader2,
   ChevronRight,
-  FileText,
   HelpCircle
 } from "lucide-react";
 
@@ -104,9 +103,6 @@ export default function ReceiptVoucherDetailPage() {
           <span className="font-medium">Phiếu thu: {voucher.code}</span>
         </button>
         <div className="flex items-center gap-6 text-sm text-slate-600">
-          <button className="flex items-center gap-1.5 hover:text-blue-600">
-            <FileText className="w-4 h-4" /> Tư vấn thuế
-          </button>
           <button className="flex items-center gap-1.5 hover:text-blue-600">
             <HelpCircle className="w-4 h-4" /> Trợ giúp
           </button>

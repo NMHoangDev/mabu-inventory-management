@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 17; // Bumped: scan-flow linkage (purchase_orders.invoice_document_id, goods_receipt_items.stock_added_at, invoice_rows.purchase_order_id/goods_receipt_id)
+const SCHEMA_VERSION = 21; // Bumped: storefront (customers.password_hash + customer_sessions, site_settings), orders.payment_method, orders.fulfillment_status thêm confirmed/packing, backfill products.slug
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -573,6 +573,12 @@ async function migrate() {
     create index if not exists idx_goods_receipt_items_stock_pending
       on goods_receipt_items(stock_added_at) where stock_added_at is null;
 
+    -- Idempotency: đánh dấu đã trừ tồn kho khi đơn hàng chuyển "completed"
+    -- (xem transitionOrderStatus trong lib/orders/repository.ts)
+    alter table order_items add column if not exists stock_deducted_at timestamptz;
+    create index if not exists idx_order_items_stock_pending
+      on order_items(stock_deducted_at) where stock_deducted_at is null;
+
     -- Cho phép mỗi invoice_row tham chiếu nhiều PO/GR (audit)
     -- purchase_orders.id và goods_receipts.id đều là uuid nên FK phải cùng kiểu
     alter table invoice_rows add column if not exists purchase_order_id uuid references purchase_orders(id) on delete set null;
@@ -896,6 +902,187 @@ async function migrate() {
     create index if not exists idx_cash_book_created_at     on cash_book(created_at desc);
     create index if not exists idx_cash_book_group         on cash_book(group_name);
     create index if not exists idx_cash_book_payment_type   on cash_book(payment_type);
+  `);
+
+  // 16. Tìm kiếm không dấu (unaccent + pg_trgm) + trạng thái thanh toán đơn
+  // nhập hàng + ghi nhớ tần suất chọn sản phẩm khi tạo đơn hàng.
+  //
+  // search_text (products/customers): trước đây chỉ được set up bằng 1 file
+  // SQL rời (supabase/migrations/2026-07-05_unaccent_search.sql) chạy tay qua
+  // SQL editor — KHÔNG nằm trong migration tự động này, nên môi trường nào
+  // chưa chạy tay sẽ thiếu extension/trigger dù cột search_text có thể đã tồn
+  // tại (ALTER từng chạy 1 lần) → search "gõ không dấu" âm thầm không hoạt
+  // động cho các row insert/update sau đó (không có trigger fill lại). Port
+  // nguyên logic vào đây để mọi môi trường (kể cả DB mới) đều có đầy đủ và tự
+  // backfill lại các row đang bị null.
+  await client.query(`
+    create extension if not exists unaccent;
+    create extension if not exists pg_trgm;
+
+    alter table customers add column if not exists search_text text;
+    alter table products  add column if not exists search_text text;
+
+    create or replace function customers_fill_search_text()
+    returns trigger as $$
+    begin
+      new.search_text := lower(unaccent(
+        coalesce(new.name,'') || ' ' ||
+        coalesce(new.phone,'') || ' ' ||
+        coalesce(new.code,'') || ' ' ||
+        coalesce(new.email,'')
+      ));
+      return new;
+    end;
+    $$ language plpgsql;
+
+    drop trigger if exists trg_customers_fill_search_text on customers;
+    create trigger trg_customers_fill_search_text
+      before insert or update of name, phone, code, email on customers
+      for each row execute function customers_fill_search_text();
+
+    create or replace function products_fill_search_text()
+    returns trigger as $$
+    begin
+      new.search_text := lower(unaccent(
+        coalesce(new.name,'') || ' ' ||
+        coalesce(new.sku,'') || ' ' ||
+        coalesce(new.barcode,'')
+      ));
+      return new;
+    end;
+    $$ language plpgsql;
+
+    drop trigger if exists trg_products_fill_search_text on products;
+    create trigger trg_products_fill_search_text
+      before insert or update of name, sku, barcode on products
+      for each row execute function products_fill_search_text();
+
+    -- Backfill các row hiện có (kể cả row cũ trước khi có trigger).
+    update customers set search_text = lower(unaccent(
+      coalesce(name,'') || ' ' || coalesce(phone,'') || ' ' || coalesce(code,'') || ' ' || coalesce(email,'')
+    )) where search_text is null or search_text = '';
+
+    update products set search_text = lower(unaccent(
+      coalesce(name,'') || ' ' || coalesce(sku,'') || ' ' || coalesce(barcode,'')
+    )) where search_text is null or search_text = '';
+
+    create index if not exists idx_customers_search_text_trgm on customers using gin (search_text gin_trgm_ops);
+    create index if not exists idx_products_search_text_trgm  on products  using gin (search_text gin_trgm_ops);
+
+    -- Trạng thái thanh toán đơn nhập hàng — TÁCH RIÊNG khỏi receipt_status
+    -- (trạng thái nhập hàng/tồn kho). Trước đây chỉ có 1 nút "Thanh toán hoàn
+    -- thành" nhưng thực chất nó điều khiển tồn kho (receipt_status), không hề
+    -- liên quan thanh toán — dẫn tới đơn tạo bằng "Tạo & nhập hàng" hiển thị
+    -- "Hoàn thành" ngay nhưng KHÔNG hề cộng tồn kho (nút cộng tồn kho bị ẩn vì
+    -- status đã "completed"). Cột này derive giống orders.payment_status.
+    alter table goods_receipts add column if not exists payment_status text not null default 'unpaid'
+      check (payment_status in ('unpaid','partial','paid'));
+    create index if not exists idx_goods_receipts_payment_status on goods_receipts(payment_status);
+
+    -- Ghi nhớ tần suất 1 sản phẩm được thêm vào đơn hàng — ưu tiên gợi ý
+    -- trong ô tìm sản phẩm ở /orders/new (xem app/api/orders/search-products).
+    create table if not exists product_search_usage (
+      product_id   uuid primary key references products(id) on delete cascade,
+      use_count    integer not null default 0,
+      last_used_at timestamptz not null default now()
+    );
+  `);
+
+  // 17. Áp chênh lệch kiểm kê vào tồn kho (idempotency guard, giống
+  // goods_receipt_items.stock_added_at) + Nhóm nhà cung cấp (mirror
+  // customer_groups) + phí vận chuyển theo quy tắc (trước đây chỉ tồn tại
+  // trong React state của trang /shipping/config, không có nơi lưu thật).
+  await client.query(`
+    alter table stock_check_items add column if not exists stock_applied_at timestamptz;
+    create index if not exists idx_stock_check_items_stock_pending
+      on stock_check_items(stock_applied_at) where stock_applied_at is null;
+
+    create table if not exists supplier_groups (
+      id          uuid primary key default gen_random_uuid(),
+      name        text not null unique,
+      code        text,
+      description text,
+      type        text default 'Cố định',
+      created_at  timestamptz default now(),
+      updated_at  timestamptz default now()
+    );
+    alter table suppliers add column if not exists group_id uuid references supplier_groups(id) on delete set null;
+    create index if not exists idx_suppliers_group_id on suppliers(group_id);
+
+    alter table shipping_settings add column if not exists fee_rules jsonb not null default '[]'::jsonb;
+  `);
+
+  // 18. Storefront (website bán hàng công khai) — xem STOREFRONT_PLAN.md.
+  // Auth khách hàng KHÔNG dùng lại pattern cookie=UUID trần của staff (chấp
+  // nhận được vì nội bộ) — storefront đối diện internet trực tiếp nên cần
+  // token ngẫu nhiên + hash lưu DB (customer_sessions), cookie chỉ chứa token.
+  await client.query(`
+    alter table customers add column if not exists password_hash text;
+
+    create table if not exists customer_sessions (
+      id           uuid primary key default gen_random_uuid(),
+      customer_id  uuid not null references customers(id) on delete cascade,
+      token_hash   text not null unique,
+      user_agent   text,
+      created_at   timestamptz not null default now(),
+      expires_at   timestamptz not null
+    );
+    create index if not exists idx_customer_sessions_customer_id on customer_sessions(customer_id);
+    create index if not exists idx_customer_sessions_expires_at  on customer_sessions(expires_at);
+
+    -- Cấu hình nội dung trang chủ storefront — 1 dòng duy nhất, mirror
+    -- shipping_settings.
+    create table if not exists site_settings (
+      id                    int primary key default 1,
+      store_name            text not null default 'Cửa hàng',
+      banner_url            text not null default '',
+      hero_title            text not null default '',
+      hero_subtitle         text not null default '',
+      announcement          text not null default '',
+      contact_phone         text not null default '',
+      contact_address       text not null default '',
+      featured_category_ids uuid[] not null default '{}',
+      featured_product_ids  uuid[] not null default '{}',
+      updated_at            timestamptz not null default now(),
+      constraint site_settings_singleton check (id = 1)
+    );
+
+    -- Phương thức thanh toán của đơn hàng — trước đây orders không phân biệt
+    -- COD / chuyển khoản / thẻ. Cần để xử lý luồng khác nhau: COD thì
+    -- payment_status chỉ chuyển 'paid' khi đã giao xong (thu tiền tại nhà);
+    -- chuyển khoản/thẻ thì có thể 'paid' ngay từ lúc xác nhận đơn, trong khi
+    -- fulfillment_status vẫn 'chưa giao'.
+    alter table orders add column if not exists payment_method text not null default 'cod'
+      check (payment_method in ('cod', 'bank_transfer', 'card', 'cash'));
+
+    -- Mở rộng pipeline xử lý đơn: thêm 'confirmed' (đã xác nhận) và 'packing'
+    -- (đang đóng gói) giữa 'unshipped' và 'shipping' — trước đây chỉ có 4
+    -- trạng thái, thiếu 2 bước xử lý nội bộ trước khi giao.
+    alter table orders drop constraint if exists orders_fulfillment_status_check;
+    alter table orders add constraint orders_fulfillment_status_check
+      check (fulfillment_status in ('unshipped', 'confirmed', 'packing', 'shipping', 'shipped', 'returned'));
+
+    -- Backfill slug cho sản phẩm cũ chưa có (bắt buộc để lộ ra trang chi tiết
+    -- sản phẩm /products/[slug] trên storefront). Hậu tố 8 ký tự từ id để
+    -- đảm bảo unique tuyệt đối, không cần tính collision giữa các tên trùng.
+    update products
+    set slug = regexp_replace(regexp_replace(lower(unaccent(coalesce(name, 'san-pham'))), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g')
+               || '-' || substr(id::text, 1, 8)
+    where slug is null;
+
+    update categories
+    set slug = regexp_replace(regexp_replace(lower(unaccent(coalesce(name, 'danh-muc'))), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g')
+               || '-' || substr(id::text, 1, 8)
+    where slug is null;
+
+    -- Mặc định đưa toàn bộ sản phẩm "active" ĐÃ CÓ TRƯỚC khi triển khai
+    -- storefront lên website luôn (thay vì storefront trống trơn tới khi
+    -- admin bấm "hiển thị" từng sản phẩm). Chốt mốc created_at cứng (không
+    -- dùng now()) để migrate() chạy lại lần sau (mỗi lần server khởi động)
+    -- KHÔNG tự publish sản phẩm mới tạo sau mốc này — những sản phẩm đó phải
+    -- qua toggle "Hiển thị trên website" ở trang sửa sản phẩm (Task P4).
+    update products set published_at = created_at
+      where status = 'active' and published_at is null and created_at < '2026-07-10'::timestamptz;
   `);
 } finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);

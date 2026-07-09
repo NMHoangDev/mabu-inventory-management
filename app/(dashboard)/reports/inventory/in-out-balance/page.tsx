@@ -17,6 +17,17 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInOutBalance } from "@/services/reportService";
 
+// Không có bảng ledger lịch sử nên không thể vẽ "tồn kho tuyệt đối theo
+// ngày" một cách trung thực — thay bằng biến động luỹ kế (nhập - xuất cộng
+// dồn từ đầu kỳ), tính hoàn toàn từ số liệu thật (daily.import/export).
+function cumulativeNet(daily: { import: number; export: number }[]): number[] {
+  let running = 0;
+  return daily.map((d) => {
+    running += (d.import || 0) - (d.export || 0);
+    return running;
+  });
+}
+
 export default function InOutBalancePage() {
   const [period, setPeriod] = useState<Period>("30d");
   const [dateFrom, setDateFrom] = useState("");
@@ -109,10 +120,10 @@ export default function InOutBalancePage() {
                 />
               </div>
               <div className="bg-white rounded-lg border border-gray-100 p-5 shadow-sm">
-                <h3 className="font-semibold text-gray-800 text-sm mb-4">Tồn kho theo ngày</h3>
+                <h3 className="font-semibold text-gray-800 text-sm mb-4">Biến động tồn kho luỹ kế (nhập − xuất)</h3>
                 <SvgLineChart
                   labels={d.daily.map((pt) => formatDate(pt.day))}
-                  datasets={[{ label: "Tồn kho", data: d.daily.map((pt) => pt.ending), color: "#0088ff" }]}
+                  datasets={[{ label: "Biến động luỹ kế", data: cumulativeNet(d.daily), color: "#0088ff" }]}
                   height={180}
                 />
               </div>

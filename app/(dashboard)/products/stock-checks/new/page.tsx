@@ -76,7 +76,8 @@ export default function NewStockCheckPage() {
   const [code, setCode] = useState("KTH00001");
   const [codeLoading, setCodeLoading] = useState(true);
   const [branch, setBranch] = useState("Chi nhánh mặc định");
-  const [staff, setStaff] = useState("NA");
+  const [staff, setStaff] = useState("");
+  const [staffOptions, setStaffOptions] = useState<{ id: string; full_name: string }[]>([]);
   const [note, setNote] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
@@ -85,11 +86,21 @@ export default function NewStockCheckPage() {
   const [stockLoading, setStockLoading] = useState(true);
   const [items, setItems] = useState<DraftItem[]>([]);
   const [productQuery, setProductQuery] = useState("");
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<TabKey>("all");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const productBoxRef = useRef<HTMLDivElement | null>(null);
+  const productInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    fetch("/api/staff")
+      .then((r) => r.json())
+      .then((d) => setStaffOptions(Array.isArray(d?.staff) ? d.staff : []))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,24 +122,11 @@ export default function NewStockCheckPage() {
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        if (Array.isArray(data)) {
-          setSystemStock(data);
-          // Auto-fill tất cả sản phẩm với tồn thực tế = tồn hệ thống (mặc định chưa lệch)
-          setItems(
-            data.map((row, idx) => ({
-              rowKey: `sys-${row.product_id}-${idx}`,
-              product_id: row.product_id,
-              sku: row.sku,
-              product_name: row.product_name,
-              unit: row.unit,
-              image_url: row.image_url,
-              system_quantity: Number(row.system_quantity) || 0,
-              actual_quantity: Number(row.system_quantity) || 0,
-              variance_reason: "",
-              note: ""
-            }))
-          );
-        }
+        // Không auto-fill toàn bộ sản phẩm vào phiếu — để trống, người dùng tự
+        // tìm/chọn sản phẩm muốn kiểm (xem ô tìm kiếm bên dưới). Trước đây auto-fill
+        // hết khiến ô tìm kiếm luôn trả về rỗng (mọi sản phẩm đã "có sẵn" trong
+        // phiếu) nên không thể chọn thêm được.
+        if (Array.isArray(data)) setSystemStock(data);
       })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : "Lỗi mạng."))
       .finally(() => !cancelled && setStockLoading(false));
@@ -141,6 +139,8 @@ export default function NewStockCheckPage() {
     function handleClickOutside(event: MouseEvent) {
       if (productBoxRef.current && !productBoxRef.current.contains(event.target as Node)) {
         setProductQuery("");
+        setMultiSelect(false);
+        setMultiSelected(new Set());
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -172,17 +172,21 @@ export default function NewStockCheckPage() {
 
   const productResults = useMemo(() => {
     const q = productQuery.trim().toLowerCase();
-    if (!q) return [];
-    return systemStock
+    const available = systemStock.filter(
+      (row) => !items.some((it) => it.product_id === row.product_id)
+    );
+    // Chế độ chọn nhiều: cho phép duyệt cả khi chưa gõ gì (tối đa 30 dòng) để
+    // "thêm nhanh" nhiều sản phẩm cùng lúc. Chế độ thường: bắt buộc gõ tìm kiếm.
+    if (!q) return multiSelect ? available.slice(0, 30) : [];
+    return available
       .filter(
         (row) =>
-          !items.some((it) => it.product_id === row.product_id) &&
-          (row.product_name.toLowerCase().includes(q) ||
-            row.sku.toLowerCase().includes(q) ||
-            (row.unit ?? "").toLowerCase().includes(q))
+          row.product_name.toLowerCase().includes(q) ||
+          row.sku.toLowerCase().includes(q) ||
+          (row.unit ?? "").toLowerCase().includes(q)
       )
-      .slice(0, 10);
-  }, [productQuery, systemStock, items]);
+      .slice(0, multiSelect ? 30 : 10);
+  }, [productQuery, systemStock, items, multiSelect]);
 
   function updateItem(key: string, patch: Partial<DraftItem>) {
     setItems((prev) => prev.map((it) => (it.rowKey === key ? { ...it, ...patch } : it)));
@@ -192,22 +196,55 @@ export default function NewStockCheckPage() {
     setItems((prev) => prev.filter((it) => it.rowKey !== key));
   }
 
+  function rowToDraftItem(row: SystemStockRow): DraftItem {
+    return {
+      rowKey: `add-${row.product_id}-${Math.random().toString(36).slice(2, 7)}`,
+      product_id: row.product_id,
+      sku: row.sku,
+      product_name: row.product_name,
+      unit: row.unit,
+      image_url: row.image_url,
+      system_quantity: Number(row.system_quantity) || 0,
+      actual_quantity: 0,
+      variance_reason: "",
+      note: ""
+    };
+  }
+
   function addProductToCheck(row: SystemStockRow) {
-    setItems((prev) => [
-      ...prev,
-      {
-        rowKey: `add-${row.product_id}-${Math.random().toString(36).slice(2, 7)}`,
-        product_id: row.product_id,
-        sku: row.sku,
-        product_name: row.product_name,
-        unit: row.unit,
-        image_url: row.image_url,
-        system_quantity: Number(row.system_quantity) || 0,
-        actual_quantity: 0,
-        variance_reason: "",
-        note: ""
-      }
-    ]);
+    setItems((prev) => [...prev, rowToDraftItem(row)]);
+    setProductQuery("");
+  }
+
+  function openMultiSelect() {
+    setMultiSelect(true);
+    setMultiSelected(new Set());
+    productInputRef.current?.focus();
+  }
+
+  function toggleMultiSelected(productId: string) {
+    setMultiSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllResults() {
+    setMultiSelected((prev) => {
+      if (productResults.every((r) => prev.has(r.product_id))) return new Set();
+      return new Set(productResults.map((r) => r.product_id));
+    });
+  }
+
+  function commitMultiSelect() {
+    const rows = systemStock.filter((r) => multiSelected.has(r.product_id));
+    if (rows.length > 0) {
+      setItems((prev) => [...prev, ...rows.map(rowToDraftItem)]);
+    }
+    setMultiSelect(false);
+    setMultiSelected(new Set());
     setProductQuery("");
   }
 
@@ -342,9 +379,10 @@ export default function NewStockCheckPage() {
                     onChange={(e) => setStaff(e.target.value)}
                     className="w-full border-slate-300 rounded text-sm py-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option>NA</option>
-                    <option>PHAN VĂN VŨ</option>
-                    <option>Khác</option>
+                    <option value="">-- Chọn nhân viên --</option>
+                    {staffOptions.map((s) => (
+                      <option key={s.id} value={s.full_name}>{s.full_name}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -456,6 +494,7 @@ export default function NewStockCheckPage() {
                 <Search className="w-4 h-4" />
               </span>
               <input
+                ref={productInputRef}
                 value={productQuery}
                 onChange={(e) => setProductQuery(e.target.value)}
                 placeholder="Tìm theo tên, mã SKU, hoặc quét mã Barcode...(F3)"
@@ -463,29 +502,79 @@ export default function NewStockCheckPage() {
               />
               <button
                 type="button"
-                onClick={() => setProductQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1 bg-slate-100 text-[12px] border border-slate-300 rounded text-slate-600 hover:bg-slate-200"
+                onClick={() => (multiSelect ? setMultiSelect(false) : openMultiSelect())}
+                className={`absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1 text-[12px] border rounded ${
+                  multiSelect
+                    ? "bg-blue-600 border-blue-600 text-white"
+                    : "bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200"
+                }`}
               >
-                Chọn nhiều
+                {multiSelect ? `Đang chọn (${multiSelected.size})` : "Chọn nhiều"}
               </button>
-              {productResults.length > 0 ? (
-                <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded shadow-lg z-20 max-h-60 overflow-y-auto">
-                  {productResults.map((p) => (
-                    <button
-                      key={p.product_id}
-                      onClick={() => addProductToCheck(p)}
-                      className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between"
-                    >
-                      <div>
-                        <div className="text-sm font-medium text-slate-800">{p.product_name}</div>
-                        <div className="text-xs text-slate-500">
-                          SKU: {p.sku || "—"}
-                          {p.unit ? ` · ${p.unit}` : ""} · Tồn: {formatNumber(p.system_quantity)}
-                        </div>
-                      </div>
-                      <Plus className="w-4 h-4 text-slate-400" />
-                    </button>
-                  ))}
+              {multiSelect || productResults.length > 0 ? (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded shadow-lg z-20 max-h-72 overflow-y-auto">
+                  {multiSelect ? (
+                    <div className="sticky top-0 flex items-center justify-between gap-2 border-b bg-slate-50 px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={toggleSelectAllResults}
+                        disabled={productResults.length === 0}
+                        className="text-xs font-medium text-blue-600 hover:underline disabled:opacity-40"
+                      >
+                        {productResults.length > 0 && productResults.every((r) => multiSelected.has(r.product_id))
+                          ? "Bỏ chọn tất cả"
+                          : "Chọn tất cả"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={commitMultiSelect}
+                        disabled={multiSelected.size === 0}
+                        className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 disabled:opacity-40"
+                      >
+                        Thêm {multiSelected.size > 0 ? multiSelected.size : ""} sản phẩm
+                      </button>
+                    </div>
+                  ) : null}
+                  {productResults.length === 0 ? (
+                    <div className="px-3 py-6 text-center text-xs text-slate-500">
+                      Không có sản phẩm nào để thêm (đã có trong phiếu hoặc không khớp tìm kiếm).
+                    </div>
+                  ) : (
+                    productResults.map((p) => {
+                      const checked = multiSelected.has(p.product_id);
+                      return (
+                        <button
+                          key={p.product_id}
+                          type="button"
+                          onClick={() =>
+                            multiSelect ? toggleMultiSelected(p.product_id) : addProductToCheck(p)
+                          }
+                          className={`w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                            checked ? "bg-blue-50" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            {multiSelect ? (
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                readOnly
+                                className="pointer-events-none"
+                              />
+                            ) : null}
+                            <div>
+                              <div className="text-sm font-medium text-slate-800">{p.product_name}</div>
+                              <div className="text-xs text-slate-500">
+                                SKU: {p.sku || "—"}
+                                {p.unit ? ` · ${p.unit}` : ""} · Tồn: {formatNumber(p.system_quantity)}
+                              </div>
+                            </div>
+                          </div>
+                          {!multiSelect ? <Plus className="w-4 h-4 text-slate-400" /> : null}
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               ) : null}
             </div>
@@ -498,7 +587,7 @@ export default function NewStockCheckPage() {
               </button>
             </div>
             <button
-              onClick={() => setProductQuery("")}
+              onClick={openMultiSelect}
               className="px-5 py-2 border border-blue-600 text-blue-600 rounded text-sm font-medium hover:bg-blue-50"
             >
               Thêm nhanh sản phẩm

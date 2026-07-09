@@ -44,7 +44,8 @@ export async function GET(request: Request) {
         select
           date_trunc('day', gr.received_at)::date as day,
           count(distinct gr.id) as receipt_count,
-          coalesce(sum(gri.received_qty * gri.unit_cost), 0)::numeric as total_amount
+          coalesce(sum(gri.received_qty * gri.unit_cost), 0)::numeric as total_amount,
+          coalesce(sum(gri.received_qty), 0)::numeric as total_qty
         from goods_receipts gr
         left join goods_receipt_items gri on gri.goods_receipt_id = gr.id
         ${whereSQL}
@@ -53,7 +54,14 @@ export async function GET(request: Request) {
         limit 90
       `, params);
 
-      return NextResponse.json({ daily: result.rows.map((r) => ({ day: r.day, receipt_count: num(r.receipt_count), total_amount: num(r.total_amount) })) });
+      return NextResponse.json({
+        daily: result.rows.map((r) => ({
+          day: r.day,
+          receipt_count: num(r.receipt_count),
+          total_amount: num(r.total_amount),
+          total_qty: num(r.total_qty)
+        }))
+      });
     }
 
     // ── Group: by supplier ───────────────────────────────────────────────────
@@ -246,6 +254,40 @@ export async function GET(request: Request) {
         receipt_count: num(r.receipt_count),
         total_amount: num(r.total_amount),
         total_paid: num(r.total_paid),
+        unpaid: num(r.total_amount) - num(r.total_paid),
+      })) });
+    }
+
+    // ── Group: payment by staff ──────────────────────────────────────────────
+    // Trước đây group_by này được NHẮC TỚI trong comment ở đầu file nhưng
+    // chưa từng được cài — /reports/purchases/payment-by-staff phải rơi về
+    // order_count = Math.round(1 + Math.random()*20) hoặc danh sách viết cứng.
+    if (groupBy === "payment_staff") {
+      const where: string[] = [];
+      const params: (string | number)[] = [];
+      let p = 1;
+      if (dateFrom) { where.push(`gr.received_at >= $${p++}`); params.push(dateFrom); }
+      if (dateTo) { where.push(`gr.received_at <= $${p++}::date + interval '1 day'`); params.push(dateTo); }
+      const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+      const result = await pool.query(`
+        select
+          coalesce(nullif(gr.staff, ''), 'Không xác định') as name,
+          count(distinct gr.id) as order_count,
+          sum(gr.total_cost)::numeric as total_amount,
+          sum(gr.paid)::numeric as total_paid
+        from goods_receipts gr
+        ${whereSQL}
+        group by name
+        order by total_amount desc
+      `, params);
+
+      return NextResponse.json({ staff: result.rows.map((r) => ({
+        name: str(r.name),
+        role: "Nhân viên",
+        order_count: num(r.order_count),
+        total: num(r.total_amount),
+        paid: num(r.total_paid),
         unpaid: num(r.total_amount) - num(r.total_paid),
       })) });
     }

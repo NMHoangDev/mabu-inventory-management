@@ -16,6 +16,7 @@ import {
   MessageCircle,
   Package,
   Search,
+  Send,
   ShoppingCart,
   Settings,
   Table2,
@@ -25,7 +26,8 @@ import {
   X,
   Wallet,
   Sparkles,
-  Zap
+  Zap,
+  Store
 } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
 import StaffBadge from "@/components/layouts/StaffBadge";
@@ -66,6 +68,9 @@ const navItems = [
     key: "zalo-notify", path: "/thong-bao-zalo", label: "Thông báo Zalo", group: "Vận hành", icon: MessageCircle
   },
   {
+    key: "zalo-forward-rules", path: "/zalo/forward-rules", label: "Chuyển tiếp Zalo", group: "Vận hành", icon: Send
+  },
+  {
     key: "zalo-accounts", path: "/zalo/accounts", label: "Quản lý TK Zalo", group: "Hệ thống", icon: UserCog
   },
   {
@@ -104,6 +109,7 @@ const navItems = [
     ]
   },
   { key: "automations", path: "/automations", label: "Tự động hóa", group: "Vận hành", icon: Zap },
+  { key: "storefront-settings", path: "/settings/storefront", label: "Website bán hàng", group: "Vận hành", icon: Store },
   { key: "assistant", path: "/assistant", label: "Trợ lý AI", group: "Hệ thống", icon: Sparkles },
   { key: "settings", path: "/settings", label: "Cài đặt", group: "Hệ thống", icon: Settings },
   { key: "blueprint", path: "/blueprint", label: "Design Blueprint", group: "Hệ thống", icon: FileText }

@@ -109,86 +109,29 @@ function formatFullDate(iso: string): string {
   }
 }
 
-function calcCOGS(revenue: number): number {
-  return Math.round(revenue * 0.45);
-}
-
-function calcExpenses(revenue: number): number {
-  return Math.round(revenue * 0.25);
-}
-
-function buildDailyData(dates: string[], revenue: number): DailyPoint[] {
-  const count = dates.length;
-  if (count === 0) return [];
-  const daily = Math.round(revenue / count);
-  return dates.map((d) => ({
-    date: d,
-    revenue: daily + Math.round((Math.random() - 0.4) * daily * 0.4),
-    cogs: Math.round((daily + Math.round((Math.random() - 0.4) * daily * 0.4)) * 0.45),
-    expenses: Math.round((daily + Math.round((Math.random() - 0.4) * daily * 0.4)) * 0.25)
-  }));
-}
-
-function buildTopProducts(): TopProduct[] {
-  return [
-    { product_name: "Sản phẩm A", quantity_sold: 120, revenue: 48000000 },
-    { product_name: "Sản phẩm B", quantity_sold: 85, revenue: 34000000 },
-    { product_name: "Sản phẩm C", quantity_sold: 60, revenue: 24000000 },
-    { product_name: "Sản phẩm D", quantity_sold: 45, revenue: 18000000 },
-    { product_name: "Sản phẩm E", quantity_sold: 30, revenue: 12000000 },
-  ];
-}
-
 async function fetchProfitLossData(dateRange: DateRange): Promise<ProfitLossData> {
-  const params = new URLSearchParams({
-    date_from: dateRange.from,
-    date_to: dateRange.to,
-    page: "1",
-    page_size: "100"
-  });
-  const res = await fetch(`/api/orders?${params}`);
-  const data = await res.json();
+  const params = new URLSearchParams({ date_from: dateRange.from, date_to: dateRange.to });
+  const res = await fetch(`/api/reports/profit-loss?${params}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Không tải được báo cáo lãi lỗ.");
+  return res.json();
+}
 
-  const orders = data.orders ?? [];
-  const revenue = orders.reduce((s: number, o: any) => s + (o.total ?? 0), 0);
-  const order_count = orders.length;
-  const avg_order_value = order_count > 0 ? Math.round(revenue / order_count) : 0;
-  const cogs = calcCOGS(revenue);
-  const gross_profit = revenue - cogs;
-  const gross_margin = revenue > 0 ? (gross_profit / revenue) * 100 : 0;
-  const expenses = calcExpenses(revenue);
-  const net_profit = gross_profit - expenses;
-  const net_margin = revenue > 0 ? (net_profit / revenue) * 100 : 0;
+// So sánh với kỳ liền trước (cùng số ngày) để có % tăng/giảm THẬT — trước
+// đây 3 badge "+12.5%"/"+5.2%"/"+8.3%" luôn hiển thị cố định bất kể dữ liệu.
+function previousPeriod(range: DateRange): DateRange {
+  const from = new Date(range.from);
+  const to = new Date(range.to);
+  const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1);
+  const prevTo = new Date(from);
+  prevTo.setDate(prevTo.getDate() - 1);
+  const prevFrom = new Date(prevTo);
+  prevFrom.setDate(prevFrom.getDate() - (days - 1));
+  return { from: prevFrom.toISOString().slice(0, 10), to: prevTo.toISOString().slice(0, 10) };
+}
 
-  const dates: string[] = [];
-  const d0 = new Date(dateRange.from);
-  const d1 = new Date(dateRange.to);
-  for (let d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
-    dates.push(new Date(d).toISOString().slice(0, 10));
-  }
-  const daily_data = buildDailyData(dates, revenue);
-
-  const byMethod: Record<string, { amount: number; count: number }> = {};
-  for (const o of orders) {
-    const method = o.payment_status ?? "unpaid";
-    if (!byMethod[method]) byMethod[method] = { amount: 0, count: 0 };
-    byMethod[method].amount += o.total ?? 0;
-    byMethod[method].count += 1;
-  }
-  const by_payment_method = Object.entries(byMethod).map(([method, v]) => ({
-    method,
-    amount: v.amount,
-    count: v.count
-  }));
-
-  const top_products = buildTopProducts();
-
-  return {
-    revenue, cogs, gross_profit, gross_margin,
-    expenses, net_profit, net_margin,
-    order_count, avg_order_value,
-    daily_data, by_payment_method, top_products
-  };
+function pctChange(cur: number, prev: number): number | null {
+  if (prev === 0) return cur > 0 ? null : 0;
+  return ((cur - prev) / Math.abs(prev)) * 100;
 }
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -278,6 +221,7 @@ export default function ProfitLossPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [data, setData] = useState<ProfitLossData | null>(null);
+  const [prevData, setPrevData] = useState<ProfitLossData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -286,10 +230,15 @@ export default function ProfitLossPage() {
       const range = period === "custom" && dateFrom && dateTo
         ? { from: dateFrom, to: dateTo }
         : getDateRange(period);
-      const result = await fetchProfitLossData(range);
+      const [result, prevResult] = await Promise.all([
+        fetchProfitLossData(range),
+        fetchProfitLossData(previousPeriod(range)).catch(() => null)
+      ]);
       setData(result);
+      setPrevData(prevResult);
     } catch {
       setData(null);
+      setPrevData(null);
     } finally {
       setLoading(false);
     }
@@ -300,6 +249,9 @@ export default function ProfitLossPage() {
   const d = data;
   const grossMargin = d ? d.gross_margin : 0;
   const netMargin = d ? d.net_margin : 0;
+  const revenueTrend = d && prevData ? pctChange(d.revenue, prevData.revenue) : null;
+  const grossProfitTrend = d && prevData ? pctChange(d.gross_profit, prevData.gross_profit) : null;
+  const netProfitTrend = d && prevData ? pctChange(d.net_profit, prevData.net_profit) : null;
 
   return (
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
@@ -368,8 +320,8 @@ export default function ProfitLossPage() {
                 value={fmtMoney.format(d.revenue)}
                 sub={`${d.order_count} đơn`}
                 color="blue"
-                trend={d.revenue > 0 ? "+12.5%" : undefined}
-                trendUp
+                trend={revenueTrend !== null ? `${revenueTrend >= 0 ? "+" : ""}${revenueTrend.toFixed(1)}%` : undefined}
+                trendUp={revenueTrend !== null && revenueTrend >= 0}
               />
               <SummaryCard
                 label="Giá vốn (COGS)"
@@ -382,8 +334,8 @@ export default function ProfitLossPage() {
                 value={fmtMoney.format(d.gross_profit)}
                 sub={`${grossMargin.toFixed(1)}% margin`}
                 color="green"
-                trend={d.gross_profit > 0 ? "+5.2%" : undefined}
-                trendUp
+                trend={grossProfitTrend !== null ? `${grossProfitTrend >= 0 ? "+" : ""}${grossProfitTrend.toFixed(1)}%` : undefined}
+                trendUp={grossProfitTrend !== null && grossProfitTrend >= 0}
               />
               <SummaryCard
                 label="Chi phí"
@@ -396,8 +348,8 @@ export default function ProfitLossPage() {
                 value={fmtMoney.format(d.net_profit)}
                 sub={`${netMargin.toFixed(1)}% margin`}
                 color={d.net_profit >= 0 ? "green" : "red"}
-                trend={d.net_profit >= 0 ? "+8.3%" : undefined}
-                trendUp={d.net_profit >= 0}
+                trend={netProfitTrend !== null ? `${netProfitTrend >= 0 ? "+" : ""}${netProfitTrend.toFixed(1)}%` : undefined}
+                trendUp={netProfitTrend !== null && netProfitTrend >= 0}
               />
             </div>
 

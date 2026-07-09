@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Loader2,
   Check,
+  Copy,
   Tag as TagIcon,
   Sparkles,
   DollarSign,
@@ -75,6 +76,14 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
+  const [copiedSku, setCopiedSku] = useState<string | null>(null);
+
+  function copySku(sku: string) {
+    navigator.clipboard.writeText(sku).then(() => {
+      setCopiedSku(sku);
+      setTimeout(() => setCopiedSku((cur) => (cur === sku ? null : cur)), 1500);
+    });
+  }
 
   // Filters for standard products
   const [searchQuery, setSearchQuery] = useState("");
@@ -1268,7 +1277,25 @@ export default function ProductsPage() {
                               >
                                 {p.name}
                               </button>
-                              <span className="text-xs text-slate-400 font-mono">SKU: {p.sku || "—"}</span>
+                              <span className="inline-flex items-center gap-1 text-xs text-slate-400 font-mono">
+                                SKU: {p.sku || "—"}
+                                {p.sku && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      copySku(p.sku);
+                                    }}
+                                    title="Sao chép mã SKU"
+                                    className="text-slate-300 hover:text-primary"
+                                  >
+                                    {copiedSku === p.sku ? (
+                                      <Check className="h-3 w-3 text-green-500" />
+                                    ) : (
+                                      <Copy className="h-3 w-3" />
+                                    )}
+                                  </button>
+                                )}
+                              </span>
                             </div>
                           </div>
                         </td>

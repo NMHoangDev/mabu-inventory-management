@@ -11,10 +11,14 @@ import {
   RotateCcw,
   AlertCircle,
   ExternalLink,
-  Wallet
+  Wallet,
+  Banknote,
+  CreditCard
 } from "lucide-react";
 
 type ReceiptStatus = "pending" | "in_progress" | "completed" | "cancelled";
+type PaymentStatus = "unpaid" | "partial" | "paid";
+type PaymentMethod = "cash" | "bank_transfer" | "card";
 
 interface GoodsReceiptItem {
   id: string;
@@ -47,6 +51,7 @@ interface GoodsReceipt {
   note: string;
   receipt_status: ReceiptStatus;
   order_status: ReceiptStatus;
+  payment_status: PaymentStatus;
   subtotal: number;
   discount: number;
   tax: number;
@@ -60,8 +65,22 @@ interface GoodsReceipt {
 const STATUS_META: Record<ReceiptStatus, { label: string; className: string }> = {
   pending: { label: "Chờ nhận hàng", className: "bg-slate-100 text-slate-600" },
   in_progress: { label: "Đang nhập hàng", className: "bg-orange-100 text-orange-700" },
-  completed: { label: "Hoàn thành", className: "bg-emerald-100 text-emerald-700" },
+  completed: { label: "Đã nhập hàng", className: "bg-emerald-100 text-emerald-700" },
   cancelled: { label: "Đã hủy", className: "bg-red-100 text-red-700" }
+};
+
+// Trạng thái thanh toán cho NCC — TÁCH RIÊNG khỏi STATUS_META (trạng thái
+// nhập hàng/tồn kho ở trên). Xem lib/inventory/receipts.ts updateGoodsReceiptPayment.
+const PAYMENT_META: Record<PaymentStatus, { label: string; className: string }> = {
+  unpaid: { label: "Chưa thanh toán", className: "bg-slate-100 text-slate-600" },
+  partial: { label: "Thanh toán 1 phần", className: "bg-amber-100 text-amber-700" },
+  paid: { label: "Đã thanh toán", className: "bg-emerald-100 text-emerald-700" }
+};
+
+const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Tiền mặt",
+  bank_transfer: "Chuyển khoản",
+  card: "Quẹt thẻ"
 };
 
 const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
@@ -145,11 +164,48 @@ export default function GoodsReceiptDetailPage() {
         kind: "ok",
         message:
           next === "completed"
-            ? "Thanh toán hoàn thành. Đã cộng tồn kho."
+            ? "Đã xác nhận nhập hàng. Đã cộng tồn kho."
             : next === "cancelled"
               ? "Đã hủy đơn nhập hàng."
               : `Đã chuyển trạng thái: ${next}`
       });
+      fetchData();
+    } catch (e) {
+      setFlash({ kind: "error", message: e instanceof Error ? e.message : "Lỗi không xác định." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── Thanh toán cho NCC — TÁCH BIỆT hoàn toàn khỏi trạng thái nhập hàng/tồn
+  // kho ở trên. Xem app/api/goods-receipts/[id]/payment/route.ts.
+  const [showPayForm, setShowPayForm] = useState(false);
+  const [payAmount, setPayAmount] = useState(0);
+  const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+
+  const openPayForm = () => {
+    if (!gr) return;
+    setPayAmount(Math.max(0, gr.total_cost - gr.paid));
+    setPayMethod((gr.payment_method as PaymentMethod) || "cash");
+    setShowPayForm(true);
+  };
+
+  const submitPayment = async () => {
+    if (!gr || busy) return;
+    setBusy(true);
+    setFlash(null);
+    try {
+      const res = await fetch(`/api/goods-receipts/${encodeURIComponent(gr.id)}/payment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paid: payAmount, paymentMethod: payMethod })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.success) {
+        throw new Error(body?.error ?? body?.message ?? "Không cập nhật được thanh toán.");
+      }
+      setFlash({ kind: "ok", message: body.message ?? "Đã cập nhật thanh toán." });
+      setShowPayForm(false);
       fetchData();
     } catch (e) {
       setFlash({ kind: "error", message: e instanceof Error ? e.message : "Lỗi không xác định." });
@@ -179,7 +235,7 @@ export default function GoodsReceiptDetailPage() {
   }
 
   const statusMeta = STATUS_META[gr.receipt_status] ?? STATUS_META.pending;
-  const orderStatusMeta = STATUS_META[gr.order_status] ?? STATUS_META.pending;
+  const paymentStatusMeta = PAYMENT_META[gr.payment_status] ?? PAYMENT_META.unpaid;
   const stockAddedCount = gr.items.filter((it) => it.stock_added_at).length;
   const allStockAdded = gr.items.length > 0 && stockAddedCount === gr.items.length;
 
@@ -228,10 +284,10 @@ export default function GoodsReceiptDetailPage() {
             }
           />
           <Field
-            label="Trạng thái nhập"
+            label="Trạng thái thanh toán"
             value={
-              <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${orderStatusMeta.className}`}>
-                {orderStatusMeta.label}
+              <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${paymentStatusMeta.className}`}>
+                {paymentStatusMeta.label}
               </span>
             }
           />
@@ -257,7 +313,10 @@ export default function GoodsReceiptDetailPage() {
           <Field label="Công nợ" value={fmtMoney.format(gr.total_cost)} suffix=" đ" highlight />
           <Field label="Tổng đơn nhập" value={fmtMoney.format(totalCost)} suffix=" đ" highlight />
           <Field label="Trả hàng" value="0" suffix=" đ" />
-          <Field label="Đã thanh toán" value={fmtMoney.format(gr.paid)} suffix=" đ" />
+          <Field
+            label="Đã thanh toán"
+            value={`${fmtMoney.format(gr.paid)} đ${gr.paid > 0 ? ` (${PAYMENT_METHOD_LABELS[(gr.payment_method as PaymentMethod) || "cash"] ?? gr.payment_method})` : ""}`}
+          />
           <Field
             label="Còn lại"
             value={fmtMoney.format(Math.max(0, gr.total_cost - gr.paid))}
@@ -366,6 +425,68 @@ export default function GoodsReceiptDetailPage() {
         )}
       </div>
 
+      {/* Thanh toán cho NCC — form chọn phương thức, tách biệt hoàn toàn khỏi
+          trạng thái nhập hàng/tồn kho ở action bar bên dưới. */}
+      {showPayForm ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800">Thanh toán cho nhà cung cấp</h3>
+            <button
+              type="button"
+              onClick={() => setShowPayForm(false)}
+              className="text-xs text-slate-500 hover:text-slate-700"
+            >
+              Đóng
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-end gap-4">
+            <div>
+              <label className="mb-1 block text-xs text-slate-500">Số tiền thanh toán</label>
+              <input
+                type="number"
+                min={0}
+                step={1000}
+                value={payAmount || ""}
+                onChange={(e) => setPayAmount(Math.max(0, Number(e.target.value) || 0))}
+                className="w-44 rounded border border-slate-300 px-3 py-1.5 text-right text-sm"
+              />
+              <div className="mt-1 text-[11px] text-slate-500">
+                Còn phải trả: {fmtMoney.format(Math.max(0, gr.total_cost - gr.paid))} đ
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {(["cash", "bank_transfer", "card"] as PaymentMethod[]).map((m) => (
+                <PayMethodButton
+                  key={m}
+                  active={payMethod === m}
+                  onClick={() => setPayMethod(m)}
+                  icon={
+                    m === "cash" ? (
+                      <Banknote className="h-4 w-4" />
+                    ) : m === "bank_transfer" ? (
+                      <Wallet className="h-4 w-4" />
+                    ) : (
+                      <CreditCard className="h-4 w-4" />
+                    )
+                  }
+                >
+                  {PAYMENT_METHOD_LABELS[m]}
+                </PayMethodButton>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={submitPayment}
+              disabled={busy || payAmount <= 0}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Xác nhận thanh toán
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Action bar */}
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
         <button
@@ -389,33 +510,74 @@ export default function GoodsReceiptDetailPage() {
         >
           <Printer className="h-4 w-4" /> In
         </button>
-        {gr.receipt_status !== "completed" ? (
-          <button
-            type="button"
-            onClick={() => transitionStatus("completed")}
-            disabled={busy}
-            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
-            Thanh toán hoàn thành
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() =>
-              transitionStatus(
-                "pending",
-                "Chuyển về Chờ nhận hàng sẽ hoàn lại tồn kho đã cộng. Tiếp tục?"
-              )
-            }
-            disabled={busy}
-            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200 bg-white px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-          >
-            <RotateCcw className="h-4 w-4" /> Hoàn lại "Chờ nhận hàng"
-          </button>
-        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {gr.payment_status !== "paid" ? (
+            <button
+              type="button"
+              onClick={openPayForm}
+              disabled={busy}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+            >
+              <Wallet className="h-4 w-4" /> Thanh toán
+            </button>
+          ) : null}
+
+          {gr.receipt_status !== "completed" ? (
+            <button
+              type="button"
+              onClick={() => transitionStatus("completed")}
+              disabled={busy}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Xác nhận đã nhập hàng
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                transitionStatus(
+                  "pending",
+                  "Chuyển về Chờ nhận hàng sẽ hoàn lại tồn kho đã cộng. Tiếp tục?"
+                )
+              }
+              disabled={busy}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200 bg-white px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" /> Hoàn lại "Chờ nhận hàng"
+            </button>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function PayMethodButton({
+  active,
+  onClick,
+  icon,
+  children
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors ${
+        active
+          ? "border-blue-500 bg-blue-50 text-blue-700"
+          : "border-slate-300 bg-white text-slate-600 hover:border-blue-400 hover:text-blue-600"
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }
 

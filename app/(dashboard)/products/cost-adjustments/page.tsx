@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { downloadCsv } from "@/lib/shared/csv-export";
 import {
   Loader2,
   Plus,
@@ -86,9 +87,6 @@ export default function CostAdjustmentsListPage() {
         <h1 className="text-lg font-semibold text-slate-800">Điều chỉnh giá vốn</h1>
         <div className="flex items-center gap-6 text-sm text-slate-600">
           <button className="flex items-center gap-1 hover:text-blue-600">
-            <FileText className="w-4 h-4" /> Tư vấn thuế
-          </button>
-          <button className="flex items-center gap-1 hover:text-blue-600">
             <FileText className="w-4 h-4" /> Trợ giúp
           </button>
           <div className="flex items-center gap-2">
@@ -101,7 +99,19 @@ export default function CostAdjustmentsListPage() {
 
       <div className="p-4 bg-white border-b flex items-center justify-between flex-shrink-0">
         <div className="flex gap-4">
-          <button className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600">
+          <button
+            onClick={() =>
+              downloadCsv(`dieu-chinh-gia-von-${Date.now()}.csv`, filtered, [
+                { label: "Mã phiếu", value: (r) => r.code },
+                { label: "Ngày tạo", value: (r) => formatDate(r.created_at) },
+                { label: "Chi nhánh", value: (r) => r.branch || "Chi nhánh mặc định" },
+                { label: "Người tạo", value: (r) => r.staff },
+                { label: "Số sản phẩm", value: (r) => r.total_items },
+                { label: "Trạng thái", value: (r) => STATUS_META[r.status]?.label ?? r.status },
+              ])
+            }
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600"
+          >
             <Download className="w-4 h-4" /> Xuất file
           </button>
         </div>

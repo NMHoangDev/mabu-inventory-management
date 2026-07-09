@@ -6,6 +6,7 @@ import { fixMojibakeText } from "../shared/format";
 import type { InvoiceDocument } from "../shared/schema";
 import { markDuplicateDocument, readStore, upsertDocumentWithRows } from "./repository";
 import { scanUploadedFile } from "./ocr";
+import { runTrigger } from "../automations/engine";
 
 type ScanJobStatus = "queued" | "running" | "completed" | "partial" | "failed";
 type ScanJobFileStatus = "queued" | "duplicate" | "restore" | "retry" | "scanning" | "scanned" | "error";
@@ -193,6 +194,12 @@ async function processJobFile(jobId: string, file: ScanJobFile) {
       error: document.status === "error" ? document.warnings.join(" ") : "",
       finishedAt: nowIso()
     });
+
+    if (status === "scanned") {
+      runTrigger("invoice.scanned", {
+        invoice: { job_id: jobId, document_id: document.id, file_name: file.fileName, row_count: document.rowCount },
+      }).catch((e) => console.warn("[automations] invoice.scanned failed:", e));
+    }
   } catch (error) {
     await markJobFile(jobId, file.id, {
       status: "error",

@@ -34,6 +34,22 @@ const pickupSchema = z.object({
   is_default: z.boolean().optional(),
 });
 
+// Trước đây trang /shipping/config tab "Cấu hình phí" chỉ tồn tại trong React
+// state — bấm lưu không gửi lên đây (route chỉ nhận general settings), refresh
+// mất hết. fee_rules giờ có cột jsonb thật (shipping_settings.fee_rules, thêm
+// ở SCHEMA_VERSION 20).
+const feeRuleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  carrier: z.string(),
+  from_province: z.string(),
+  to_province: z.string(),
+  base_fee: z.number().min(0),
+  per_kg_fee: z.number().min(0),
+  free_shipping_threshold: z.number().min(0),
+  enabled: z.boolean(),
+});
+
 const updateSchema = z.object({
   weight_source: z.enum(["order", "custom"]).optional(),
   default_weight_g: z.number().min(0).optional(),
@@ -46,6 +62,7 @@ const updateSchema = z.object({
   delivery_warning_days: z.number().int().min(0).max(60).optional(),
   restricted_zones: z.string().optional(),
   pickup_addresses: z.array(pickupSchema).optional(),
+  fee_rules: z.array(feeRuleSchema).optional(),
 });
 
 export async function POST(request: Request) {

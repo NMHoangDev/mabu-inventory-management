@@ -17,37 +17,70 @@ interface SupplierFormData {
 
 interface AddSupplierModalProps {
   onClose: () => void;
-  onCreated: (supplier: { id: string; name: string; phone: string; code: string }) => void;
+  onSaved: (supplier: { id: string; name: string; phone: string; code: string }) => void;
+  /** Truyền id để mở modal ở chế độ sửa — modal tự fetch chi tiết nhà cung cấp. */
+  supplierId?: string | null;
 }
 
-export function AddSupplierModal({ onClose, onCreated }: AddSupplierModalProps) {
-  const [form, setForm] = useState<SupplierFormData>({
-    name: "",
-    code: "",
-    contact_name: "",
-    phone: "",
-    email: "",
-    tax_code: "",
-    address: "",
-    city: "",
-    note: ""
-  });
+const blankForm: SupplierFormData = {
+  name: "",
+  code: "",
+  contact_name: "",
+  phone: "",
+  email: "",
+  tax_code: "",
+  address: "",
+  city: "",
+  note: ""
+};
+
+export function AddSupplierModal({ onClose, onSaved, supplierId }: AddSupplierModalProps) {
+  const isEdit = !!supplierId;
+  const [form, setForm] = useState<SupplierFormData>(blankForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/suppliers/next-code")
-      .then((r) => r.json())
-      .then((d) => {
-        if (cancelled) return;
-        setForm((f) => ({ ...f, code: d?.code ?? "" }));
-      })
-      .catch(() => undefined)
-      .finally(() => { if (!cancelled) setLoading(false); });
+    async function load() {
+      setLoading(true);
+      if (isEdit && supplierId) {
+        try {
+          const res = await fetch(`/api/suppliers/${supplierId}`);
+          const d = await res.json();
+          if (!cancelled && res.ok) {
+            setForm({
+              name: d.name ?? "",
+              code: d.code ?? "",
+              contact_name: d.contact_name ?? "",
+              phone: d.phone ?? "",
+              email: d.email ?? "",
+              tax_code: d.tax_code ?? "",
+              address: d.address ?? "",
+              city: d.city ?? "",
+              note: d.note ?? ""
+            });
+          } else if (!cancelled) {
+            setError(d?.error ?? "Không tải được thông tin nhà cung cấp.");
+          }
+        } catch (err) {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Không tải được thông tin nhà cung cấp.");
+        }
+      } else {
+        try {
+          const res = await fetch("/api/suppliers/next-code");
+          const d = await res.json();
+          if (!cancelled) setForm((f) => ({ ...f, code: d?.code ?? "" }));
+        } catch {
+          /* giữ code rỗng, user có thể tự nhập */
+        }
+      }
+      if (!cancelled) setLoading(false);
+    }
+    void load();
     return () => { cancelled = true; };
-  }, []);
+  }, [isEdit, supplierId]);
 
   function setField(key: keyof SupplierFormData, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -62,17 +95,19 @@ export function AddSupplierModal({ onClose, onCreated }: AddSupplierModalProps) 
     setError("");
     setSaving(true);
     try {
-      const res = await fetch("/api/suppliers", {
-        method: "POST",
+      const url = isEdit ? `/api/suppliers/${supplierId}` : "/api/suppliers";
+      const method = isEdit ? "PATCH" : "POST";
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form)
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Không tạo được nhà cung cấp.");
-      onCreated({ id: data.id, name: data.name, phone: data.phone ?? "", code: data.code ?? "" });
+      if (!res.ok) throw new Error(data?.error ?? "Không lưu được nhà cung cấp.");
+      onSaved({ id: data.id, name: data.name, phone: data.phone ?? "", code: data.code ?? "" });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Có lỗi khi tạo nhà cung cấp.");
+      setError(err instanceof Error ? err.message : "Có lỗi khi lưu nhà cung cấp.");
     } finally {
       setSaving(false);
     }
@@ -83,7 +118,9 @@ export function AddSupplierModal({ onClose, onCreated }: AddSupplierModalProps) 
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-white rounded shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
-          <h2 className="text-lg font-semibold text-slate-800">Thêm nhà cung cấp</h2>
+          <h2 className="text-lg font-semibold text-slate-800">
+            {isEdit ? "Sửa nhà cung cấp" : "Thêm nhà cung cấp"}
+          </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <X className="w-5 h-5" />
           </button>
@@ -221,7 +258,7 @@ export function AddSupplierModal({ onClose, onCreated }: AddSupplierModalProps) 
               className="px-6 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              {saving ? "Đang lưu..." : "Lưu nhà cung cấp"}
+              {saving ? "Đang lưu..." : isEdit ? "Cập nhật" : "Lưu nhà cung cấp"}
             </button>
           </div>
         </form>

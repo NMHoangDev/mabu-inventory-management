@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Filter, ImageIcon, Loader2, Package, Printer, Search, Settings, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImageIcon, Loader2, Package, Printer, Search, Settings, SlidersHorizontal } from "lucide-react";
 
 type InventoryProduct = {
   id: string;
@@ -142,10 +142,6 @@ export default function ProductInventoryPage() {
             <option value="inactive">Ngừng giao dịch</option>
             <option value="draft">Nháp</option>
           </select>
-          <button className="inline-flex h-10 items-center gap-2 rounded-md border bg-white px-3 text-sm text-slate-600 hover:bg-slate-50" type="button">
-            Bộ lọc khác
-            <Filter className="h-4 w-4" />
-          </button>
           <button className="h-10 rounded-md border border-slate-200 bg-slate-100 px-3 text-sm text-slate-400" disabled type="button">Lưu bộ lọc</button>
         </div>
 
