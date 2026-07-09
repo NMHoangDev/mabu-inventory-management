@@ -1,0 +1,63 @@
+name: Deploy App (Production)
+
+# Deploy len host production timetech.markeeai.com - CHI chay khi bam nut
+# "Run workflow" thu cong trong tab Actions tren GitHub, KHONG tu dong chay
+# khi push/merge vao main. Dung de kiem soat chinh xac khi nao code thuc su
+# len production (repo nay khong co nhanh dev rieng, moi thay doi vao main
+# deu phai duoc chu dong bam deploy sau khi da kiem tra ky).
+#
+# Ha tang thuc te (xem CLAUDE.md muc CI/CD):
+#   - Host: VM Ubuntu 20.04 dung chung voi vai project khac (KHONG dedicated).
+#   - Thu muc code: /home/vanthuong/opt/apps/mabuu/mabu-inventory-management
+#   - Docker: chi co binary `docker-compose` (v2 standalone, KHONG co plugin
+#     `docker compose`). User vanthuong da duoc them vao group `docker` nen
+#     KHONG can sudo cho lenh docker/docker-compose.
+#   - File `.env` da co san tren server (secrets Supabase/Gemini/Bridge) -
+#     workflow nay KHONG duoc tao/ghi de file do, chi doc de kiem tra ton tai.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Nhanh/commit muon deploy (de trong = dung main moi nhat)"
+        required: false
+        default: "main"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, app]
+    defaults:
+      run:
+        working-directory: /home/vanthuong/opt/apps/mabuu/mabu-inventory-management
+    steps:
+      - name: Kiem tra .env da ton tai (khong duoc CI tao/ghi de file nay)
+        run: |
+          if [ ! -f .env ]; then
+            echo "Khong tim thay .env tai $(pwd)/.env - copy tu .env.production.example va dien secret truoc khi deploy." >&2
+            exit 1
+          fi
+
+      - name: Pull code theo ref duoc chon
+        run: |
+          git fetch origin
+          git checkout "${{ github.event.inputs.ref }}"
+          git pull origin "${{ github.event.inputs.ref }}" || true
+
+      - name: Build frontend + zalo-bridge
+        run: docker-compose build frontend zalo-bridge
+
+      - name: Ap dung container moi
+        run: |
+          docker-compose up -d frontend zalo-bridge
+          sleep 5
+          docker-compose restart router
+          docker image prune -f
+
+      - name: Kiem tra healthcheck (frontend + DB qua router)
+        run: |
+          sleep 5
+          curl -sf -o /dev/null http://localhost:8080/api/state || (echo "Frontend/DB khong phan hoi qua router" && exit 1)
+          curl -sf -o /dev/null http://localhost:8080/zalo-bridge/health || echo "Luu y: zalo-bridge/health khong phan hoi 200 - kiem tra lai container zalo-bridge"
+
+      - name: Kiem tra tu ben ngoai (qua domain thuc)
+        run: |
+          curl -sf -o /dev/null https://timetech.markeeai.com/api/state || echo "Luu y: khong goi duoc https://timetech.markeeai.com/api/state tu runner - kiem tra Cloudflare/DNS/SSL rieng, khong tinh la deploy loi neu check noi bo o buoc truoc da qua"

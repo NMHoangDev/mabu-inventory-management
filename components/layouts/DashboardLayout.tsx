@@ -15,6 +15,7 @@ import {
   Menu,
   MessageCircle,
   Package,
+  Receipt,
   Search,
   Send,
   ShoppingCart,
@@ -81,6 +82,7 @@ const navItems = [
       { key: "orders-parse", path: "/orders/parse", label: "Tạo từ AI parse" }
     ]
   },
+  { key: "pos", path: "/pos", label: "Bán hàng (POS)", group: "Vận hành", icon: Receipt },
   {
     key: "shipping", path: "/shipping", label: "Vận chuyển", group: "Vận hành", icon: Truck,
     subItems: [
