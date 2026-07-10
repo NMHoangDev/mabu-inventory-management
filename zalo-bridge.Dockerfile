@@ -1,9 +1,15 @@
 # =============================================================================
-# Zalo Bridge — Express server (Node 20)
+# Zalo Bridge — Express server (Node 22)
 # Bridge nhận cookie từ Chrome Extension và forward message tới InvoiceFlow
 # frontend qua SSE. Cần `sharp` (native) nên dùng đầy đủ build toolchain.
+#
+# Node 22+ bắt buộc: @supabase/realtime-js (dep của @supabase/supabase-js,
+# dùng trong supabaseSync.js) eager-resolve global WebSocket ngay khi
+# createClient() được gọi (kể cả không dùng .channel()/realtime) — Node 20
+# không có global WebSocket nên mọi lần gọi getClient() throw ngay, khiến
+# forward-rules (forwardEngine.js) và persistIncomingMessage luôn fail.
 # =============================================================================
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 # sharp cần python3 + make + g++ cho build prebuilt binary trên alpine.
 # Tuy nhiên với alpine, sharp hiện phân phối prebuilt qua @img/sharp → KHÔNG
@@ -25,7 +31,7 @@ RUN npm ci --omit=dev --no-audit --no-fund \
 # =============================================================================
 # Runtime stage
 # =============================================================================
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 ENV NODE_ENV=production \
     PORT=3001 \
