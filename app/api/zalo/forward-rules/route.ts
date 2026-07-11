@@ -194,7 +194,18 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json", Prefer: "return=representation" },
       body: JSON.stringify(targetRows)
     });
-    const createdTargets = targetsRes.ok ? await targetsRes.json() : [];
+    if (!targetsRes.ok) {
+      // Rollback rule — nếu không, rule mồ côi (is_enabled=true, 0 target) sẽ
+      // âm thầm không forward gì (view v_zalo_forward_rules_active INNER JOIN
+      // targets) trong khi UI vẫn báo "tạo thành công".
+      const text = await targetsRes.text();
+      await sb(`/zalo_forward_rules?id=eq.${rule.id}`, { method: "DELETE" });
+      return NextResponse.json(
+        { error: `Tạo nhóm đích thất bại, đã hủy rule: ${text || targetsRes.status}` },
+        { status: 500 }
+      );
+    }
+    const createdTargets = await targetsRes.json();
 
     return NextResponse.json({ rule: { ...rule, targets: createdTargets } });
   } catch (e) {
