@@ -263,6 +263,7 @@ export async function persistIncomingMessage({
   threadType,
   msg,
   isSelf,
+  isCatchUp = false,
 }) {
   const sb = getClient();
   if (!sb) return { ok: false, reason: 'no-supabase-client' };
@@ -308,7 +309,15 @@ export async function persistIncomingMessage({
       },
       {
         onConflict: 'user_id,source_message_id',
-        ignoreDuplicates: true,
+        // Catch-up (getCMRecent) không bao giờ có image_urls đầy đủ (xem
+        // catchUpRecentMessages) → ignoreDuplicates=true để không đè mất dữ
+        // liệu tốt hơn đã có từ listener live. Ngược lại, listener live PHẢI
+        // được phép ghi đè — Zalo đôi khi bắn 2 event cho cùng 1 ảnh (event
+        // đầu href rỗng lúc ảnh còn xử lý, event sau mới có URL thật); nếu
+        // luôn ignoreDuplicates=true thì tuỳ thứ tự đến, ảnh có thể bị kẹt ở
+        // bản ghi rỗng vĩnh viễn dù event đầy đủ đến ngay sau đó (bug quan sát
+        // được 2026-07-11: ảnh gửi vào nhóm chính không hiện dù forward vẫn ổn).
+        ignoreDuplicates: isCatchUp,
       }
     );
 
@@ -465,6 +474,7 @@ export async function catchUpRecentMessages({ accountId, api, count = 50 }) {
             },
           },
           isSelf,
+          isCatchUp: true,
         });
         if (result.ok) persisted++;
         else skipped++;
