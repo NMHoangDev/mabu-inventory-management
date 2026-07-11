@@ -17,7 +17,6 @@ import {
   Package,
   Receipt,
   Search,
-  Send,
   ShoppingCart,
   Settings,
   Table2,
@@ -67,9 +66,6 @@ const navItems = [
   },
   {
     key: "zalo-notify", path: "/thong-bao-zalo", label: "Thông báo Zalo", group: "Vận hành", icon: MessageCircle
-  },
-  {
-    key: "zalo-forward-rules", path: "/zalo/forward-rules", label: "Chuyển tiếp Zalo", group: "Vận hành", icon: Send
   },
   {
     key: "zalo-accounts", path: "/zalo/accounts", label: "Quản lý TK Zalo", group: "Hệ thống", icon: UserCog

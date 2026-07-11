@@ -255,6 +255,7 @@ export default function NewOrderPage() {
         paid,
         payment_status: paid >= total && total > 0 ? "paid" : "unpaid",
         fulfillment_status: "unshipped",
+        payment_method: paymentMethod === "transfer" ? "bank_transfer" : paymentMethod,
         status,
         items: cart.map((c) => ({
           product_id: c.product_id,
@@ -679,7 +680,7 @@ export default function NewOrderPage() {
                 disabled={submitting || cart.length === 0}
                 className="w-full bg-[#005baf] hover:bg-[#005eb3] text-white py-3 rounded font-bold text-sm shadow-sm transition-colors uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {submitting ? "Đang lưu..." : "Thanh toán (F10)"}
+                {submitting ? "Đang lưu..." : "Tạo đơn hàng"}
               </button>
               <div className="flex gap-2">
                 <button

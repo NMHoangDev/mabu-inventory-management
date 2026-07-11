@@ -61,9 +61,14 @@ export async function GET(request: Request) {
             when p.sku ilike $2 then 4
             else 5
           end,
-          -- 2) "Ghi nhớ tìm kiếm": sản phẩm hay được thêm vào đơn hàng trước
-          --    đó lên trước các sản phẩm cùng hạng khớp — không đè lên khớp
-          --    chính xác ở trên, chỉ phân định trong nhóm khớp ngang nhau.
+          -- 2) "Ghi nhớ tìm kiếm": sản phẩm vừa được chọn/thêm vào đơn hàng
+          --    gần đây nhất lên trước các sản phẩm cùng hạng khớp — không đè
+          --    lên khớp chính xác ở trên, chỉ phân định trong nhóm khớp ngang
+          --    nhau. Ưu tiên last_used_at (mới chọn là lên đầu ngay) trước
+          --    use_count (trước đây chỉ dùng use_count nên 1 lượt chọn mới
+          --    không thắng nổi sản phẩm được chọn nhiều lần trong quá khứ —
+          --    trông như tính năng "không hoạt động").
+          coalesce(psu.last_used_at, '-infinity'::timestamptz) desc,
           coalesce(psu.use_count, 0) desc,
           -- 3) Gõ sai/thiếu chữ vẫn tìm được nhờ độ tương tự trigram.
           similarity(coalesce(p.search_text, ''), $6) desc,
