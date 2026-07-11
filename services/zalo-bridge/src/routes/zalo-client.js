@@ -433,7 +433,19 @@ router.get('/all-platform/zalo/group-info', async (req, res) => {
 // `{ changed_profiles: Record<key, User> }` — key có suffix "_0" nên lấy giá
 // trị đầu tiên thay vì tra theo userId thô.
 //
-// Cache 60s per userId, cùng cơ chế với group-info.
+// Cache 60s per userId cho kết quả THÀNH CÔNG, cùng cơ chế với group-info.
+//
+// Negative cache (thất bại) dùng TTL dài hơn hẳn (10 phút): `getUserInfo` gọi
+// endpoint `/api/social/friend/getprofiles/v2` — endpoint này chỉ trả hồ sơ
+// cho user đã là BẠN BÈ trên Zalo. Với người lạ nhắn tin (chưa kết bạn), ZCA
+// trả lỗi code:112 ("Lỗi không xác định") — lỗi này KHÔNG transient, nó sẽ
+// fail y hệt mỗi lần gọi cho tới khi 2 bên kết bạn. Trước đây không cache lỗi
+// này → mỗi lần FE mở lại conversation / tab focus / poll (xem ENSURE_RETRY ở
+// useZalo.ts) đều gọi thẳng ZCA thật, dồn dập trong vài giây — vừa vô ích vừa
+// có rủi ro bị Zalo rate-limit/đánh dấu tài khoản thật đang dùng.
+const USER_INFO_SUCCESS_TTL_MS = 60_000;
+const USER_INFO_FAILURE_TTL_MS = 10 * 60_000;
+
 router.get('/all-platform/zalo/user-info', async (req, res) => {
   try {
     const ctx = requireLoggedIn(req, res);
@@ -446,8 +458,11 @@ router.get('/all-platform/zalo/user-info', async (req, res) => {
     ctx.__singleUserCache = ctx.__singleUserCache || {};
     const cached = ctx.__singleUserCache[userId];
     const now = Date.now();
-    if (cached && cached.ts > now - 60_000) {
-      return res.json(cached.payload);
+    if (cached) {
+      const ttl = cached.failed ? USER_INFO_FAILURE_TTL_MS : USER_INFO_SUCCESS_TTL_MS;
+      if (cached.ts > now - ttl) {
+        return res.status(cached.status).json(cached.payload);
+      }
     }
 
     let profile;
@@ -460,21 +475,25 @@ router.get('/all-platform/zalo/user-info', async (req, res) => {
         `[${ctx.accountId}] user-info: getUserInfo(${userId}) failed`,
         { err: e?.message, code: e?.code }
       );
-      return res.status(502).json({
+      const payload = {
         ok: false,
         error: 'getUserInfo failed',
         detail: e?.message,
         thread_id: userId,
-      });
+      };
+      ctx.__singleUserCache[userId] = { ts: now, payload, status: 502, failed: true };
+      return res.status(502).json(payload);
     }
 
     const name = profile?.zaloName || profile?.displayName;
     if (!profile || !name) {
-      return res.status(404).json({
+      const payload = {
         ok: false,
         error: 'user not found or empty name',
         thread_id: userId,
-      });
+      };
+      ctx.__singleUserCache[userId] = { ts: now, payload, status: 404, failed: true };
+      return res.status(404).json(payload);
     }
 
     const payload = {
@@ -484,7 +503,7 @@ router.get('/all-platform/zalo/user-info', async (req, res) => {
       user_name: name,
       avatar_url: profile.avatar || null,
     };
-    ctx.__singleUserCache[userId] = { ts: now, payload };
+    ctx.__singleUserCache[userId] = { ts: now, payload, status: 200, failed: false };
     return res.json(payload);
   } catch (err) {
     logger.error('GET user-info error', { err: err.message });

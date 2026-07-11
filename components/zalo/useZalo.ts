@@ -329,6 +329,26 @@ async function ensureConversationInSupabase(
           console.log(
             `[ZALO_FE][USER_NAME] threadId=${threadId} name="${resolvedName}"`
           );
+        } else {
+          // Bridge /user-info gọi ZCA `friend/getprofiles/v2` — endpoint này
+          // CHỈ trả hồ sơ cho người đã là bạn bè trên Zalo. Người lạ nhắn tin
+          // (chưa kết bạn) sẽ luôn fail ở đây bất kể retry bao nhiêu lần (ZCA
+          // trả code:112). Fallback giống hệt group: nhờ extension scrape tên
+          // thật trực tiếp từ DOM Zalo Web (không bị giới hạn "phải là bạn bè"
+          // như API) — nếu thành công, route /sync-dom tự upsert row nên bỏ
+          // qua phần ghi "Zalo <id>" bên dưới.
+          // eslint-disable-next-line no-console
+          console.log(
+            `[ZALO_FE][USER_NAME_FALLBACK] threadId=${threadId} using DOM scrape (not a Zalo friend, friend-profile API can't resolve)`
+          );
+          const ok = await requestExtensionDomSync(accountId);
+          // eslint-disable-next-line no-console
+          console.log(
+            `[ZALO_FE][DOM_SCRAPE] threadId=${threadId} ok=${ok}`
+          );
+          if (ok) {
+            return; // route /sync-dom đã upsert row trực tiếp
+          }
         }
       } catch (e) {
         // bridge offline → fallback
