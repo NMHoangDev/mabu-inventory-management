@@ -105,6 +105,10 @@ function resolveMessageId(msg) {
  */
 function extractOneImageUrl(contentObj) {
   if (!contentObj || typeof contentObj !== 'object') return null;
+  // Self-echo của tin gửi từ chính bridge (SEND_MEDIA_API / forwardMedia) đôi
+  // khi bọc field ảnh trong `params` thay vì để phẳng ở top-level — xem shape
+  // gửi đi ở zca-js/dist/apis/sendMessage.js handleAttachment() (data.params.*).
+  const p = contentObj.params && typeof contentObj.params === 'object' ? contentObj.params : null;
   const url =
     contentObj.hdUrl ||
     contentObj.oriUrl ||
@@ -113,6 +117,11 @@ function extractOneImageUrl(contentObj) {
     contentObj.href ||
     contentObj.thumbUrl ||
     contentObj.thumb ||
+    p?.hdUrl ||
+    p?.oriUrl ||
+    p?.normalUrl ||
+    p?.rawUrl ||
+    p?.thumbUrl ||
     null;
   return typeof url === 'string' && url.length > 0 ? url : null;
 }
@@ -130,6 +139,11 @@ export function resolveImageUrls(msg) {
   if (Array.isArray(c) && c.length > 0 && typeof c[0] === 'object') {
     const urls = c.map(extractOneImageUrl).filter((u) => u);
     if (urls.length > 0) return urls;
+    // Array nhưng không phần tử nào khớp field ảnh đã biết — log lại raw shape
+    // (trước đây âm thầm rơi qua fallback vì nhánh dưới chỉ chạy khi !Array).
+    logger.warn(
+      `[resolveImageUrls] content array không khớp field ảnh đã biết: ${JSON.stringify(c).slice(0, 300)}`
+    );
   }
   // 1 ảnh: content là 1 object.
   if (c && typeof c === 'object' && !Array.isArray(c)) {
