@@ -1093,7 +1093,14 @@ function ProductPicker({ rowId, sku, name, preferred, value, onChange, inline = 
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => onChange(p.id)}
+                  onClick={() => {
+                    onChange(p.id);
+                    void fetch("/api/orders/search-products/track", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ product_id: p.id })
+                    }).catch(() => undefined);
+                  }}
                   className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-slate-50 ${
                     isSelected ? "bg-blue-50" : ""
                   }`}
@@ -1210,6 +1217,11 @@ function ProductPicker({ rowId, sku, name, preferred, value, onChange, inline = 
                     onClick={() => {
                       onChange(p.id);
                       setOpen(false);
+                      void fetch("/api/orders/search-products/track", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ product_id: p.id })
+                      }).catch(() => undefined);
                     }}
                     className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-slate-50 ${
                       isSelected ? "bg-blue-50" : ""

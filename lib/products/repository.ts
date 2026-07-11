@@ -274,8 +274,13 @@ export async function getProducts() {
   await ensureDatabase();
   const pool = getPool();
   const res = await pool.query(`
-    select 
+    select
       p.*,
+      -- products KHÔNG có cột image_url thật (ảnh sống ở product_images) —
+      -- trước đây danh sách sản phẩm luôn thiếu ảnh vì query này không join
+      -- bảng đó. Dùng subquery tương quan (không phải LATERAL JOIN) để không
+      -- phải sửa GROUP BY bên dưới.
+      (select url from product_images pi where pi.product_id = p.id order by pi.position asc limit 1) as image_url,
       c.name as category_name,
       b.name as brand_name,
       t.name as type_name,

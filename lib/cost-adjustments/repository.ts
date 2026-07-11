@@ -386,6 +386,7 @@ export async function searchProductsForCostAdjustment(
      left join lateral (
        select url from product_images where product_id = p.id order by position asc limit 1
      ) pi on true
+     left join product_search_usage psu on psu.product_id = p.id
      where p.status = 'active'
        and (
          $1 = ''
@@ -403,6 +404,11 @@ export async function searchProductsForCostAdjustment(
          when lower(p.sku) like lower($1 || '%') then 1
          else 2
        end,
+       -- "Ghi nhớ tìm kiếm": sản phẩm vừa được chọn gần đây lên trước, giống
+       -- /api/orders/search-products — trước đây thiếu nên tìm kiếm ở trang
+       -- điều chỉnh giá vốn không "nhớ" gì cả dù dùng chung bảng usage.
+       coalesce(psu.last_used_at, '-infinity'::timestamptz) desc,
+       coalesce(psu.use_count, 0) desc,
        similarity(coalesce(p.search_text, ''), $4) desc,
        p.name asc
      limit $5`,

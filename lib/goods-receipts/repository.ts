@@ -457,25 +457,55 @@ export interface ScanProductSearchHit {
   stock: number;
 }
 
+// Cùng chất lượng tìm kiếm với /api/orders/search-products (unaccent +
+// trigram + ưu tiên sản phẩm vừa chọn gần đây qua product_search_usage) —
+// trước đây chỉ ILIKE phẳng, không chịu được gõ thiếu dấu/sai chữ và không
+// có "ghi nhớ tìm kiếm" như trang tạo đơn hàng.
 export async function searchProductsForScan(query: string, limit = 15): Promise<ScanProductSearchHit[]> {
   if (!isDatabaseConfigured) return [];
-  const trimmed = query.trim();
-  if (trimmed.length < 1) return [];
+  const q = query.trim();
+  if (q.length < 1) return [];
   await ensureDatabase();
   const pool = getPool();
-  const q = `%${trimmed}%`;
-  // Prioritize exact SKU match (sku = $2 ILIKE upper/lower) over name match by
-  // ordering SKU equality first. Empty sku (no SKU column) goes last.
+
+  const qNorm = q
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^\w\sÀ-ɏḀ-ỿ]/g, "");
+  const qRaw = `%${q}%`;
+  const qAcc = `%${qNorm}%`;
+  const safeLimit = Math.max(1, Math.min(limit, 50));
+
   const result = await pool.query(
     `select p.id, p.sku, p.name, p.unit, coalesce(p.stock, 0) as stock
        from products p
-      where p.sku ilike $1 or p.name ilike $1
+       left join product_search_usage psu on psu.product_id = p.id
+      where p.status = 'active'
+        and (
+          p.sku ilike $1
+          or p.name ilike $1
+          or coalesce(p.barcode,'') ilike $1
+          or p.search_text ilike $2
+          or similarity(coalesce(p.search_text, ''), $5) > 0.25
+        )
       order by
-        case when lower(p.sku) = lower($2) then 0 else 1 end,
-        case when lower(p.name) = lower($2) then 0 else 1 end,
+        case
+          when lower(p.sku) = lower($3) then 0
+          when coalesce(p.barcode,'') = $3 then 0
+          when lower(p.sku) like lower($4) then 1
+          when lower(p.name) like lower($4) then 2
+          when p.name ilike $1 then 3
+          when p.sku ilike $1 then 4
+          else 5
+        end,
+        coalesce(psu.last_used_at, '-infinity'::timestamptz) desc,
+        coalesce(psu.use_count, 0) desc,
+        similarity(coalesce(p.search_text, ''), $5) desc,
+        length(p.name) asc,
         p.name asc
-      limit $3`,
-    [q, trimmed, Math.max(1, Math.min(limit, 50))]
+      limit $6`,
+    [qRaw, qAcc, q, `${q}%`, qNorm, safeLimit]
   );
   return result.rows.map((row) => ({
     id: String(row.id),

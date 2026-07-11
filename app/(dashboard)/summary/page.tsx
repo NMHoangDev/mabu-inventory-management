@@ -1265,8 +1265,16 @@ function SummaryProductLinkModal({
         inputProductName: productDisplayName || cleanInvoice(row.inputProductName),
         adjustedInvoiceName: legacyAdjusted || legacyRetail || productDisplayName || cleanInvoice(row.adjustedInvoiceName),
         retailName: legacyRetail || productDisplayName || cleanInvoice(row.retailName),
-        unit: cleanInvoice(product.unit) || cleanInvoice(row.unit)
+        unit: cleanInvoice(product.unit) || cleanInvoice(row.unit),
+        syncedProductId: product.id
       };
+      // Ghi nhớ tìm kiếm — cùng bảng product_search_usage với /orders/new,
+      // để sản phẩm vừa chọn ở đây cũng lên đầu khi tìm lại (ở đây hoặc nơi khác).
+      void fetch("/api/orders/search-products/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product_id: product.id })
+      }).catch(() => undefined);
       const ok = await onApply(patch);
       if (ok) setPickerOpen(false);
     } finally {
@@ -1319,6 +1327,13 @@ function SummaryProductLinkModal({
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ images: [{ url: manualImageUrl }] })
+        }).catch(() => undefined);
+      }
+      if (created?.id) {
+        void fetch("/api/orders/search-products/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_id: created.id })
         }).catch(() => undefined);
       }
 

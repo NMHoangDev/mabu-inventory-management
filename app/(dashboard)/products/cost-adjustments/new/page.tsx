@@ -144,6 +144,13 @@ export default function NewCostAdjustmentPage() {
     setItems((prev) => [...prev, hitToDraftItem(hit)]);
     setProductQuery("");
     setProductResults([]);
+    // Ghi nhớ tìm kiếm dùng chung product_search_usage với /orders/new — sản
+    // phẩm vừa chọn ở đây cũng lên đầu khi tìm lại (ở đây hoặc trang khác).
+    void fetch("/api/orders/search-products/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_id: hit.product_id })
+    }).catch(() => undefined);
   }
 
   function openMultiSelect() {
