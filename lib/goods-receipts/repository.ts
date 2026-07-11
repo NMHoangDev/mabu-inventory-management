@@ -338,6 +338,23 @@ export async function createGoodsReceipt(input: CreateGoodsReceiptInput): Promis
       );
     }
 
+    // Tự động gắn sản phẩm ↔ nhà cung cấp (product_suppliers) — đơn nhập hàng
+    // đã có sẵn supplier_id + danh sách sản phẩm, không cần user tự vào từng
+    // NCC để thêm sản phẩm cung cấp thủ công.
+    if (input.supplier_id && isUuid(input.supplier_id)) {
+      const productIds = Array.from(new Set(items.map((it) => it.product_id).filter((id): id is string => !!id)));
+      if (productIds.length > 0) {
+        await client
+          .query(
+            `insert into product_suppliers (product_id, supplier_id)
+             select unnest($2::uuid[]), $1::uuid
+             on conflict (product_id, supplier_id) do nothing`,
+            [input.supplier_id, productIds]
+          )
+          .catch(() => undefined);
+      }
+    }
+
     // Cộng tồn kho NGAY khi tạo đơn với trạng thái "completed" (nút "Tạo &
     // nhập hàng" — hàng đã về, tách biệt hoàn toàn khỏi thanh toán). Trước
     // đây bug: status hiển thị "Hoàn thành" ngay nhưng tồn kho KHÔNG được

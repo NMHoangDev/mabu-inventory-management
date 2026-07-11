@@ -708,6 +708,23 @@ export async function confirmScanReceiptWithOptions(
       return emptyFail("Tất cả dòng đã chọn đều không hợp lệ (thiếu SKU/số lượng).");
     }
 
+    // Tự động gắn sản phẩm ↔ nhà cung cấp (product_suppliers) — nhà cung cấp
+    // đã resolve/match theo tên hóa đơn ở trên (dòng ~578). Trước đây bảng
+    // này chỉ ghi được qua UI thủ công (AddSupplierModal/trang chi tiết NCC)
+    // nên gần như luôn rỗng dù nhập hàng liên tục. Không chặn luồng tạo đơn
+    // nhập nếu bước này lỗi — chỉ là dữ liệu bổ sung, không phải nghiệp vụ lõi.
+    if (supplierId) {
+      const productIds = Array.from(new Set(prepared.map((p) => p.product_id)));
+      await client
+        .query(
+          `insert into product_suppliers (product_id, supplier_id)
+           select unnest($2::uuid[]), $1::uuid
+           on conflict (product_id, supplier_id) do nothing`,
+          [supplierId, productIds]
+        )
+        .catch(() => undefined);
+    }
+
     const poCodeRes = await client.query(
       `select code from purchase_orders where code ~ '^OSN[0-9]+$'
         order by length(code) desc, code desc limit 1`

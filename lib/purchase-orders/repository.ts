@@ -362,6 +362,21 @@ export async function createPurchaseOrder(input: CreatePurchaseOrderInput): Prom
          where id = $2`,
         [total, input.supplier_id]
       ).catch(() => undefined);
+
+      // Tự động gắn sản phẩm ↔ nhà cung cấp (product_suppliers) — đơn đặt hàng
+      // nhập đã có sẵn supplier_id + danh sách sản phẩm, không cần user tự
+      // vào từng NCC để thêm sản phẩm cung cấp thủ công.
+      const productIds = Array.from(new Set(items.map((it) => it.product_id).filter((id): id is string => !!id)));
+      if (productIds.length > 0) {
+        await client
+          .query(
+            `insert into product_suppliers (product_id, supplier_id)
+             select unnest($2::uuid[]), $1::uuid
+             on conflict (product_id, supplier_id) do nothing`,
+            [input.supplier_id, productIds]
+          )
+          .catch(() => undefined);
+      }
     }
 
     await client.query("commit");

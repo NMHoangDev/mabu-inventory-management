@@ -151,11 +151,15 @@ export function AddSupplierModal({ onClose, onSaved, supplierId }: AddSupplierMo
       const toAdd = Array.from(selectedIds).filter((id) => !originalProductIds.has(id));
       const toRemove = Array.from(originalProductIds).filter((id) => !selectedIds.has(id));
       if (toAdd.length > 0) {
-        await fetch(`/api/suppliers/${savedSupplierId}/products`, {
+        const linkRes = await fetch(`/api/suppliers/${savedSupplierId}/products`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ product_ids: toAdd })
-        }).catch(() => undefined);
+        });
+        if (!linkRes.ok) {
+          const linkData = await linkRes.json().catch(() => ({}));
+          throw new Error(linkData?.error ?? "Không lưu được sản phẩm cung cấp cho nhà cung cấp.");
+        }
       }
       if (toRemove.length > 0) {
         await Promise.all(
