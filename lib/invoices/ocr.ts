@@ -19,7 +19,10 @@ Extract every item line separately.
 Keep Vietnamese text exactly as shown.
 Normalize numbers by removing thousand separators when possible.
 CRITICAL - Product Name Extraction:
-- The "inputProductName" field must contain the FULL product item name exactly as it appears in the invoice line, including any manufacturer/brand/model/dimension/quality tokens (e.g. "NSX:", "MH:", "Model:", "KT:", "Mới 100%"). Do NOT strip or omit anything — copy the entire line verbatim.
+- The "inputProductName" field must contain the ENTIRE product/service description text of that invoice line, character-for-character, from the very first word to the very last word — including manufacturer/brand/model/dimension/quality/spec tokens such as "NSX:", "MH:", "Model:", "KT:", "Mới 100%", "Xuất xứ:", "Hãng SX:", "Quy cách:", "Mã:", part numbers, serial numbers, and any trailing text after commas.
+- Never summarize, shorten, abbreviate, paraphrase, or stop early. If the line is long, keep it long — there is no length limit on this field.
+- Only stop at the actual end of that item's name in the invoice (i.e. right before the unit/quantity/price columns begin), never before.
+- Example: invoice line reads "Ví cầm tay cho nữ, mã Meow, dạng gấp, có cúc bấm và dây cầm, lót trong bằng vải dệt, giả da PU, KT:12*3*9.5cm, NSX:Baisier Leather Co.,Ltd. Mới 100%" → inputProductName must be exactly "Ví cầm tay cho nữ, mã Meow, dạng gấp, có cúc bấm và dây cầm, lót trong bằng vải dệt, giả da PU, KT:12*3*9.5cm, NSX:Baisier Leather Co.,Ltd. Mới 100%" (every token kept, nothing cut after "KT:" or "NSX:").
 Schema:
 {
   "invoiceDate": "",
