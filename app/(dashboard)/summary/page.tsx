@@ -1107,10 +1107,15 @@ function SummaryProductLinkModal({
   const [searching, setSearching] = useState(false);
   const [remoteResults, setRemoteResults] = useState<ProductSummary[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [manualError, setManualError] = useState("");
   const [manualForm, setManualForm] = useState({
     name: cleanInvoice(row.inputProductName),
     sku: cleanInvoice(row.internalProductCode),
-    unit: cleanInvoice(row.unit)
+    unit: cleanInvoice(row.unit),
+    price: "",
+    // Prefill giá vốn từ đơn giá trên hóa đơn (sau thuế nếu có) — user vẫn
+    // sửa được, chỉ là gợi ý hợp lý thay vì để trống.
+    costPrice: cleanInvoice(row.unitPriceAfterTax) || cleanInvoice(row.unitPrice)
   });
   const menuRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
@@ -1250,12 +1255,42 @@ function SummaryProductLinkModal({
 
   async function applyManual() {
     setSubmitting(true);
+    setManualError("");
     try {
       const name = cleanInvoice(manualForm.name) || cleanInvoice(row.inputProductName);
       let sku = cleanInvoice(manualForm.sku);
       if (!sku) sku = autoSku();
       else if (!/^SKU/i.test(sku)) sku = `SKU-${sku}`;
       const unit = cleanInvoice(manualForm.unit);
+      const price = Number(manualForm.price) || 0;
+      const costPrice = Number(manualForm.costPrice) || 0;
+
+      // Tạo THẬT sản phẩm ngay tại đây (trước đây chỉ điền tạm field lên dòng
+      // scan, sản phẩm thật chỉ được tạo sau ở bước "Tạo đơn nhập" — với giá
+      // bán luôn = 0 vì bước đó không hỏi giá). Tạo ngay giúp: (1) sản phẩm
+      // xuất hiện trong danh sách sản phẩm ngay lập tức, (2) bước "Tạo đơn
+      // nhập" sau này match đúng sản phẩm này qua synced_product_id/SKU thay
+      // vì tạo trùng 1 sản phẩm khác thiếu giá.
+      const createRes = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          sku,
+          unit: unit || undefined,
+          price,
+          cost_price: costPrice,
+          status: "active",
+          track_inventory: true
+        })
+      });
+      if (!createRes.ok) {
+        const data = await createRes.json().catch(() => ({}));
+        setManualError(data?.error || "Không tạo được sản phẩm mới.");
+        return;
+      }
+      const created = await createRes.json();
+
       // Auto-fill cả 3 cột tên từ tên user vừa nhập: tên hàng đầu vào, tên bán lẻ
       // và tên chỉnh lại. Nếu 1 trong 3 cột đã có sẵn giá trị thì GIỮ NGUYÊN
       // (không ghi đè dữ liệu user đã tự điền trước đó).
@@ -1264,10 +1299,13 @@ function SummaryProductLinkModal({
         inputProductName: name,
         unit,
         retailName: cleanInvoice(row.retailName) || name,
-        adjustedInvoiceName: cleanInvoice(row.adjustedInvoiceName) || name
+        adjustedInvoiceName: cleanInvoice(row.adjustedInvoiceName) || name,
+        syncedProductId: created?.id ? String(created.id) : undefined
       };
       const ok = await onApply(patch);
       if (ok) setManualOpen(false);
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : "Lỗi không xác định.");
     } finally {
       setSubmitting(false);
     }
@@ -1344,9 +1382,9 @@ function SummaryProductLinkModal({
                     Sản phẩm này chưa có trong danh sách sản phẩm
                   </div>
                   <div className="mt-0.5 text-xs text-slate-600">
-                    Điền 3 cột: tên sản phẩm, mã SKU (sẽ tự tạo nếu bỏ trống, luôn
-                    có chữ "SKU"), đơn vị. Tên bán lẻ và tên chỉnh lại sẽ giữ
-                    trống để bạn điền sau.
+                    Điền tên, mã SKU (tự tạo nếu bỏ trống), đơn vị, giá bán và giá
+                    vốn — sản phẩm sẽ được tạo ngay. Tên bán lẻ và tên chỉnh lại
+                    sẽ giữ trống để bạn điền sau.
                   </div>
                 </div>
                 <ChevronDown className="mt-1 h-4 w-4 rotate-[-90deg] text-blue-700" />
@@ -1436,7 +1474,7 @@ function SummaryProductLinkModal({
             <div className="space-y-3 rounded-lg border border-blue-200 bg-white p-4">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold text-slate-900">
-                  Điền 3 cột để tạo sản phẩm mới
+                  Tạo sản phẩm mới
                 </div>
                 <button
                   type="button"
@@ -1495,10 +1533,44 @@ function SummaryProductLinkModal({
                   />
                 </div>
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                    Giá bán
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={manualForm.price}
+                    onChange={(e) => setManualForm((f) => ({ ...f, price: e.target.value }))}
+                    placeholder="0"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                    Giá vốn
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={manualForm.costPrice}
+                    onChange={(e) => setManualForm((f) => ({ ...f, costPrice: e.target.value }))}
+                    placeholder="0"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                Sản phẩm sẽ được tạo ngay và xuất hiện trong danh sách sản phẩm.{" "}
                 <strong>Tên bán lẻ</strong> và <strong>Tên chỉnh lại xuất hóa đơn</strong> sẽ giữ trống
                 — bạn có thể điền trực tiếp trong bảng tổng hợp sau.
               </div>
+              {manualError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {manualError}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

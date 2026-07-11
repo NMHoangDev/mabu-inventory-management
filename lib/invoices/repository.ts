@@ -410,7 +410,8 @@ export async function patchRow(rowId: string, patch: Partial<InvoiceRow>) {
         total_after_tax = $16,
         unit_price_after_tax = $17,
         note = $18,
-        updated_at = $19
+        synced_product_id = $19,
+        updated_at = $20
       where id = $1
     `,
     [
@@ -432,6 +433,7 @@ export async function patchRow(rowId: string, patch: Partial<InvoiceRow>) {
       cell(merged.totalAfterTax),
       cell(merged.unitPriceAfterTax),
       cell(merged.note),
+      cell(merged.syncedProductId),
       now
     ]
   );
