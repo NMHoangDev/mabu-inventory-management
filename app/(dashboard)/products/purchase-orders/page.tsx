@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2, Plus, Upload, Download, ChevronLeft, ChevronRight, FileText } from "lucide-react";
 import { downloadCsv } from "@/lib/shared/csv-export";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 type PurchaseOrderStatus = "draft" | "pending" | "partial" | "completed" | "cancelled";
 
@@ -25,8 +26,6 @@ interface PurchaseOrderRow {
 }
 
 type TabKey = "all" | "pending" | "partial" | "completed";
-
-const fmtMoney = new Intl.NumberFormat("vi-VN");
 
 function formatDateTime(iso: string): string {
   try {
@@ -295,7 +294,7 @@ export default function PurchaseOrdersListPage() {
                         {row.total_quantity.toLocaleString("vi-VN")}
                       </td>
                       <td className="p-3 text-right tabular-nums font-medium">
-                        {fmtMoney.format(row.total_amount)}
+                        {formatCurrencyVND(row.total_amount)}
                       </td>
                     </tr>
                   );

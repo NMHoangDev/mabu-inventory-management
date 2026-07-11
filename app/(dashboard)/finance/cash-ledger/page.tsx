@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { downloadCsv } from "@/lib/shared/csv-export";
+import { formatCurrencyVND } from "@/lib/shared/format";
 import {
   Calendar,
   ChevronDown,
@@ -32,8 +33,6 @@ interface LedgerRow {
   recorded_date: string;
   note: string;
 }
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function formatDateTime(iso: string): string {
   try {
@@ -188,7 +187,7 @@ export default function CashLedgerPage() {
           <div className="flex-1 text-center">
             <div className="text-xs text-gray-500 mb-1">Số dư đầu kỳ</div>
             <div className="text-lg font-bold text-gray-800">
-              {fmtMoney.format(-49785480)}
+              {formatCurrencyVND(-49785480)}
             </div>
           </div>
           <div className="text-gray-400 font-bold text-xl">+</div>
@@ -196,7 +195,7 @@ export default function CashLedgerPage() {
             <div className="text-xs text-gray-500 mb-1">Tổng thu</div>
             <div className="text-lg font-bold text-green-600 flex items-center justify-center gap-1">
               <TrendingUp className="w-4 h-4" />
-              {fmtMoney.format(totalReceipts)}
+              {formatCurrencyVND(totalReceipts)}
             </div>
           </div>
           <div className="text-gray-400 font-bold text-xl">-</div>
@@ -204,14 +203,14 @@ export default function CashLedgerPage() {
             <div className="text-xs text-gray-500 mb-1">Tổng chi</div>
             <div className="text-lg font-bold text-red-500 flex items-center justify-center gap-1">
               <TrendingDown className="w-4 h-4" />
-              {fmtMoney.format(totalPayments)}
+              {formatCurrencyVND(totalPayments)}
             </div>
           </div>
           <div className="text-gray-400 font-bold text-xl">=</div>
           <div className="flex-1 text-center">
             <div className="text-xs text-gray-500 mb-1">Tồn cuối kỳ</div>
             <div className="text-lg font-bold text-blue-500">
-              {fmtMoney.format(-49785480 + totalReceipts - totalPayments)}
+              {formatCurrencyVND(-49785480 + totalReceipts - totalPayments)}
             </div>
           </div>
         </div>
@@ -355,10 +354,10 @@ export default function CashLedgerPage() {
                       <td className="px-4 py-3 text-gray-500">{row.created_by || "—"}</td>
                       <td className="px-4 py-3 text-gray-500">{row.payment_method || "—"}</td>
                       <td className="px-4 py-3 text-right text-green-600 font-medium tabular-nums">
-                        {row.voucher_type === "receipt" ? fmtMoney.format(row.amount) : "—"}
+                        {row.voucher_type === "receipt" ? formatCurrencyVND(row.amount) : "—"}
                       </td>
                       <td className="px-4 py-3 text-right text-red-600 font-medium tabular-nums">
-                        {row.voucher_type === "payment" ? fmtMoney.format(row.amount) : "—"}
+                        {row.voucher_type === "payment" ? formatCurrencyVND(row.amount) : "—"}
                       </td>
                       <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">{row.note || "—"}</td>
                     </tr>

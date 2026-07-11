@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { downloadCsv } from "@/lib/shared/csv-export";
+import { formatCurrencyVND } from "@/lib/shared/format";
 import {
   ChevronLeft,
   ChevronRight,
@@ -29,8 +30,6 @@ interface PaymentRow {
   status: VoucherStatus;
   created_at: string;
 }
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 const STATUS_META: Record<VoucherStatus, { label: string; className: string }> = {
   draft: { label: "Nháp", className: "bg-slate-100 text-slate-600" },
@@ -257,7 +256,7 @@ export default function PaymentVouchersPage() {
                           {meta.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums">{fmtMoney.format(row.amount)}</td>
+                      <td className="px-4 py-3 text-right font-medium tabular-nums">{formatCurrencyVND(row.amount)}</td>
                       <td className="px-4 py-3 text-slate-500">{row.group_name || "—"}</td>
                       <td className="px-4 py-3">
                         {row.reference_code ? (

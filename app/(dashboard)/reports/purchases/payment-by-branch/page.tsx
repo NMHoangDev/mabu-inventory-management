@@ -5,7 +5,6 @@ import { BarChart3, RefreshCw, Table2 } from "lucide-react";
 import {
   DateRangePicker,
   DonutChart,
-  fmtMoney,
   getDateRange,
   Period,
   PeriodSelector,
@@ -14,6 +13,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPaymentByBranch } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export default function PaymentByBranchPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -77,9 +77,9 @@ export default function PaymentByBranchPage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <SummaryCard label="Chi nhánh" value={String(d.branches.length)} sub="CN" color="blue" />
-            <SummaryCard label="Tổng chi" value={fmtMoney.format(d.summary.total_amount)} sub="VNĐ" color="green" />
-            <SummaryCard label="Đã thanh toán" value={fmtMoney.format(d.summary.total_paid)} sub="VNĐ" color="purple" />
-            <SummaryCard label="Còn nợ" value={fmtMoney.format(d.summary.total_unpaid)} sub="VNĐ" color="red" />
+            <SummaryCard label="Tổng chi" value={formatCurrencyVND(d.summary.total_amount)} color="green" />
+            <SummaryCard label="Đã thanh toán" value={formatCurrencyVND(d.summary.total_paid)} color="purple" />
+            <SummaryCard label="Còn nợ" value={formatCurrencyVND(d.summary.total_unpaid)} color="red" />
           </div>
 
           {view === "chart" && (
@@ -92,6 +92,7 @@ export default function PaymentByBranchPage() {
                     value: b.total_amount,
                     color: ["#0088ff", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"][i % 5],
                   }))}
+                  formatValue={formatCurrencyVND}
                 />
               </div>
             </div>
@@ -105,9 +106,9 @@ export default function PaymentByBranchPage() {
               columns={[
                 { key: "branch", label: "Chi nhánh", align: "left" },
                 { key: "receipt_count", label: "Số đơn", align: "right" },
-                { key: "total_amount", label: "Tổng chi", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "total_paid", label: "Đã thanh toán", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "unpaid", label: "Còn nợ", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                { key: "total_amount", label: "Tổng chi", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+                { key: "total_paid", label: "Đã thanh toán", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+                { key: "unpaid", label: "Còn nợ", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
               ]}
               data={d.branches}
             />

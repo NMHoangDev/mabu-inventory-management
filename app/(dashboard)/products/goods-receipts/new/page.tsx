@@ -11,6 +11,7 @@ import {
   X,
   Download
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface Supplier {
   id: string;
@@ -61,8 +62,6 @@ const emptyItem = (): DraftItem => ({
   discount: 0,
   note: ""
 });
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function parseNum(text: string): number {
   const cleaned = text.replace(/[^0-9.-]/g, "");
@@ -411,7 +410,7 @@ export default function NewGoodsReceiptPage() {
                             >
                               <div>
                                 <div className="text-sm font-medium text-slate-800">{p.product_name}</div>
-                                <div className="text-xs text-slate-500">SKU: {p.sku || "—"} · {fmtMoney.format(p.default_cost)}đ</div>
+                                <div className="text-xs text-slate-500">SKU: {p.sku || "—"} · {formatCurrencyVND(p.default_cost)}</div>
                               </div>
                               <Plus className="w-4 h-4 text-slate-400" />
                             </button>
@@ -521,7 +520,7 @@ export default function NewGoodsReceiptPage() {
                                 />
                               </td>
                               <td className="px-4 py-3 text-right font-medium text-slate-800 tabular-nums">
-                                {fmtMoney.format(lineTotal)}
+                                {formatCurrencyVND(lineTotal)}
                               </td>
                               <td className="px-4 py-3">
                                 <button onClick={() => removeItem(it.rowKey)} className="text-slate-400 hover:text-red-600">
@@ -625,7 +624,7 @@ export default function NewGoodsReceiptPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Tổng tiền</span>
-                    <span className="font-medium tabular-nums">{fmtMoney.format(subtotal)}</span>
+                    <span className="font-medium tabular-nums">{formatCurrencyVND(subtotal)}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-blue-500 cursor-pointer">Chiết khấu (F6)</span>
@@ -661,7 +660,7 @@ export default function NewGoodsReceiptPage() {
                   </div>
                   <div className="flex justify-between items-center py-2 border-t border-slate-100">
                     <span className="font-bold">Tiền cần trả</span>
-                    <span className="font-bold tabular-nums">{fmtMoney.format(finalTotal)}</span>
+                    <span className="font-bold tabular-nums">{formatCurrencyVND(finalTotal)}</span>
                   </div>
                   <div className="pt-2">
                     <span className="text-slate-700 font-medium">Thanh toán cho NCC</span>
@@ -691,7 +690,7 @@ export default function NewGoodsReceiptPage() {
                   </div>
                   <div className="flex justify-between items-center py-3 border-t border-slate-100 mt-2">
                     <span className="text-slate-600">Còn phải trả</span>
-                    <span className="font-bold text-lg tabular-nums text-slate-800">{fmtMoney.format(remaining)}</span>
+                    <span className="font-bold text-lg tabular-nums text-slate-800">{formatCurrencyVND(remaining)}</span>
                   </div>
                 </div>
               </div>

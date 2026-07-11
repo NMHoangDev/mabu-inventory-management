@@ -1,5 +1,18 @@
 import type { InvoiceRow } from "./schema";
 
+const vndNumberFormatter = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
+
+/**
+ * Định dạng tiền tệ dùng chung toàn app: dấu chấm phân cách hàng nghìn +
+ * hậu tố "VND" rõ ràng (trước đây mỗi trang tự định nghĩa formatter riêng,
+ * nhiều nơi hiển thị số thô không phân cách hoặc chỉ có "đ").
+ */
+export function formatCurrencyVND(value: number | string | null | undefined): string {
+  const n = typeof value === "number" ? value : Number(value ?? 0);
+  const safe = Number.isFinite(n) ? n : 0;
+  return `${vndNumberFormatter.format(safe)} VND`;
+}
+
 export function cleanInvoiceProductName(value: string): string {
   if (!value) return value;
   // Strip trailing metadata tokens MH/KT/NSX/Model + value đi kèm.

@@ -14,6 +14,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseByOrder, type PurchaseOrderData } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 const STATUS_COLORS: Record<string, string> = {
   "Hoàn thành": "text-green-600 bg-green-50",
@@ -85,7 +86,7 @@ export default function ByOrderPage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <SummaryCard label="Tổng đơn nhập" value={fmtMoney.format(d.total_receipts)} sub="Đơn" color="blue" />
-            <SummaryCard label="Tổng giá trị" value={fmtMoney.format(d.total_amount)} sub="VNĐ" color="green" />
+            <SummaryCard label="Tổng giá trị" value={formatCurrencyVND(d.total_amount)} color="green" />
             <SummaryCard label="Hoàn thành" value={fmtMoney.format(d.completed)} sub={`${((d.completed / Math.max(d.total_receipts, 1)) * 100).toFixed(1)}%`} color="purple" />
             <SummaryCard label="Đã hủy" value={fmtMoney.format(d.cancelled)} sub={`${((d.cancelled / Math.max(d.total_receipts, 1)) * 100).toFixed(1)}%`} color="red" />
           </div>
@@ -108,7 +109,7 @@ export default function ByOrderPage() {
                   }
                 },
                 { key: "item_count", label: "Số SP", align: "right" },
-                { key: "total", label: "Tổng tiền", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                { key: "total", label: "Tổng tiền", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
               ]}
               data={d.orders}
             />

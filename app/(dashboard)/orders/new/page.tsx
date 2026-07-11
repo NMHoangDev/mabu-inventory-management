@@ -24,6 +24,7 @@ import {
   StickyNote,
   X
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface Product {
   id: string;
@@ -81,9 +82,6 @@ const SOURCES = [
 const BRANCHES = ["Chi nhánh chính", "Chi nhánh trung tâm", "Kho Quận 1"];
 const STAFF = "Nguyễn Văn A";
 
-function fmtMoney(n: number) {
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(n);
-}
 function fmtDate(d: Date) {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
 }
@@ -523,8 +521,8 @@ export default function NewOrderPage() {
                             ))}
                           </div>
                         </td>
-                        <td className="p-4 text-right text-sm">{fmtMoney(tierPrice(c))}</td>
-                        <td className="p-4 text-right text-sm font-semibold">{fmtMoney(tierPrice(c) * c.quantity)}</td>
+                        <td className="p-4 text-right text-sm">{formatCurrencyVND(tierPrice(c))}</td>
+                        <td className="p-4 text-right text-sm font-semibold">{formatCurrencyVND(tierPrice(c) * c.quantity)}</td>
                         <td className="p-4 text-right">
                           <button
                             onClick={() => removeItem(c.product_id)}
@@ -620,7 +618,7 @@ export default function NewOrderPage() {
             <div className="flex-1 space-y-3 mb-4">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-[#404754]">Tổng tiền sản phẩm ({cart.length})</span>
-                <span className="text-sm font-medium">{fmtMoney(subtotal)}</span>
+                <span className="text-sm font-medium">{formatCurrencyVND(subtotal)}</span>
               </div>
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-1 group cursor-pointer">
@@ -648,7 +646,7 @@ export default function NewOrderPage() {
               </div>
               <div className="flex justify-between items-center pt-3 border-t border-dashed border-[#c0c6d6]">
                 <span className="text-base font-bold text-[#0d1d29]">Khách phải trả</span>
-                <span className="text-base font-bold text-[#005baf]">{fmtMoney(total)}đ</span>
+                <span className="text-base font-bold text-[#005baf]">{formatCurrencyVND(total)}</span>
               </div>
             </div>
 
@@ -1071,7 +1069,7 @@ function ProductSearch({
                     </div>
                   </div>
                   <span className="text-sm font-semibold text-[#005baf] tabular-nums shrink-0">
-                    {fmtMoney(p.price)}đ
+                    {formatCurrencyVND(p.price)}
                   </span>
                 </button>
               );

@@ -24,6 +24,7 @@ import {
   type SupplierPurchaseData,
   type ProductPurchaseData,
 } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export default function ByTimePage() {
   const [period, setPeriod] = useState<Period>("7d");
@@ -115,9 +116,9 @@ export default function ByTimePage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <SummaryCard label="Tổng đơn nhập" value={fmtMoney.format(d.summary.total_receipts)} sub="Đơn" color="blue" />
-            <SummaryCard label="Tổng giá trị" value={fmtMoney.format(d.summary.total_amount)} sub="VNĐ" color="green" />
-            <SummaryCard label="Đã thanh toán" value={fmtMoney.format(d.summary.total_paid)} sub="VNĐ" color="purple" />
-            <SummaryCard label="Còn nợ" value={fmtMoney.format(d.summary.total_unpaid)} sub="VNĐ" color="red" />
+            <SummaryCard label="Tổng giá trị" value={formatCurrencyVND(d.summary.total_amount)} color="green" />
+            <SummaryCard label="Đã thanh toán" value={formatCurrencyVND(d.summary.total_paid)} color="purple" />
+            <SummaryCard label="Còn nợ" value={formatCurrencyVND(d.summary.total_unpaid)} color="red" />
           </div>
 
           {view === "chart" ? (
@@ -150,6 +151,7 @@ export default function ByTimePage() {
                       value: s.total_amount,
                       color: ["#0088ff", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"][i % 5],
                     }))}
+                    formatValue={formatCurrencyVND}
                   />
                 </div>
 
@@ -162,7 +164,7 @@ export default function ByTimePage() {
                       { key: "product_name", label: "Sản phẩm", align: "left" },
                       { key: "sku", label: "SKU", align: "center" },
                       { key: "total_qty", label: "SL nhập", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                      { key: "total_amount", label: "Tổng tiền", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                      { key: "total_amount", label: "Tổng tiền", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
                     ]}
                     data={d.products.slice(0, 8)}
                   />
@@ -186,7 +188,7 @@ export default function ByTimePage() {
                       return <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{String(v)}</span>;
                     }
                   },
-                  { key: "total", label: "Tổng tiền", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                  { key: "total", label: "Tổng tiền", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
                 ]}
                 data={d.orders}
               />

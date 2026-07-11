@@ -14,6 +14,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchAboveThreshold } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export default function AboveThresholdPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -79,7 +80,7 @@ export default function AboveThresholdPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <SummaryCard label="Sản phẩm vượt định mức" value={String(d.items.length)} sub="Loại" color="amber" />
             <SummaryCard label="Tổng vượt" value={fmtMoney.format(d.total_excess)} sub="Sản phẩm" color="red" />
-            <SummaryCard label="Vốn bị lock" value={fmtMoney.format(d.capital_locked)} sub="VNĐ" color="blue" />
+            <SummaryCard label="Vốn bị lock" value={formatCurrencyVND(d.capital_locked)} color="blue" />
             <SummaryCard label="TB vượt/SP" value={fmtMoney.format(d.total_excess / Math.max(d.items.length, 1))} sub="Sản phẩm" color="purple" />
           </div>
 
@@ -110,7 +111,7 @@ export default function AboveThresholdPage() {
                 { key: "current_qty", label: "Tồn hiện tại", align: "right", render: (v) => fmtMoney.format(Number(v)) },
                 { key: "max_stock", label: "Tồn tối đa", align: "right", render: (v) => fmtMoney.format(Number(v)) },
                 { key: "excess", label: "Vượt", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "capital_locked", label: "Vốn lock", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                { key: "capital_locked", label: "Vốn lock", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
               ]}
               data={d.items.sort((a, b) => b.excess - a.excess)}
             />

@@ -25,6 +25,7 @@ import {
   ChevronRight,
   RefreshCw,
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface OrderItem {
   id: string;
@@ -144,9 +145,6 @@ const NEXT_FULFILLMENT: Record<string, { key: string; label: string; danger?: bo
   returned: [],
 };
 
-function fmtMoney(n: number) {
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(n);
-}
 function fmtDate(iso: string) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -212,7 +210,7 @@ export default function OrderDetailPage() {
   // hề được gọi từ chính trang chi tiết đơn hàng.
   const markPaidNow = async () => {
     if (!order || busy) return;
-    if (!window.confirm(`Xác nhận đã nhận đủ ${fmtMoney(order.total - order.paid)}đ còn lại từ khách?`)) return;
+    if (!window.confirm(`Xác nhận đã nhận đủ ${formatCurrencyVND(order.total - order.paid)} còn lại từ khách?`)) return;
     setBusy(true);
     setActionError("");
     try {
@@ -431,11 +429,11 @@ export default function OrderDetailPage() {
                       <p className="text-xs text-[#404754]">SKU: {item.product_sku || "—"} · {item.unit}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-medium text-[#0d1d29]">{fmtMoney(item.unit_price)}đ</p>
+                      <p className="text-sm font-medium text-[#0d1d29]">{formatCurrencyVND(item.unit_price)}</p>
                       <p className="text-xs text-[#404754]">× {item.quantity}</p>
                     </div>
                     <div className="text-right w-28 shrink-0">
-                      <p className="text-sm font-bold text-[#005baf]">{fmtMoney(item.line_total)}đ</p>
+                      <p className="text-sm font-bold text-[#005baf]">{formatCurrencyVND(item.line_total)}</p>
                     </div>
                   </div>
                 ))}
@@ -444,23 +442,23 @@ export default function OrderDetailPage() {
               <div className="border-t border-[#c0c6d6] p-4 space-y-2 bg-[#fafbfc]">
                 <div className="flex justify-between text-sm text-[#404754]">
                   <span>Tổng tiền sản phẩm</span>
-                  <span>{fmtMoney(order.subtotal)}đ</span>
+                  <span>{formatCurrencyVND(order.subtotal)}</span>
                 </div>
                 {order.discount > 0 && (
                   <div className="flex justify-between text-sm text-[#404754]">
                     <span>Chiết khấu</span>
-                    <span className="text-green-600">-{fmtMoney(order.discount)}đ</span>
+                    <span className="text-green-600">-{formatCurrencyVND(order.discount)}</span>
                   </div>
                 )}
                 {order.shipping_fee > 0 && (
                   <div className="flex justify-between text-sm text-[#404754]">
                     <span>Phí giao hàng</span>
-                    <span>+{fmtMoney(order.shipping_fee)}đ</span>
+                    <span>+{formatCurrencyVND(order.shipping_fee)}</span>
                   </div>
                 )}
                 <div className="flex justify-between pt-2 border-t border-dashed border-[#c0c6d6]">
                   <span className="text-base font-bold text-[#0d1d29]">Khách phải trả</span>
-                  <span className="text-base font-bold text-[#005baf]">{fmtMoney(order.total)}đ</span>
+                  <span className="text-base font-bold text-[#005baf]">{formatCurrencyVND(order.total)}</span>
                 </div>
               </div>
             </section>
@@ -554,7 +552,7 @@ export default function OrderDetailPage() {
                       <TimelineItem
                         icon={<CheckCircle className="w-3.5 h-3.5" />}
                         time={order.updated_at}
-                        text={`Thanh toán thành công: ${fmtMoney(order.paid)}đ`}
+                        text={`Thanh toán thành công: ${formatCurrencyVND(order.paid)}`}
                         color="text-green-600 bg-green-100"
                       />
                     )}
@@ -572,15 +570,15 @@ export default function OrderDetailPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-[#404754]">Tổng tiền</span>
-                  <span className="font-medium">{fmtMoney(order.total)}đ</span>
+                  <span className="font-medium">{formatCurrencyVND(order.total)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-[#404754]">Đã thanh toán</span>
-                  <span className="font-medium text-green-600">{fmtMoney(order.paid)}đ</span>
+                  <span className="font-medium text-green-600">{formatCurrencyVND(order.paid)}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-dashed border-[#c0c6d6] pt-2">
                   <span className="text-[#404754] font-semibold">Còn lại</span>
-                  <span className="font-bold text-red-600">{fmtMoney(remaining)}đ</span>
+                  <span className="font-bold text-red-600">{formatCurrencyVND(remaining)}</span>
                 </div>
               </div>
               {actionError && (

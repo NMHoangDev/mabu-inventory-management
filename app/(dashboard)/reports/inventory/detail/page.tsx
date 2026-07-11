@@ -13,6 +13,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInventoryDetail } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 const STATE_STYLE: Record<string, string> = {
   active: "text-green-600 bg-green-50",
@@ -78,7 +79,7 @@ export default function InventoryDetailPage() {
             <SummaryCard label="Tổng sản phẩm" value={fmtMoney.format(d.items.length)} sub="Loại" color="blue" />
             <SummaryCard label="Tổng tồn" value={fmtMoney.format(d.total_quantity)} sub="Sản phẩm" color="green" />
             <SummaryCard label="Đã đặt hàng" value={fmtMoney.format(d.total_reserved)} sub="Sản phẩm" color="amber" />
-            <SummaryCard label="Giá trị" value={fmtMoney.format(d.total_value)} sub="VNĐ" color="purple" />
+            <SummaryCard label="Giá trị" value={formatCurrencyVND(d.total_value)} color="purple" />
           </div>
 
           <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
@@ -93,8 +94,8 @@ export default function InventoryDetailPage() {
                 { key: "branch", label: "Kho", align: "left" },
                 { key: "available_quantity", label: "Còn hàng", align: "right", render: (v) => fmtMoney.format(Number(v)) },
                 { key: "reserved_quantity", label: "Đã đặt", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "cost_price", label: "Đơn giá", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "total_value", label: "Giá trị", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                { key: "cost_price", label: "Đơn giá", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+                { key: "total_value", label: "Giá trị", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
                 {
                   key: "status", label: "Trạng thái", align: "center",
                   render: (v) => {

@@ -1,7 +1,7 @@
-const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export function fmtMoney(value: number): string {
-  return `${nf.format(value)}đ`;
+  return formatCurrencyVND(value);
 }
 
 export function fmtDate(iso: string | null | undefined): string {

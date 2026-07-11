@@ -21,8 +21,6 @@ interface SupplierRow {
   product_count: number;
 }
 
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
-
 function formatDate(iso: string): string {
   try {
     const d = new Date(iso);

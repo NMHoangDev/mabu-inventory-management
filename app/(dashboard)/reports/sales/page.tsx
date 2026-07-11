@@ -13,8 +13,7 @@ import {
   Truck,
   Undo2
 } from "lucide-react";
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 const SOURCE_LABELS: Record<string, string> = {
   store: "Tại quầy",
@@ -196,7 +195,7 @@ export default function SalesReportPage() {
                     <h3 className="text-gray-600 font-semibold text-sm uppercase tracking-wide">Doanh thu cửa hàng</h3>
                     <p className="text-gray-400 text-xs mt-0.5">7 ngày qua</p>
                   </div>
-                  <span className="text-3xl font-bold text-[#0088ff]">{fmtMoney.format(stats.revenue_7d)}</span>
+                  <span className="text-3xl font-bold text-[#0088ff]">{formatCurrencyVND(stats.revenue_7d)}</span>
                 </div>
 
                 <div className="flex items-center gap-1 text-[#0088ff] text-xs font-medium mb-4 cursor-pointer">
@@ -444,7 +443,7 @@ export default function SalesReportPage() {
                               {FULFILLMENT_LABELS[o.fulfillment_status] ?? o.fulfillment_status}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-right font-medium tabular-nums">{fmtMoney.format(o.total)} đ</td>
+                          <td className="px-4 py-3 text-right font-medium tabular-nums">{formatCurrencyVND(o.total)}</td>
                           <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(o.created_at)}</td>
                         </tr>
                       ))}

@@ -5,7 +5,6 @@ import { BarChart3, RefreshCw, Table2 } from "lucide-react";
 import {
   DateRangePicker,
   DonutChart,
-  fmtMoney,
   formatFullDate,
   getDateRange,
   Period,
@@ -16,6 +15,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseBySupplier, type SupplierPurchaseData } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export default function BySupplierPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -90,7 +90,7 @@ export default function BySupplierPage() {
               >
                 <div className="text-xs text-gray-500 truncate">{s.supplier_name}</div>
                 <div className={`text-sm font-bold mt-0.5 ${selected === i ? "text-blue-600" : "text-gray-800"}`}>
-                  {fmtMoney.format(s.total_amount)}
+                  {formatCurrencyVND(s.total_amount)}
                 </div>
                 <div className="text-[10px] text-gray-400 mt-0.5">{s.receipt_count} đơn</div>
               </button>
@@ -105,15 +105,15 @@ export default function BySupplierPage() {
                   <div className="space-y-3 mt-4">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">Tổng giá trị</span>
-                      <span className="font-semibold text-gray-800">{fmtMoney.format(cur.total_amount)}</span>
+                      <span className="font-semibold text-gray-800">{formatCurrencyVND(cur.total_amount)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">Đã thanh toán</span>
-                      <span className="font-semibold text-green-600">{fmtMoney.format(cur.total_paid)}</span>
+                      <span className="font-semibold text-green-600">{formatCurrencyVND(cur.total_paid)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">Còn nợ</span>
-                      <span className="font-semibold text-red-500">{fmtMoney.format(cur.unpaid)}</span>
+                      <span className="font-semibold text-red-500">{formatCurrencyVND(cur.unpaid)}</span>
                     </div>
                     <div className="h-2 bg-gray-100 rounded overflow-hidden">
                       <div className="h-full bg-green-500 rounded" style={{ width: `${(cur.total_paid / Math.max(cur.total_amount, 1)) * 100}%` }} />
@@ -131,6 +131,7 @@ export default function BySupplierPage() {
                     value: s.total_amount,
                     color: ["#0088ff", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"][i % 5],
                   }))}
+                  formatValue={formatCurrencyVND}
                 />
               </div>
             </div>
@@ -143,9 +144,9 @@ export default function BySupplierPage() {
                 columns={[
                   { key: "supplier_name", label: "Nhà cung cấp", align: "left" },
                   { key: "receipt_count", label: "Số đơn", align: "right" },
-                  { key: "total_amount", label: "Tổng tiền", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                  { key: "total_paid", label: "Đã thanh toán", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                  { key: "unpaid", label: "Còn nợ", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                  { key: "total_amount", label: "Tổng tiền", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+                  { key: "total_paid", label: "Đã thanh toán", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+                  { key: "unpaid", label: "Còn nợ", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
                 ]}
                 data={d.suppliers}
               />

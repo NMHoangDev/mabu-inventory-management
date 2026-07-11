@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, ImageIcon, Loader2, Package, Printer, Search, Settings, SlidersHorizontal } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 type InventoryProduct = {
   id: string;
@@ -184,9 +185,9 @@ export default function ProductInventoryPage() {
                   <td className={`px-4 py-3 text-center ${product.available_quantity < 0 ? "text-red-500" : product.available_quantity > 0 ? "text-emerald-600" : ""}`}>{fmtNumber(product.available_quantity)}</td>
                   <td className="px-4 py-3 text-center font-medium">{fmtNumber(product.total_inventory)}</td>
                   <td className="px-4 py-3 text-center text-slate-500">{fmtDate(product.created_at)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{fmtNumber(product.price)}</td>
-                  <td className="px-4 py-3 text-right">{fmtNumber(product.cost_price)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{fmtNumber(product.wholesale_price)}</td>
+                  <td className="px-4 py-3 text-right font-medium">{formatCurrencyVND(product.price)}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrencyVND(product.cost_price)}</td>
+                  <td className="px-4 py-3 text-right font-medium">{formatCurrencyVND(product.wholesale_price)}</td>
                 </tr>
               ))}
             </tbody>

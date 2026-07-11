@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Pencil, Package, Trash2, Star } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, FileText, Loader2, Pencil, Package, Trash2, Star, Truck } from "lucide-react";
 import { AddSupplierModal } from "@/components/suppliers/AddSupplierModal";
 import { SupplierProductSearch, type SupplierProductHit } from "@/components/suppliers/SupplierProductSearch";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface SupplierDetail {
   id: string;
@@ -39,7 +41,35 @@ interface SupplierProductRow {
   is_preferred: boolean;
 }
 
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
+interface PurchaseOrderRow {
+  id: string;
+  code: string;
+  status: string;
+  total: number;
+  created_at: string;
+  invoice_document_id: string | null;
+  invoice_file_name: string | null;
+}
+
+interface GoodsReceiptRow {
+  id: string;
+  code: string;
+  receipt_status: string;
+  order_status: string;
+  total_cost: number;
+  received_at: string;
+  purchase_order_id: string | null;
+  invoice_document_id: string | null;
+  invoice_file_name: string | null;
+}
+
+const PO_STATUS_LABEL: Record<string, string> = {
+  draft: "Nháp",
+  pending: "Chờ nhận hàng",
+  partial: "Nhận một phần",
+  completed: "Hoàn thành",
+  cancelled: "Đã hủy"
+};
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -66,6 +96,10 @@ export default function SupplierDetailPage() {
   const [productsLoading, setProductsLoading] = useState(true);
   const [addingProductId, setAddingProductId] = useState<string | null>(null);
   const [removingProductId, setRemovingProductId] = useState<string | null>(null);
+
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderRow[]>([]);
+  const [goodsReceipts, setGoodsReceipts] = useState<GoodsReceiptRow[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
 
   const fetchSupplier = useCallback(async () => {
     setLoading(true);
@@ -95,10 +129,25 @@ export default function SupplierDetailPage() {
     }
   }, [supplierId]);
 
+  const fetchOrders = useCallback(async () => {
+    setOrdersLoading(true);
+    try {
+      const res = await fetch(`/api/suppliers/${supplierId}/purchase-orders`);
+      const data = await res.json();
+      setPurchaseOrders(Array.isArray(data?.purchase_orders) ? data.purchase_orders : []);
+      setGoodsReceipts(Array.isArray(data?.goods_receipts) ? data.goods_receipts : []);
+    } catch {
+      /* giữ danh sách cũ nếu tải lại lỗi */
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, [supplierId]);
+
   useEffect(() => {
     fetchSupplier();
     fetchProducts();
-  }, [fetchSupplier, fetchProducts]);
+    fetchOrders();
+  }, [fetchSupplier, fetchProducts, fetchOrders]);
 
   async function handleAddProduct(hit: SupplierProductHit) {
     setAddingProductId(hit.id);
@@ -221,7 +270,7 @@ export default function SupplierDetailPage() {
                 <h2 className="font-semibold text-gray-800">Lịch sử giao dịch</h2>
               </div>
               <div className="p-4 space-y-3 text-sm">
-                <Field label="Tổng tiền đã mua" value={`${fmtMoney.format(supplier.total_purchased)}đ`} />
+                <Field label="Tổng tiền đã mua" value={formatCurrencyVND(supplier.total_purchased)} />
                 <Field label="Số đơn nhập" value={String(supplier.total_orders)} />
                 <Field label="Lần nhập gần nhất" value={formatDate(supplier.last_order_at)} />
               </div>
@@ -290,20 +339,23 @@ export default function SupplierDetailPage() {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <div className="font-medium text-gray-800 flex items-center gap-1">
+                            <Link
+                              href={`/products/inventory/${row.product_id}`}
+                              className="font-medium text-gray-800 hover:text-blue-600 hover:underline flex items-center gap-1"
+                            >
                               {row.product_name}
                               {row.is_preferred ? <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" /> : null}
-                            </div>
+                            </Link>
                             <div className="text-xs text-gray-500">
                               {row.sku ? `SKU: ${row.sku}` : "—"}
                               {row.unit ? ` · ${row.unit}` : ""}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums text-gray-700">
-                            {fmtMoney.format(row.stock)}
+                            {row.stock.toLocaleString("vi-VN")}
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums text-gray-700">
-                            {row.cost_price !== null ? `${fmtMoney.format(row.cost_price)}đ` : "—"}
+                            {row.cost_price !== null ? formatCurrencyVND(row.cost_price) : "—"}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button
@@ -321,6 +373,105 @@ export default function SupplierDetailPage() {
                           </td>
                         </tr>
                       ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="mt-6 bg-white rounded shadow-sm border border-gray-200">
+              <div className="p-4 border-b border-gray-100">
+                <h2 className="font-semibold text-gray-800">
+                  Đơn nhập hàng liên quan ({purchaseOrders.length + goodsReceipts.length})
+                </h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-y border-gray-200 text-gray-500 font-medium">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Mã đơn</th>
+                      <th className="px-4 py-3 text-left">Loại</th>
+                      <th className="px-4 py-3 text-left">Trạng thái</th>
+                      <th className="px-4 py-3 text-left">File hóa đơn scan</th>
+                      <th className="px-4 py-3 text-right">Tổng tiền</th>
+                      <th className="px-4 py-3 text-right">Ngày</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {ordersLoading ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-slate-500">
+                          <Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Đang tải...
+                        </td>
+                      </tr>
+                    ) : purchaseOrders.length === 0 && goodsReceipts.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-16 text-center text-slate-500">
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="bg-gray-100 p-5 rounded-full">
+                              <Truck className="h-10 w-10 text-gray-300" />
+                            </div>
+                            Chưa có đơn đặt hàng nhập hoặc phiếu nhập kho nào từ nhà cung cấp này.
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <>
+                        {purchaseOrders.map((po) => (
+                          <tr
+                            key={`po-${po.id}`}
+                            onClick={() => router.push(`/products/purchase-orders/${po.id}`)}
+                            className="cursor-pointer hover:bg-gray-50"
+                          >
+                            <td className="px-4 py-3 font-medium text-blue-600">{po.code}</td>
+                            <td className="px-4 py-3 text-gray-600">Đơn đặt hàng nhập</td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {PO_STATUS_LABEL[po.status] ?? po.status}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {po.invoice_file_name ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <FileText className="w-3.5 h-3.5 text-slate-400" />
+                                  {po.invoice_file_name}
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                              {formatCurrencyVND(po.total)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-gray-500">{formatDate(po.created_at)}</td>
+                          </tr>
+                        ))}
+                        {goodsReceipts.map((gr) => (
+                          <tr
+                            key={`gr-${gr.id}`}
+                            onClick={() => router.push(`/products/goods-receipts/${gr.id}`)}
+                            className="cursor-pointer hover:bg-gray-50"
+                          >
+                            <td className="px-4 py-3 font-medium text-blue-600">{gr.code}</td>
+                            <td className="px-4 py-3 text-gray-600">Phiếu nhập kho</td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {PO_STATUS_LABEL[gr.receipt_status] ?? gr.receipt_status}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {gr.invoice_file_name ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <FileText className="w-3.5 h-3.5 text-slate-400" />
+                                  {gr.invoice_file_name}
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                              {formatCurrencyVND(gr.total_cost)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-gray-500">{formatDate(gr.received_at)}</td>
+                          </tr>
+                        ))}
+                      </>
                     )}
                   </tbody>
                 </table>

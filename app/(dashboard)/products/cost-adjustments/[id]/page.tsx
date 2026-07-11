@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Wallet
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 type CostAdjustmentStatus = "draft" | "in_progress" | "completed" | "cancelled";
 
@@ -47,8 +48,6 @@ const STATUS_META: Record<CostAdjustmentStatus, { label: string; className: stri
   completed: { label: "Đã áp dụng", className: "bg-emerald-100 text-emerald-700" },
   cancelled: { label: "Đã hủy", className: "bg-red-100 text-red-700" }
 };
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function formatDateOnly(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -232,15 +231,15 @@ export default function CostAdjustmentDetailPage() {
                     <td className="px-3 py-2 font-mono text-xs">{it.sku || "—"}</td>
                     <td className="px-3 py-2 font-medium text-slate-900">{it.product_name}</td>
                     <td className="px-3 py-2 text-slate-600">{it.unit || "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{fmtMoney.format(it.current_cost)}</td>
-                    <td className="px-3 py-2 text-right font-medium tabular-nums">{fmtMoney.format(it.new_cost)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatCurrencyVND(it.current_cost)}</td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCurrencyVND(it.new_cost)}</td>
                     <td
                       className={`px-3 py-2 text-right tabular-nums ${
                         it.variance > 0 ? "text-emerald-700" : it.variance < 0 ? "text-red-600" : "text-slate-500"
                       }`}
                     >
                       {it.variance > 0 ? "+" : ""}
-                      {fmtMoney.format(it.variance)}
+                      {formatCurrencyVND(it.variance)}
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-500">{it.note || "—"}</td>
                   </tr>
@@ -253,7 +252,7 @@ export default function CostAdjustmentDetailPage() {
                   </td>
                   <td className="px-3 py-2 text-right font-bold tabular-nums">
                     {totalVariance > 0 ? "+" : ""}
-                    {fmtMoney.format(totalVariance)}
+                    {formatCurrencyVND(totalVariance)}
                   </td>
                   <td></td>
                 </tr>

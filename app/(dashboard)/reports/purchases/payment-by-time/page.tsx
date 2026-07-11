@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { BarChart3, RefreshCw, Table2 } from "lucide-react";
 import {
   DateRangePicker,
-  fmtMoney,
   formatDate,
   getDateRange,
   Period,
@@ -15,6 +14,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPaymentByTime } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export default function PaymentByTimePage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -77,9 +77,9 @@ export default function PaymentByTimePage() {
       {d ? (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <SummaryCard label="Tổng giá trị" value={fmtMoney.format(d.summary.total_amount)} sub="VNĐ" color="blue" />
-            <SummaryCard label="Đã thanh toán" value={fmtMoney.format(d.summary.total_paid)} sub={`${((d.summary.total_paid / Math.max(d.summary.total_amount, 1)) * 100).toFixed(1)}%`} color="green" />
-            <SummaryCard label="Chưa thanh toán" value={fmtMoney.format(d.summary.total_unpaid)} sub={`${((d.summary.total_unpaid / Math.max(d.summary.total_amount, 1)) * 100).toFixed(1)}%`} color="red" />
+            <SummaryCard label="Tổng giá trị" value={formatCurrencyVND(d.summary.total_amount)} color="blue" />
+            <SummaryCard label="Đã thanh toán" value={formatCurrencyVND(d.summary.total_paid)} sub={`${((d.summary.total_paid / Math.max(d.summary.total_amount, 1)) * 100).toFixed(1)}%`} color="green" />
+            <SummaryCard label="Chưa thanh toán" value={formatCurrencyVND(d.summary.total_unpaid)} sub={`${((d.summary.total_unpaid / Math.max(d.summary.total_amount, 1)) * 100).toFixed(1)}%`} color="red" />
             <SummaryCard label="Số giao dịch" value={String(d.daily.length)} sub="Ngày" color="amber" />
           </div>
 
@@ -94,6 +94,7 @@ export default function PaymentByTimePage() {
                     { label: "Chưa thanh toán", data: d.daily.map((pt) => pt.total_unpaid), color: "#ef4444" },
                   ]}
                   height={180}
+                  formatValue={formatCurrencyVND}
                 />
               </div>
               <div className="bg-white rounded-lg border border-gray-100 p-5 shadow-sm">

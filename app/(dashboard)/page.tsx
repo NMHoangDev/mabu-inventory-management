@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import type { InvoiceDocument } from "@/lib/shared/schema";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 function fmtNumber(value: number) {
   return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value);
@@ -234,24 +235,21 @@ function SmartDashboardStrip() {
   const cards = [
     {
       title: "Doanh thu hôm nay",
-      value: fmtNumber(kpis.revenue_today.current),
-      suffix: "đ",
+      value: formatCurrencyVND(kpis.revenue_today.current),
       trend: kpis.revenue_today,
       icon: <Wallet className="h-5 w-5" />,
       color: "from-blue-500 to-indigo-500",
     },
     {
       title: "Doanh thu tuần",
-      value: fmtNumber(kpis.revenue_week.current),
-      suffix: "đ",
+      value: formatCurrencyVND(kpis.revenue_week.current),
       trend: kpis.revenue_week,
       icon: <TrendingUp className="h-5 w-5" />,
       color: "from-emerald-500 to-teal-500",
     },
     {
       title: "Doanh thu tháng",
-      value: fmtNumber(kpis.revenue_month.current),
-      suffix: "đ",
+      value: formatCurrencyVND(kpis.revenue_month.current),
       trend: kpis.revenue_month,
       icon: <TrendingUp className="h-5 w-5" />,
       color: "from-violet-500 to-purple-500",
@@ -269,7 +267,7 @@ function SmartDashboardStrip() {
     { label: "Khách hàng", value: fmtNumber(kpis.customers_total), sub: `+${kpis.customers_new_this_month} mới tháng này`, icon: <Users className="h-4 w-4" />, href: "/customers" },
     { label: "Sản phẩm", value: fmtNumber(kpis.products_total), sub: `${kpis.products_out_of_stock} hết · ${kpis.products_low_stock} sắp hết`, icon: <Package className="h-4 w-4" />, href: "/inventory" },
     { label: "Vận đơn chờ", value: fmtNumber(kpis.pending_shippings), sub: "Đang giao / chờ pickup", icon: <Truck className="h-4 w-4" />, href: "/shipping/orders" },
-    { label: "Cần nhập hàng", value: fmtNumber(kpis.pending_reorder_value) + "đ", sub: "Gợi ý từ AI", icon: <Sparkles className="h-4 w-4" />, href: "/inventory" },
+    { label: "Cần nhập hàng", value: formatCurrencyVND(kpis.pending_reorder_value), sub: "Gợi ý từ AI", icon: <Sparkles className="h-4 w-4" />, href: "/inventory" },
   ];
 
   return (
@@ -293,18 +291,17 @@ function SmartDashboardStrip() {
       {/* Bento grid: 4 large cards + 4 small */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (
-          <div key={c.title} className="relative overflow-hidden rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
-            <div className={`absolute -right-6 -top-6 h-20 w-20 rounded-full bg-gradient-to-br ${c.color} opacity-10`} />
-            <div className={`inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br ${c.color} text-white mb-2`}>
+          <div key={c.title} className="group relative overflow-hidden rounded-2xl bg-white border border-slate-200/60 p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-blue-200">
+            <div className={`absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br ${c.color} opacity-10 transition-transform duration-500 group-hover:scale-150`} />
+            <div className={`inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${c.color} text-white mb-3 shadow-soft`}>
               {c.icon}
             </div>
-            <div className="text-xs text-slate-500">{c.title}</div>
-            <div className="flex items-baseline gap-1 mt-1">
-              <span className="text-2xl font-bold text-slate-900 tabular-nums">{c.value}</span>
-              {c.suffix && <span className="text-sm text-slate-500">{c.suffix}</span>}
+            <div className="text-xs font-medium text-slate-500">{c.title}</div>
+            <div className="flex items-baseline gap-1 mt-1.5">
+              <span className="text-2xl font-bold text-slate-900 tabular-nums tracking-tight">{c.value}</span>
             </div>
             {c.trend && <TrendBadge trend={c.trend} />}
-            {c.sub && <div className="text-[10px] text-slate-500 mt-1">{c.sub}</div>}
+            {c.sub && <div className="text-[10px] text-slate-500 mt-1.5 font-medium">{c.sub}</div>}
           </div>
         ))}
       </div>
@@ -314,17 +311,17 @@ function SmartDashboardStrip() {
           <Link
             key={s.label}
             href={s.href}
-            className="rounded-xl bg-white border border-slate-200 p-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all"
+            className="group rounded-2xl bg-white border border-slate-200/60 p-4 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-300 hover:shadow-md"
           >
             <div className="flex items-center justify-between">
-              <div className="text-xs text-slate-500 flex items-center gap-1.5">
-                <span className="text-blue-600">{s.icon}</span>
+              <div className="text-xs font-semibold text-slate-500 flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 transition-colors group-hover:bg-blue-100">{s.icon}</span>
                 {s.label}
               </div>
-              <ChevronRight className="h-3 w-3 text-slate-400" />
+              <ChevronRight className="h-4 w-4 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-blue-500" />
             </div>
-            <div className="text-lg font-bold text-slate-900 mt-1 tabular-nums">{s.value}</div>
-            <div className="text-[10px] text-slate-500 mt-0.5">{s.sub}</div>
+            <div className="text-lg font-bold text-slate-900 mt-2 tabular-nums">{s.value}</div>
+            <div className="text-[10px] font-medium text-slate-500 mt-1">{s.sub}</div>
           </Link>
         ))}
       </div>

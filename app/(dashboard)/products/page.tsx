@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
-import { normalizeFinancials, normalizeNumberText, parseNumeric, cleanInvoiceProductName } from "@/lib/shared/format";
+import { normalizeFinancials, normalizeNumberText, parseNumeric, cleanInvoiceProductName, formatCurrencyVND } from "@/lib/shared/format";
 import type { InvoiceRow } from "@/lib/shared/schema";
 import {
   Plus,
@@ -53,14 +53,6 @@ type ProductDraft = {
 
 function cleanText(value: unknown) {
   return String(value ?? "").trim();
-}
-
-function fmtNumber(value: number) {
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value);
-}
-
-function fmtCurrency(value: number) {
-  return `${fmtNumber(value)} ₫`;
 }
 
 export default function ProductsPage() {
@@ -1330,13 +1322,13 @@ export default function ProductsPage() {
                           {p.brand_name && <div className="text-[10px] text-slate-400 mt-0.5">{p.brand_name}</div>}
                         </td>
                         <td className="px-6 py-4 text-right font-semibold text-slate-700 tabular-nums">
-                          {fmtCurrency(Number(p.price) || 0)}
+                          {formatCurrencyVND(Number(p.price) || 0)}
                         </td>
                         <td className="px-6 py-4 text-right text-slate-600 tabular-nums">
-                          {fmtCurrency(Number(p.compare_at_price) || 0)}
+                          {formatCurrencyVND(Number(p.compare_at_price) || 0)}
                         </td>
                         <td className="px-6 py-4 text-right text-slate-600 tabular-nums">
-                          {fmtCurrency(Number(p.cost_price) || 0)}
+                          {formatCurrencyVND(Number(p.cost_price) || 0)}
                         </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex items-center justify-center gap-1">
@@ -1488,7 +1480,7 @@ export default function ProductsPage() {
                           )}
                         </td>
                         <td className="px-3 py-3 text-right font-mono text-slate-600">
-                          {product.purchasePrice ? fmtCurrency(parseNumeric(product.purchasePrice) ?? 0) : "-"}
+                          {product.purchasePrice ? formatCurrencyVND(parseNumeric(product.purchasePrice) ?? 0) : "-"}
                         </td>
                         <td className="px-3 py-3">
                           {productEditMode ? (
@@ -1499,7 +1491,7 @@ export default function ProductsPage() {
                               placeholder="Giá bán" 
                             />
                           ) : (
-                            productMeta[product.id]?.salePrice ? fmtCurrency(parseNumeric(productMeta[product.id]?.salePrice) ?? 0) : <span className="text-slate-400 italic">Chưa có</span>
+                            productMeta[product.id]?.salePrice ? formatCurrencyVND(parseNumeric(productMeta[product.id]?.salePrice) ?? 0) : <span className="text-slate-400 italic">Chưa có</span>
                           )}
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -1623,7 +1615,7 @@ export default function ProductsPage() {
             <div className="p-6 space-y-4">
               <div className="bg-slate-50 p-3.5 rounded border border-slate-150 text-xs text-slate-600 space-y-1">
                 <div><strong>Tên hàng đầu vào:</strong> {cleanInvoiceProductName(selectedCandidate.inputProductName)}</div>
-                <div><strong>Giá nhập gần nhất:</strong> {selectedCandidate.purchasePrice ? fmtCurrency(parseNumeric(selectedCandidate.purchasePrice) ?? 0) : "-"}</div>
+                <div><strong>Giá nhập gần nhất:</strong> {selectedCandidate.purchasePrice ? formatCurrencyVND(parseNumeric(selectedCandidate.purchasePrice) ?? 0) : "-"}</div>
                 <div><strong>Số lượng quét được:</strong> {selectedCandidate.rowCount} dòng hóa đơn</div>
               </div>
 

@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
-import { parseNumeric, cleanInvoiceProductName } from "@/lib/shared/format";
+import { parseNumeric, cleanInvoiceProductName, formatCurrencyVND } from "@/lib/shared/format";
 import type { InvoiceRow } from "@/lib/shared/schema";
 
 type ProductCandidate = {
@@ -39,10 +39,6 @@ function cleanText(value: unknown) {
 
 function fmtNumber(value: number) {
   return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value);
-}
-
-function fmtCurrency(value: number) {
-  return `${fmtNumber(value)} đ`;
 }
 
 export default function SalesPage() {
@@ -185,7 +181,7 @@ export default function SalesPage() {
                     <td className="px-3 py-2 font-semibold">{product.sku || <span className="text-warning-foreground">Cần nhập</span>}</td>
                     <td className="max-w-[280px] truncate px-3 py-2" title={cleanInvoiceProductName(product.retailName || product.inputProductName)}>{cleanInvoiceProductName(product.retailName || product.inputProductName) || "-"}</td>
                     <td className="px-3 py-2">{product.unit || "-"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{product.purchasePrice ? fmtCurrency(parseNumeric(product.purchasePrice) ?? 0) : "-"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{product.purchasePrice ? formatCurrencyVND(parseNumeric(product.purchasePrice) ?? 0) : "-"}</td>
                     <td className="px-3 py-2">
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${product.missing.length === 0 ? "bg-emerald-50 text-emerald-700" : "bg-warning-bg text-warning-foreground"}`}>
                         {product.missing.length === 0 ? "Tạo được" : `Thiếu ${product.missing.join(", ")}`}
@@ -228,7 +224,7 @@ export default function SalesPage() {
                     <td className="px-3 py-2 font-semibold">{receipt.receiptNumber}</td>
                     <td className="max-w-[260px] truncate px-3 py-2 text-xs text-muted-foreground" title={receipt.sourceFileName}>{receipt.sourceFileName}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtNumber(receipt.itemCount)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{fmtCurrency(receipt.totalAmount)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatCurrencyVND(receipt.totalAmount)}</td>
                     <td className="px-3 py-2">
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${receipt.missingSkuCount === 0 ? "bg-emerald-50 text-emerald-700" : "bg-warning-bg text-warning-foreground"}`}>
                         {receipt.missingSkuCount === 0 ? "Nháp hợp lệ" : `Thiếu ${receipt.missingSkuCount} SKU`}

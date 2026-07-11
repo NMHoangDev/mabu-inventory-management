@@ -13,6 +13,7 @@ import {
   X,
   Package
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface Supplier {
   id: string;
@@ -599,7 +600,7 @@ export default function NewPurchaseOrderPage() {
                           </div>
                         </div>
                         <span className="text-xs text-blue-600 whitespace-nowrap">
-                          {formatNumber(p.default_cost)}đ
+                          {formatCurrencyVND(p.default_cost)}
                         </span>
                       </button>
                     ))}
@@ -716,7 +717,7 @@ export default function NewPurchaseOrderPage() {
                       </div>
                       <div className="col-span-2 flex items-center justify-end gap-2">
                         <span className="font-medium text-slate-800 tabular-nums">
-                          {formatNumber(lineTotal)}
+                          {formatCurrencyVND(lineTotal)}
                         </span>
                         <button
                           onClick={() => removeItem(it.rowKey)}
@@ -780,7 +781,7 @@ export default function NewPurchaseOrderPage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Tổng tiền</span>
-                  <span className="font-medium tabular-nums">{formatNumber(subtotal)}</span>
+                  <span className="font-medium tabular-nums">{formatCurrencyVND(subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm items-center">
                   <span className="text-blue-500">Chiết khấu (F6)</span>
@@ -808,7 +809,7 @@ export default function NewPurchaseOrderPage() {
                 </div>
                 <div className="flex justify-between text-base font-bold pt-4 border-t border-dashed">
                   <span className="text-slate-800">Tiền cần trả</span>
-                  <span className="text-slate-800 tabular-nums">{formatNumber(finalTotal)}</span>
+                  <span className="text-slate-800 tabular-nums">{formatCurrencyVND(finalTotal)}</span>
                 </div>
               </div>
             </div>

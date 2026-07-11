@@ -8,6 +8,7 @@ import {
   ChevronRight,
   HelpCircle
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface VoucherDetail {
   id: string;
@@ -32,8 +33,6 @@ interface VoucherDetail {
   created_at: string;
   updated_at: string;
 }
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function formatDateTime(iso: string): string {
   try {
@@ -147,7 +146,7 @@ export default function ReceiptVoucherDetailPage() {
                   </div>
                   <div>
                     <div className="text-xs text-gray-500 mb-1">Số tiền thu</div>
-                    <div className="font-bold text-green-600 text-base">{fmtMoney.format(voucher.amount)} đ</div>
+                    <div className="font-bold text-green-600 text-base">{formatCurrencyVND(voucher.amount)}</div>
                   </div>
                   {voucher.note && (
                     <div className="col-span-2">

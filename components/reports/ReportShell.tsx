@@ -193,11 +193,16 @@ export function SummaryCard({
 export function SvgBarChart({
   labels,
   datasets,
-  height = 200
+  height = 200,
+  formatValue = (v: number) => fmtMoney.format(v)
 }: {
   labels: string[];
   datasets: { label: string; data: number[]; color: string }[];
   height?: number;
+  // Formatter dùng cho tooltip <title>. Mặc định giữ hành vi cũ (số thô, dùng
+  // cho chart số lượng/tồn kho). Truyền formatCurrencyVND khi chart hiển thị
+  // tiền (doanh thu, giá trị nhập/xuất...) để có hậu tố "VND" nhất quán.
+  formatValue?: (v: number) => string;
 }) {
   if (labels.length === 0) {
     return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Chưa có dữ liệu</div>;
@@ -228,7 +233,7 @@ export function SvgBarChart({
                 opacity={0.85}
                 rx="2"
               >
-                <title>{ds.label}: {fmtMoney.format(v)}</title>
+                <title>{ds.label}: {formatValue(v)}</title>
               </rect>
             );
           })
@@ -333,10 +338,14 @@ export function SvgLineChart({
 
 export function DonutChart({
   data, // [{label, value, color}]
-  size = 140
+  size = 140,
+  formatValue = (v: number) => fmtMoney.format(v)
 }: {
   data: { label: string; value: number; color: string }[];
   size?: number;
+  // Xem ghi chú formatValue ở SvgBarChart — mặc định giữ số thô, truyền
+  // formatCurrencyVND khi data là tiền.
+  formatValue?: (v: number) => string;
 }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (total === 0) {
@@ -373,7 +382,7 @@ export function DonutChart({
         ))}
         <circle cx={cx} cy={cy} r={r * 0.55} fill="white" />
         <text x={cx} y={cy - 6} textAnchor="middle" fontSize="14" fontWeight="bold" fill="#1f2937">
-          {fmtMoney.format(total)}
+          {formatValue(total)}
         </text>
         <text x={cx} y={cy + 10} textAnchor="middle" fontSize="9" fill="#6b7280">
           Tổng
@@ -385,7 +394,7 @@ export function DonutChart({
             <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: s.color }} />
             <span className="text-gray-600">{s.label}</span>
             <span className="font-medium text-gray-800">{(s.pct * 100).toFixed(1)}%</span>
-            <span className="text-gray-400 tabular-nums">{fmtMoney.format(s.value)}</span>
+            <span className="text-gray-400 tabular-nums">{formatValue(s.value)}</span>
           </div>
         ))}
       </div>

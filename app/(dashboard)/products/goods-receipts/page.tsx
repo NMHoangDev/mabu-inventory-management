@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { downloadCsv } from "@/lib/shared/csv-export";
+import { formatCurrencyVND } from "@/lib/shared/format";
 import {
   Loader2,
   Plus,
@@ -59,8 +60,6 @@ function formatDateTime(iso: string): string {
     return iso;
   }
 }
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 export default function GoodsReceiptsListPage() {
   const [rows, setRows] = useState<GoodsReceiptRow[]>([]);
@@ -274,7 +273,7 @@ export default function GoodsReceiptsListPage() {
                       <td className="p-3">{row.branch || "Chi nhánh mặc định"}</td>
                       <td className="p-3">{row.supplier_name || "—"}</td>
                       <td className="p-3">{row.staff || "—"}</td>
-                      <td className="p-3 text-right font-medium tabular-nums">{fmtMoney.format(row.total_cost)}</td>
+                      <td className="p-3 text-right font-medium tabular-nums">{formatCurrencyVND(row.total_cost)}</td>
                     </tr>
                   );
                 })

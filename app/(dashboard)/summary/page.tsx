@@ -20,7 +20,7 @@ import {
   X
 } from "lucide-react";
 import { excelColumns, type ExcelColumnKey, type InvoiceRow, type InvoiceDocument } from "@/lib/shared/schema";
-import { calculateVatFields, normalizeDateForInput, normalizeFinancials, normalizeNumberText, parseNumeric } from "@/lib/shared/format";
+import { calculateVatFields, normalizeDateForInput, normalizeFinancials, normalizeNumberText, parseNumeric, formatCurrencyVND } from "@/lib/shared/format";
 import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import type { Lookups } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import ScanReceiptOptionsModal from "@/app/(dashboard)/scan/components/ScanReceiptOptionsModal";
@@ -80,10 +80,6 @@ const vatOptions = ["0", "5", "8", "10"];
 
 function fmtNumber(value: number) {
   return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value);
-}
-
-function fmtCurrency(value: number) {
-  return `${fmtNumber(value)} đ`;
 }
 
 function includesText(value: unknown, query: string) {
@@ -926,15 +922,15 @@ export default function SummaryPage() {
             <div className="space-y-2 px-4 py-3 text-sm">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-slate-500">Giá trị thuế</span>
-                <span className="font-semibold tabular-nums">{fmtCurrency(parseNumeric(vatConfirm.preview.vatAmount) ?? 0)}</span>
+                <span className="font-semibold tabular-nums">{formatCurrencyVND(parseNumeric(vatConfirm.preview.vatAmount) ?? 0)}</span>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <span className="text-slate-500">Thành tiền sau thuế</span>
-                <span className="font-semibold tabular-nums">{fmtCurrency(parseNumeric(vatConfirm.preview.totalAfterTax) ?? 0)}</span>
+                <span className="font-semibold tabular-nums">{formatCurrencyVND(parseNumeric(vatConfirm.preview.totalAfterTax) ?? 0)}</span>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <span className="text-slate-500">Đơn giá sau thuế</span>
-                <span className="font-semibold tabular-nums">{fmtNumber(parseNumeric(vatConfirm.preview.unitPriceAfterTax) ?? 0)}</span>
+                <span className="font-semibold tabular-nums">{formatCurrencyVND(parseNumeric(vatConfirm.preview.unitPriceAfterTax) ?? 0)}</span>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">

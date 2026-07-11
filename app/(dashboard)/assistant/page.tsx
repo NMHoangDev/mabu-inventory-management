@@ -16,6 +16,7 @@ import {
   Bot,
   User as UserIcon,
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface AssistantDataView {
   columns: string[];
@@ -275,7 +276,7 @@ function DataView({ data }: { data: AssistantDataView }) {
                 />
               </div>
               <span className="w-24 text-right font-mono text-xs text-slate-700">
-                {fmt.format(Number(r.revenue ?? 0))} đ
+                {formatCurrencyVND(Number(r.revenue ?? 0))}
               </span>
             </div>
           ))}

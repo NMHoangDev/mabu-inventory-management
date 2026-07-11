@@ -15,6 +15,7 @@ import {
   Banknote,
   CreditCard
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 type ReceiptStatus = "pending" | "in_progress" | "completed" | "cancelled";
 type PaymentStatus = "unpaid" | "partial" | "paid";
@@ -82,8 +83,6 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   bank_transfer: "Chuyển khoản",
   card: "Quẹt thẻ"
 };
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function formatDateOnly(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -310,17 +309,16 @@ export default function GoodsReceiptDetailPage() {
               )
             }
           />
-          <Field label="Công nợ" value={fmtMoney.format(gr.total_cost)} suffix=" đ" highlight />
-          <Field label="Tổng đơn nhập" value={fmtMoney.format(totalCost)} suffix=" đ" highlight />
-          <Field label="Trả hàng" value="0" suffix=" đ" />
+          <Field label="Công nợ" value={formatCurrencyVND(gr.total_cost)} highlight />
+          <Field label="Tổng đơn nhập" value={formatCurrencyVND(totalCost)} highlight />
+          <Field label="Trả hàng" value={formatCurrencyVND(0)} />
           <Field
             label="Đã thanh toán"
-            value={`${fmtMoney.format(gr.paid)} đ${gr.paid > 0 ? ` (${PAYMENT_METHOD_LABELS[(gr.payment_method as PaymentMethod) || "cash"] ?? gr.payment_method})` : ""}`}
+            value={`${formatCurrencyVND(gr.paid)}${gr.paid > 0 ? ` (${PAYMENT_METHOD_LABELS[(gr.payment_method as PaymentMethod) || "cash"] ?? gr.payment_method})` : ""}`}
           />
           <Field
             label="Còn lại"
-            value={fmtMoney.format(Math.max(0, gr.total_cost - gr.paid))}
-            suffix=" đ"
+            value={formatCurrencyVND(Math.max(0, gr.total_cost - gr.paid))}
           />
           <Field
             label="Tồn kho"
@@ -380,13 +378,13 @@ export default function GoodsReceiptDetailPage() {
                       {Number(it.received_qty).toLocaleString("vi-VN")}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {fmtMoney.format(Number(it.unit_cost))}
+                      {formatCurrencyVND(Number(it.unit_cost))}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {fmtMoney.format(Number(it.discount) || 0)}
+                      {formatCurrencyVND(Number(it.discount) || 0)}
                     </td>
                     <td className="px-3 py-2 text-right font-medium tabular-nums">
-                      {fmtMoney.format(Number(it.line_total))}
+                      {formatCurrencyVND(Number(it.line_total))}
                     </td>
                     <td className="px-3 py-2 text-center text-xs">
                       {it.stock_added_at ? (
@@ -415,7 +413,7 @@ export default function GoodsReceiptDetailPage() {
                   </td>
                   <td colSpan={2}></td>
                   <td className="px-3 py-2 text-right font-bold tabular-nums">
-                    {fmtMoney.format(totalCost)} đ
+                    {formatCurrencyVND(totalCost)}
                   </td>
                   <td></td>
                 </tr>
@@ -451,7 +449,7 @@ export default function GoodsReceiptDetailPage() {
                 className="w-44 rounded border border-slate-300 px-3 py-1.5 text-right text-sm"
               />
               <div className="mt-1 text-[11px] text-slate-500">
-                Còn phải trả: {fmtMoney.format(Math.max(0, gr.total_cost - gr.paid))} đ
+                Còn phải trả: {formatCurrencyVND(Math.max(0, gr.total_cost - gr.paid))}
               </div>
             </div>
             <div className="flex gap-2">

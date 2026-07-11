@@ -2,15 +2,7 @@
 
 import Link from "next/link";
 import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
-import { parseNumeric } from "@/lib/shared/format";
-
-function fmtNumber(value: number) {
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value);
-}
-
-function fmtCurrency(value: number) {
-  return `${fmtNumber(value)} đ`;
-}
+import { formatCurrencyVND, parseNumeric } from "@/lib/shared/format";
 
 export default function ReportsPage() {
   const { store, setError } = useApp();
@@ -69,7 +61,7 @@ export default function ReportsPage() {
                 <div key={supplier}>
                   <div className="mb-1 flex justify-between gap-3 text-sm">
                     <span className="truncate">{supplier}</span>
-                    <span className="tabular-nums">{fmtCurrency(total)}</span>
+                    <span className="tabular-nums">{formatCurrencyVND(total)}</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded bg-muted">
                     <div className="h-full rounded bg-primary" style={{ width: `${Math.min(100, totalBeforeTax ? (total / totalBeforeTax) * 100 : 0)}%` }} />

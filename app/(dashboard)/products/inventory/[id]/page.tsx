@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Copy, HelpCircle, ImageIcon, Info, Loader2, MessageCircle, Trash2 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 type InventoryProductDetail = {
   id: string;
@@ -158,11 +159,11 @@ export default function InventoryProductDetailPage() {
         <section className="overflow-hidden rounded-lg border bg-white shadow-soft lg:col-span-2">
           <div className="border-b px-4 py-3 font-bold text-slate-800">Giá sản phẩm</div>
           <div className="grid grid-cols-1 gap-y-4 p-6 text-sm sm:grid-cols-2">
-            <div className="flex"><span className="w-32 text-slate-500">Giá bán lẻ</span><span className="font-medium text-slate-900">: {fmtNumber(product.price)}</span></div>
-            <div className="flex"><span className="w-32 text-slate-500">Giá Sỉ</span><span className="font-medium text-slate-900">: {fmtNumber(product.wholesale_price)}</span></div>
-            <div className="flex"><span className="w-32 text-slate-500">Giá Sỉ Lớn</span><span className="font-medium text-slate-900">: {fmtNumber(product.wholesale_price)}</span></div>
+            <div className="flex"><span className="w-32 text-slate-500">Giá bán lẻ</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.price)}</span></div>
+            <div className="flex"><span className="w-32 text-slate-500">Giá Sỉ</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.wholesale_price)}</span></div>
+            <div className="flex"><span className="w-32 text-slate-500">Giá Sỉ Lớn</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.wholesale_price)}</span></div>
             <div />
-            <div className="flex"><span className="w-32 text-slate-500">Giá nhập</span><span className="font-medium text-slate-900">: {fmtNumber(product.cost_price)}</span></div>
+            <div className="flex"><span className="w-32 text-slate-500">Giá nhập</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.cost_price)}</span></div>
             <div className="flex"><span className="w-32 text-slate-500">Giá Nhập = 0</span><span className="font-medium text-slate-900">: {product.cost_price === 0 ? "0" : "---"}</span></div>
           </div>
         </section>
@@ -203,7 +204,7 @@ export default function InventoryProductDetailPage() {
                 <tr key={location.id} className="text-slate-700 hover:bg-slate-50">
                   <td className="px-4 py-4">{location.name}</td>
                   <td className="px-4 py-4 text-center">{fmtNumber(location.quantity)}</td>
-                  <td className="px-4 py-4 text-center">{fmtNumber(location.cost_price)}</td>
+                  <td className="px-4 py-4 text-center">{formatCurrencyVND(location.cost_price)}</td>
                   <td className="px-4 py-4 text-center">{fmtNumber(location.available_quantity)}</td>
                   <td className="px-4 py-4 text-center">{fmtNumber(location.quantity_on_hold)}</td>
                   <td className="px-4 py-4 text-center">{fmtNumber(location.incoming_quantity)}</td>

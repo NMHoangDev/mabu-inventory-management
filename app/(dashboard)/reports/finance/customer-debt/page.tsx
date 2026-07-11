@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { ReportShell, ReportTable, fmtMoney, formatFullDate } from "@/components/reports/ReportShell";
+import { ReportShell, ReportTable, formatFullDate } from "@/components/reports/ReportShell";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface DebtRow {
   id: string | null;
@@ -53,7 +54,7 @@ export default function CustomerDebtPage() {
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
           <div className="text-xs text-gray-500">Tổng công nợ phải thu</div>
-          <div className="mt-1 text-2xl font-bold text-red-600">{fmtMoney.format(totalOutstanding)} đ</div>
+          <div className="mt-1 text-2xl font-bold text-red-600">{formatCurrencyVND(totalOutstanding)}</div>
         </div>
         <div className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
           <div className="text-xs text-gray-500">Số khách hàng còn nợ</div>
@@ -71,13 +72,13 @@ export default function CustomerDebtPage() {
             { key: "name", label: "Khách hàng", align: "left" },
             { key: "phone", label: "Điện thoại", align: "left", render: (v) => (v ? String(v) : "—") },
             { key: "total_transactions", label: "Số đơn", align: "right" },
-            { key: "total_amount", label: "Tổng giá trị", align: "right", render: (v) => `${fmtMoney.format(Number(v))} đ` },
-            { key: "total_paid", label: "Đã thanh toán", align: "right", render: (v) => `${fmtMoney.format(Number(v))} đ` },
+            { key: "total_amount", label: "Tổng giá trị", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+            { key: "total_paid", label: "Đã thanh toán", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
             {
               key: "outstanding",
               label: "Còn nợ",
               align: "right",
-              render: (v) => <span className="font-semibold text-red-600">{fmtMoney.format(Number(v))} đ</span>
+              render: (v) => <span className="font-semibold text-red-600">{formatCurrencyVND(Number(v))}</span>
             },
             { key: "last_at", label: "Đơn gần nhất", align: "right", render: (v) => (v ? formatFullDate(String(v)) : "—") }
           ]}

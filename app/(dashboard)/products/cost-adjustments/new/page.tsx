@@ -9,6 +9,7 @@ import {
   Package,
   X
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface ProductHit {
   product_id: string;
@@ -30,8 +31,6 @@ interface DraftItem {
   new_cost: number;
   note: string;
 }
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function parseNum(text: string): number {
   const v = Number(text.replace(/[^0-9.-]/g, ""));
@@ -399,7 +398,7 @@ export default function NewCostAdjustmentPage() {
                                 <div>
                                   <div className="text-sm font-medium text-gray-800">{p.product_name}</div>
                                   <div className="text-xs text-gray-500">
-                                    SKU: {p.sku || "—"} · Hiện tại: {fmtMoney.format(p.current_cost)}đ
+                                    SKU: {p.sku || "—"} · Hiện tại: {formatCurrencyVND(p.current_cost)}
                                   </div>
                                 </div>
                               </div>
@@ -484,10 +483,10 @@ export default function NewCostAdjustmentPage() {
                               <div className="text-xs text-gray-500">{it.sku ? `SKU: ${it.sku}` : "—"}</div>
                             </td>
                             <td className="px-6 py-3 text-right tabular-nums text-gray-700">
-                              {fmtMoney.format(it.current_cost)}
+                              {formatCurrencyVND(it.current_cost)}
                             </td>
                             <td className={`px-6 py-3 text-right tabular-nums font-medium ${varClass}`}>
-                              {variance > 0 ? "+" : ""}{fmtMoney.format(variance)}
+                              {variance > 0 ? "+" : ""}{formatCurrencyVND(variance)}
                             </td>
                             <td className="px-6 py-3 text-right">
                               <input
@@ -575,7 +574,7 @@ export default function NewCostAdjustmentPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">Tổng chênh lệch</span>
                   <span className={`font-bold tabular-nums ${totalVariance > 0 ? "text-blue-600" : totalVariance < 0 ? "text-red-600" : "text-gray-700"}`}>
-                    {totalVariance > 0 ? "+" : ""}{fmtMoney.format(totalVariance)}
+                    {totalVariance > 0 ? "+" : ""}{formatCurrencyVND(totalVariance)}
                   </span>
                 </div>
               </div>

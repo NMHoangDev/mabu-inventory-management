@@ -16,6 +16,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseByProduct, type ProductPurchaseData } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export default function ByProductPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -84,8 +85,8 @@ export default function ByProductPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <SummaryCard label="Tổng sản phẩm" value={String(d.products.length)} sub="Loại" color="blue" />
             <SummaryCard label="Tổng số lượng" value={fmtMoney.format(d.totalQty)} sub="Sản phẩm" color="purple" />
-            <SummaryCard label="Tổng giá trị" value={fmtMoney.format(d.totalAmount)} sub="VNĐ" color="green" />
-            <SummaryCard label="Giá TB" value={fmtMoney.format(d.totalAmount / Math.max(d.totalQty, 1))} sub="VNĐ/sản phẩm" color="amber" />
+            <SummaryCard label="Tổng giá trị" value={formatCurrencyVND(d.totalAmount)} color="green" />
+            <SummaryCard label="Giá TB" value={formatCurrencyVND(d.totalAmount / Math.max(d.totalQty, 1))} sub="/ sản phẩm" color="amber" />
           </div>
 
           {view === "chart" && (
@@ -118,8 +119,8 @@ export default function ByProductPage() {
                 { key: "product_name", label: "Sản phẩm", align: "left" },
                 { key: "sku", label: "SKU", align: "center" },
                 { key: "total_qty", label: "SL nhập", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "avg_price", label: "Đơn giá TB", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "total_amount", label: "Tổng tiền", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                { key: "avg_price", label: "Đơn giá TB", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+                { key: "total_amount", label: "Tổng tiền", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
               ]}
               data={d.products}
             />

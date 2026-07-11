@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { formatCurrencyVND } from "@/lib/shared/format";
 import {
   Info,
   HelpCircle,
@@ -104,8 +105,6 @@ const DEFAULT_FEES: FeeRule[] = [
     enabled: false,
   },
 ];
-
-const fmt = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 export default function ShippingConfigPage() {
   const [tab, setTab] = useState<"general" | "fees">("general");
@@ -546,7 +545,7 @@ export default function ShippingConfigPage() {
 
             <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm text-slate-600">
               <strong className="text-[#005baf]">Mẹo:</strong> Có {feeRules.filter((r) => r.enabled).length} / {feeRules.length} quy tắc đang bật.
-              Tổng số tiền vận chuyển dự kiến = <span className="font-mono">{fmt.format(feeRules.reduce((a, r) => a + r.base_fee, 0))} đ</span> (phí cơ bản).
+              Tổng số tiền vận chuyển dự kiến = <span className="font-mono">{formatCurrencyVND(feeRules.reduce((a, r) => a + r.base_fee, 0))}</span> (phí cơ bản).
             </div>
           </div>
         )}

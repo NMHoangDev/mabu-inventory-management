@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   DateRangePicker,
-  fmtMoney,
   formatFullDate,
   getDateRange,
   Period,
@@ -12,6 +11,7 @@ import {
   ReportShell,
   ReportTable
 } from "@/components/reports/ReportShell";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface TopCustomerRow {
   customer_id: string | null;
@@ -97,7 +97,7 @@ export default function CustomersReportPage() {
             </div>
             <div className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
               <div className="text-xs text-gray-500">Giá trị TB / đơn</div>
-              <div className="mt-1 text-2xl font-bold text-gray-800">{fmtMoney.format(data.avg_order_value)} đ</div>
+              <div className="mt-1 text-2xl font-bold text-gray-800">{formatCurrencyVND(data.avg_order_value)}</div>
             </div>
           </div>
 
@@ -111,7 +111,7 @@ export default function CustomersReportPage() {
                 { key: "name", label: "Khách hàng", align: "left" },
                 { key: "phone", label: "Điện thoại", align: "left", render: (v) => (v ? String(v) : "—") },
                 { key: "total_orders", label: "Số đơn", align: "right" },
-                { key: "total_revenue", label: "Doanh thu", align: "right", render: (v) => `${fmtMoney.format(Number(v))} đ` },
+                { key: "total_revenue", label: "Doanh thu", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
                 { key: "last_order_at", label: "Đơn gần nhất", align: "right", render: (v) => (v ? formatFullDate(String(v)) : "—") }
               ]}
               data={data.top_customers}

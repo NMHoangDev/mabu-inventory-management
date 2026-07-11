@@ -21,6 +21,7 @@ import {
   ArrowRight,
   Headphones,
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface OrderItem {
   id: string;
@@ -114,9 +115,6 @@ const SHIP_CLASS: Record<string, string> = {
   returned: "bg-gray-100 text-gray-500",
 };
 
-function fmtMoney(n: number) {
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(n);
-}
 function fmtDate(iso: string) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -252,7 +250,7 @@ export default function OrdersPage() {
             </div>
           </div>
           <div className="flex flex-col">
-            <span className="text-2xl font-bold text-[#005baf]">{fmtMoney(stats.revenue_today)}đ</span>
+            <span className="text-2xl font-bold text-[#005baf]">{formatCurrencyVND(stats.revenue_today)}</span>
             <span className="text-xs text-[#404754]">
               {stats.completed_today > 0 ? `+${stats.completed_today} đơn hoàn tất` : "Chưa có đơn hôm nay"}
             </span>
@@ -396,7 +394,7 @@ export default function OrdersPage() {
                         {SHIP_LABEL[o.fulfillment_status]}
                       </span>
                     </td>
-                    <td className="p-4 text-right font-medium text-[#0d1d29]">{fmtMoney(o.total)}đ</td>
+                    <td className="p-4 text-right font-medium text-[#0d1d29]">{formatCurrencyVND(o.total)}</td>
                   </tr>
                 ))
               )}

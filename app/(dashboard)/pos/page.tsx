@@ -25,6 +25,7 @@ import {
   ShoppingBag
 } from "lucide-react";
 import { zaloAuthApi } from "@/lib/zalo-api";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -103,11 +104,6 @@ function tierPrice(item: PosCartItem): number {
 
 function unitPrice(item: PosCartItem): number {
   return item.custom_price ?? tierPrice(item);
-}
-
-function fmtMoney(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(Math.round(n));
 }
 
 function parseNum(text: string): number {
@@ -486,7 +482,7 @@ export default function PosPage() {
         }).catch(() => undefined);
       }
 
-      setNotice({ text: `Đã thanh toán đơn ${data.code} — ${fmtMoney(total)}đ.`, orderId: data.id });
+      setNotice({ text: `Đã thanh toán đơn ${data.code} — ${formatCurrencyVND(total)}.`, orderId: data.id });
       resetTab(activeTab.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Có lỗi khi thanh toán.");
@@ -659,7 +655,7 @@ export default function PosPage() {
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-800 truncate">{p.name}</div>
                         <div className="text-xs text-gray-500">
-                          SKU: {p.sku || "—"} · {fmtMoney(p.price)}đ
+                          SKU: {p.sku || "—"} · {formatCurrencyVND(p.price)}
                         </div>
                       </div>
                     </button>
@@ -759,7 +755,7 @@ export default function PosPage() {
                     </div>
                   )}
                   <span className="text-[11px] text-gray-700 line-clamp-2 leading-tight">{p.name}</span>
-                  <span className="text-[11px] font-medium text-blue-600">{fmtMoney(p.price)}đ</span>
+                  <span className="text-[11px] font-medium text-blue-600">{formatCurrencyVND(p.price)}</span>
                 </button>
               ))}
             </div>
@@ -878,7 +874,7 @@ export default function PosPage() {
                           </div>
                         ) : (
                           <div className="flex flex-col items-end gap-1">
-                            <span className="font-medium">{fmtMoney(unitPrice(c))}</span>
+                            <span className="font-medium">{formatCurrencyVND(unitPrice(c))}</span>
                             <div className="inline-flex gap-0.5" role="group" aria-label="Chọn loại giá">
                               {(["cost", "wholesale", "retail"] as PriceTier[]).map((tier) => (
                                 <button
@@ -899,7 +895,7 @@ export default function PosPage() {
                           </div>
                         )}
                       </td>
-                      <td className="p-2 text-right font-medium">{fmtMoney(unitPrice(c) * c.quantity)}</td>
+                      <td className="p-2 text-right font-medium">{formatCurrencyVND(unitPrice(c) * c.quantity)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1087,7 +1083,7 @@ export default function PosPage() {
               <span>
                 Tổng tiền: <span className="font-bold text-black">({activeTab.cart.length})</span> sản phẩm
               </span>
-              <span className="font-medium text-black">{fmtMoney(subtotal)}</span>
+              <span className="font-medium text-black">{formatCurrencyVND(subtotal)}</span>
             </div>
             <div className="flex justify-between items-center text-gray-600">
               <span title="Hệ thống chưa hỗ trợ cấu hình thuế VAT">VAT (0%)</span>
@@ -1106,7 +1102,7 @@ export default function PosPage() {
             </div>
             <div className="flex justify-between items-center font-bold text-lg pt-4 border-t border-gray-100">
               <span className="text-blue-700 uppercase">Khách phải trả</span>
-              <span className="text-blue-700">{fmtMoney(total)}</span>
+              <span className="text-blue-700">{formatCurrencyVND(total)}</span>
             </div>
             <div className="flex justify-between items-center text-gray-600">
               <div className="flex flex-col">
@@ -1151,7 +1147,7 @@ export default function PosPage() {
             </div>
             <div className="flex justify-between items-center text-gray-600">
               <span className="font-medium text-black">Tiền thừa trả khách</span>
-              <span className="font-bold text-lg">{fmtMoney(changeDue)}</span>
+              <span className="font-bold text-lg">{formatCurrencyVND(changeDue)}</span>
             </div>
           </div>
 
@@ -1316,9 +1312,9 @@ function CustomerInfoModal({ customerId, onClose }: { customerId: string; onClos
               <InfoRow label="Điện thoại" value={customer.phone} />
               <InfoRow label="Email" value={customer.email} />
               <InfoRow label="Nhóm khách" value={customer.group_name || "—"} />
-              <InfoRow label="Tổng đã mua" value={`${fmtMoney(customer.total_spent)}đ`} />
+              <InfoRow label="Tổng đã mua" value={formatCurrencyVND(customer.total_spent)} />
               <InfoRow label="Số đơn đã mua" value={String(customer.total_orders)} />
-              <InfoRow label="Nợ hiện tại" value={`${fmtMoney(customer.total_debt)}đ`} />
+              <InfoRow label="Nợ hiện tại" value={formatCurrencyVND(customer.total_debt)} />
               <div className="pt-2">
                 <Link href={`/customers`} target="_blank" className="text-blue-600 text-xs hover:underline">
                   Xem đầy đủ hồ sơ khách hàng →

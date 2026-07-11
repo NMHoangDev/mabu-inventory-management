@@ -16,6 +16,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInventorySummary, fetchInventoryDetail, fetchInOutBalance } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 // Không có bảng ledger lịch sử nên không thể vẽ "tồn kho tuyệt đối theo
 // ngày" một cách trung thực — thay bằng biến động luỹ kế (nhập - xuất cộng
@@ -106,9 +107,9 @@ export default function InventorySummaryPage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <SummaryCard label="Tổng sản phẩm" value={fmtMoney.format(d.summary.total_products)} sub="Loại" color="blue" />
-            <SummaryCard label="Giá trị tồn kho" value={fmtMoney.format(d.summary.total_value)} sub="VNĐ" color="green" />
+            <SummaryCard label="Giá trị tồn kho" value={formatCurrencyVND(d.summary.total_value)} color="green" />
             <SummaryCard label="Tổng tồn kho" value={fmtMoney.format(d.summary.total_stock)} sub="Sản phẩm" color="purple" />
-            <SummaryCard label="Giá trị" value={fmtMoney.format(d.detail.summary.total_value)} sub="VNĐ" color="amber" />
+            <SummaryCard label="Giá trị" value={formatCurrencyVND(d.detail.summary.total_value)} color="amber" />
           </div>
 
           {view === "chart" && (
@@ -146,8 +147,8 @@ export default function InventorySummaryPage() {
                 { key: "category_name", label: "Danh mục", align: "left" },
                 { key: "branch", label: "Kho", align: "left" },
                 { key: "available_quantity", label: "Tồn kho", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "cost_price", label: "Đơn giá", align: "right", render: (v) => fmtMoney.format(Number(v)) },
-                { key: "total_value", label: "Giá trị", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                { key: "cost_price", label: "Đơn giá", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
+                { key: "total_value", label: "Giá trị", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
               ]}
               data={d.detail.items}
             />

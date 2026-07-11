@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { formatCurrencyVND } from "@/lib/shared/format";
 import {
   Box,
   Clock,
@@ -32,8 +33,6 @@ interface ShippingStats {
   };
   delivery_success_rate: number;
 }
-
-const fmt = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function todayRange() {
   const d = new Date();
@@ -141,26 +140,26 @@ export default function ShippingOverviewPage() {
                   <tr>
                     <td className="py-3 text-blue-500">Đang thu hộ <HelpCircle className="w-3 h-3 inline" /></td>
                     <td className="text-right py-3">{s?.audit.collecting.orders ?? 0}</td>
-                    <td className="text-right py-3">{fmt.format(s?.audit.collecting.cod ?? 0)}</td>
-                    <td className="text-right py-3">{fmt.format(s?.audit.collecting.fee ?? 0)}</td>
+                    <td className="text-right py-3">{formatCurrencyVND(s?.audit.collecting.cod ?? 0)}</td>
+                    <td className="text-right py-3">{formatCurrencyVND(s?.audit.collecting.fee ?? 0)}</td>
                   </tr>
                   <tr>
                     <td className="py-3 text-blue-500">Chờ đối soát <HelpCircle className="w-3 h-3 inline" /></td>
                     <td className="text-right py-3">{s?.audit.waiting_audit.orders ?? 0}</td>
-                    <td className="text-right py-3">{fmt.format(s?.audit.waiting_audit.cod ?? 0)}</td>
-                    <td className="text-right py-3">{fmt.format(s?.audit.waiting_audit.fee ?? 0)}</td>
+                    <td className="text-right py-3">{formatCurrencyVND(s?.audit.waiting_audit.cod ?? 0)}</td>
+                    <td className="text-right py-3">{formatCurrencyVND(s?.audit.waiting_audit.fee ?? 0)}</td>
                   </tr>
                   <tr>
                     <td className="py-3 text-blue-500">Đã đối soát <HelpCircle className="w-3 h-3 inline" /></td>
                     <td className="text-right py-3">{s?.audit.audited.orders ?? 0}</td>
-                    <td className="text-right py-3">{fmt.format(s?.audit.audited.cod ?? 0)}</td>
-                    <td className="text-right py-3">{fmt.format(s?.audit.audited.fee ?? 0)}</td>
+                    <td className="text-right py-3">{formatCurrencyVND(s?.audit.audited.cod ?? 0)}</td>
+                    <td className="text-right py-3">{formatCurrencyVND(s?.audit.audited.fee ?? 0)}</td>
                   </tr>
                   <tr className="font-bold text-slate-800">
                     <td className="py-4">Tổng</td>
                     <td className="text-right py-4">{auditTotal.orders}</td>
-                    <td className="text-right py-4">{fmt.format(auditTotal.cod)}</td>
-                    <td className="text-right py-4">{fmt.format(auditTotal.fee)}</td>
+                    <td className="text-right py-4">{formatCurrencyVND(auditTotal.cod)}</td>
+                    <td className="text-right py-4">{formatCurrencyVND(auditTotal.fee)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -244,9 +243,9 @@ export default function ShippingOverviewPage() {
             <h4 className="text-sm font-semibold text-slate-700 mb-4">Báo cáo chi tiết</h4>
             <div className="space-y-3 text-sm">
               <ReportRow label="Tổng vận đơn" value={auditTotal.orders} />
-              <ReportRow label="Tổng chi phí" value={fmt.format(auditTotal.fee)} />
-              <ReportRow label="Phí trung bình" value={auditTotal.orders > 0 ? fmt.format(auditTotal.fee / auditTotal.orders) : "0"} />
-              <ReportRow label="Tổng tiền thu hộ" value={fmt.format(auditTotal.cod)} />
+              <ReportRow label="Tổng chi phí" value={formatCurrencyVND(auditTotal.fee)} />
+              <ReportRow label="Phí trung bình" value={auditTotal.orders > 0 ? formatCurrencyVND(auditTotal.fee / auditTotal.orders) : "0"} />
+              <ReportRow label="Tổng tiền thu hộ" value={formatCurrencyVND(auditTotal.cod)} />
               <ReportRow label="Tỉ lệ phí/tiền thu hộ" value={auditTotal.cod > 0 ? `${((auditTotal.fee / auditTotal.cod) * 100).toFixed(1)}%` : "0"} />
             </div>
           </div>

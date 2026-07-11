@@ -74,8 +74,6 @@ const STATUS_BADGE: Record<ShippingStatus, { bg: string; text: string; border: s
 // đối tác thật (mirror PARTNERS ở shipping/orders/new/page.tsx).
 const PARTNERS = ["NINJA VAN", "JNT Express", "GHN", "GHTK", "Viettel Post", "Chành Lộc Hà"];
 
-const fmt = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
-
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);

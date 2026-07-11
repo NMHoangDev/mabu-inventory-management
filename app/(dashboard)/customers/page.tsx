@@ -13,6 +13,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import { downloadCsv } from "@/lib/shared/csv-export";
+import { formatCurrencyVND } from "@/lib/shared/format";
 import { CustomerAddress, CustomerFormData, CustomerFormModal } from "./CustomerFormModal";
 
 interface Customer {
@@ -51,10 +52,6 @@ type Tab = "all" | "transacting";
 interface SortState {
   field: "name" | "total_spent";
   asc: boolean;
-}
-
-function fmt(v: number) {
-  return new Intl.NumberFormat("vi-VN").format(v);
 }
 
 export default function CustomersPage() {
@@ -405,13 +402,13 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-gray-700">
                       {c.total_debt > 0 ? (
-                        <span className="text-red-500">{fmt(c.total_debt)}</span>
+                        <span className="text-red-500">{formatCurrencyVND(c.total_debt)}</span>
                       ) : (
                         <span className="text-gray-400">0</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-700">
-                      {c.total_spent > 0 ? fmt(c.total_spent) : ""}
+                      {c.total_spent > 0 ? formatCurrencyVND(c.total_spent) : ""}
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       {c.has_account ? (

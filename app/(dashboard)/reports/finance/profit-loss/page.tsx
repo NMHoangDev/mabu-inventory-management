@@ -10,8 +10,7 @@ import {
   TrendingDown,
   TrendingUp
 } from "lucide-react";
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 type Period = "7d" | "30d" | "90d" | "this_month" | "last_month" | "this_quarter" | "custom";
 
@@ -317,7 +316,7 @@ export default function ProfitLossPage() {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <SummaryCard
                 label="Doanh thu"
-                value={fmtMoney.format(d.revenue)}
+                value={formatCurrencyVND(d.revenue)}
                 sub={`${d.order_count} đơn`}
                 color="blue"
                 trend={revenueTrend !== null ? `${revenueTrend >= 0 ? "+" : ""}${revenueTrend.toFixed(1)}%` : undefined}
@@ -325,13 +324,13 @@ export default function ProfitLossPage() {
               />
               <SummaryCard
                 label="Giá vốn (COGS)"
-                value={fmtMoney.format(d.cogs)}
+                value={formatCurrencyVND(d.cogs)}
                 sub={`${grossMargin.toFixed(1)}%`}
                 color="amber"
               />
               <SummaryCard
                 label="Lợi nhuận gộp"
-                value={fmtMoney.format(d.gross_profit)}
+                value={formatCurrencyVND(d.gross_profit)}
                 sub={`${grossMargin.toFixed(1)}% margin`}
                 color="green"
                 trend={grossProfitTrend !== null ? `${grossProfitTrend >= 0 ? "+" : ""}${grossProfitTrend.toFixed(1)}%` : undefined}
@@ -339,13 +338,13 @@ export default function ProfitLossPage() {
               />
               <SummaryCard
                 label="Chi phí"
-                value={fmtMoney.format(d.expenses)}
+                value={formatCurrencyVND(d.expenses)}
                 sub={`${((d.expenses / Math.max(d.revenue, 1)) * 100).toFixed(1)}% doanh thu`}
                 color="red"
               />
               <SummaryCard
                 label="Lợi nhuận ròng"
-                value={fmtMoney.format(d.net_profit)}
+                value={formatCurrencyVND(d.net_profit)}
                 sub={`${netMargin.toFixed(1)}% margin`}
                 color={d.net_profit >= 0 ? "green" : "red"}
                 trend={netProfitTrend !== null ? `${netProfitTrend >= 0 ? "+" : ""}${netProfitTrend.toFixed(1)}%` : undefined}
@@ -424,7 +423,7 @@ export default function ProfitLossPage() {
                         <div key={pm.method}>
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-slate-700">{PAYMENT_METHOD_LABELS[pm.method] ?? pm.method}</span>
-                            <span className="font-medium tabular-nums">{fmtMoney.format(pm.amount)}</span>
+                            <span className="font-medium tabular-nums">{formatCurrencyVND(pm.amount)}</span>
                           </div>
                           <div className="h-2 bg-slate-100 rounded overflow-hidden">
                             <div className="h-full bg-blue-500 rounded" style={{ width: `${pct}%` }} />
@@ -468,7 +467,7 @@ export default function ProfitLossPage() {
                             </div>
                           </td>
                           <td className="px-5 py-3 text-right tabular-nums text-slate-600">{p.quantity_sold}</td>
-                          <td className="px-5 py-3 text-right tabular-nums font-medium text-slate-800">{fmtMoney.format(p.revenue)}</td>
+                          <td className="px-5 py-3 text-right tabular-nums font-medium text-slate-800">{formatCurrencyVND(p.revenue)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -481,7 +480,7 @@ export default function ProfitLossPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white rounded-lg border border-slate-200 p-5 text-center shadow-sm">
                 <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Giá trị TB đơn hàng</div>
-                <div className="text-2xl font-bold text-slate-800">{fmtMoney.format(d.avg_order_value)}</div>
+                <div className="text-2xl font-bold text-slate-800">{formatCurrencyVND(d.avg_order_value)}</div>
               </div>
               <div className="bg-white rounded-lg border border-slate-200 p-5 text-center shadow-sm">
                 <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Số đơn hàng</div>

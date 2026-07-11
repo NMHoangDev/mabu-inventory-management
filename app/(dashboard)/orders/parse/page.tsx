@@ -16,6 +16,7 @@ import {
   ShoppingCart,
   Image as ImageIcon,
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface ParsedItem {
   product_name: string;
@@ -45,8 +46,6 @@ const SAMPLE_INPUTS = [
   "Mai 0901234567 mua 2 áo thun đen size L 250k, 1 quần jean xanh 420k. Giao 12 Nguyễn Huệ Q1. Trả trước 50%",
   "Anh Tuấn 0987654321 đặt 3 hộp cà phê 85k, giao chung cư Vinhomes. Note: giao giờ hành chính",
 ];
-
-const fmt = new Intl.NumberFormat("vi-VN");
 
 export default function ParseOrderPage() {
   const router = useRouter();
@@ -297,7 +296,7 @@ export default function ParseOrderPage() {
               <div className="border-t border-slate-200 pt-2 text-sm space-y-1">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Tạm tính</span>
-                  <span className="tabular-nums font-medium">{fmt.format(itemsTotal)}đ</span>
+                  <span className="tabular-nums font-medium">{formatCurrencyVND(itemsTotal)}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500">Giảm giá</span>
@@ -319,7 +318,7 @@ export default function ParseOrderPage() {
                 </div>
                 <div className="flex justify-between font-bold text-base pt-1 border-t border-slate-200">
                   <span>Tổng</span>
-                  <span className="text-blue-600">{fmt.format(totalComputed)}đ</span>
+                  <span className="text-blue-600">{formatCurrencyVND(totalComputed)}</span>
                 </div>
               </div>
 

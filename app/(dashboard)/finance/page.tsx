@@ -16,6 +16,7 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface AgingRow {
   bucket: string;
@@ -54,9 +55,6 @@ interface FinanceSummary {
   avg_days_to_pay: number;
   incoming_cod_30d: number;
 }
-
-const fmt = new Intl.NumberFormat("vi-VN");
-const fmtMoney = (n: number) => fmt.format(Math.round(n)) + "đ";
 
 export default function FinancePage() {
   const [data, setData] = useState<FinanceSummary | null>(null);
@@ -114,28 +112,28 @@ export default function FinancePage() {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <KpiCard
           title="Phải thu khách"
-          value={fmtMoney(data.total_receivable)}
+          value={formatCurrencyVND(data.total_receivable)}
           sub={`${data.unpaid_order_count} đơn chưa thu xong`}
           icon={<ArrowDownCircle className="h-5 w-5" />}
           color="from-emerald-500 to-teal-500"
         />
         <KpiCard
           title="Phải trả NCC"
-          value={fmtMoney(data.total_payable)}
+          value={formatCurrencyVND(data.total_payable)}
           sub="Tổng hóa đơn 60 ngày gần nhất"
           icon={<ArrowUpCircle className="h-5 w-5" />}
           color="from-red-500 to-rose-500"
         />
         <KpiCard
           title="Dòng tiền tháng"
-          value={fmtMoney(cashflow)}
-          sub={`Đã thu ${fmtMoney(data.cash_in_this_month)}`}
+          value={formatCurrencyVND(cashflow)}
+          sub={`Đã thu ${formatCurrencyVND(data.cash_in_this_month)}`}
           icon={cashflow >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
           color={cashflow >= 0 ? "from-blue-500 to-indigo-500" : "from-orange-500 to-amber-500"}
         />
         <KpiCard
           title="COD sắp về"
-          value={fmtMoney(data.incoming_cod_30d)}
+          value={formatCurrencyVND(data.incoming_cod_30d)}
           sub={`TB ${data.avg_days_to_pay} ngày để thu tiền`}
           icon={<Banknote className="h-5 w-5" />}
           color="from-violet-500 to-purple-500"
@@ -165,7 +163,7 @@ export default function FinancePage() {
                       {isCritical && <AlertCircle className="inline h-3 w-3 ml-1" />}
                     </span>
                     <span className="text-slate-600">
-                      {row.order_count} đơn · <span className="font-mono font-semibold">{fmtMoney(row.amount)}</span>
+                      {row.order_count} đơn · <span className="font-mono font-semibold">{formatCurrencyVND(row.amount)}</span>
                     </span>
                   </div>
                   <div className="h-2 bg-slate-100 rounded overflow-hidden">
@@ -210,7 +208,7 @@ export default function FinancePage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-bold text-red-600 tabular-nums">{fmtMoney(d.total_debt)}</div>
+                    <div className="text-sm font-bold text-red-600 tabular-nums">{formatCurrencyVND(d.total_debt)}</div>
                   </div>
                 </div>
               ))}
@@ -250,9 +248,9 @@ export default function FinancePage() {
                       </Link>
                     </td>
                     <td className="py-2 px-2">{p.customer_name}</td>
-                    <td className="py-2 px-2 text-right tabular-nums">{fmtMoney(p.amount)}</td>
-                    <td className="py-2 px-2 text-right tabular-nums text-emerald-600">{fmtMoney(p.paid)}</td>
-                    <td className="py-2 px-2 text-right tabular-nums font-semibold text-red-600">{fmtMoney(p.remaining)}</td>
+                    <td className="py-2 px-2 text-right tabular-nums">{formatCurrencyVND(p.amount)}</td>
+                    <td className="py-2 px-2 text-right tabular-nums text-emerald-600">{formatCurrencyVND(p.paid)}</td>
+                    <td className="py-2 px-2 text-right tabular-nums font-semibold text-red-600">{formatCurrencyVND(p.remaining)}</td>
                     <td className="py-2 px-2 text-right text-xs">
                       <span className={p.days_old > 30 ? "text-red-600 font-semibold" : p.days_old > 7 ? "text-amber-600" : "text-slate-500"}>
                         {p.days_old} ngày

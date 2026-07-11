@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Search, Loader2, Package } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 export interface SupplierProductHit {
   id: string;
@@ -21,8 +22,6 @@ interface SupplierProductSearchProps {
   inputClassName?: string;
   autoFocus?: boolean;
 }
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 /**
  * Ô tìm sản phẩm dùng chung cho các trang nhà cung cấp — tái sử dụng thẳng
@@ -133,7 +132,7 @@ export function SupplierProductSearch({
                 <div>
                   <div className="text-sm font-medium text-slate-800">{p.name}</div>
                   <div className="text-xs text-slate-500">
-                    SKU: {p.sku || "—"} · {fmtMoney.format(p.price)}đ
+                    SKU: {p.sku || "—"} · {formatCurrencyVND(p.price)}
                   </div>
                 </div>
               </button>

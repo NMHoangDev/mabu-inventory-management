@@ -14,6 +14,7 @@ import {
   ChevronRight,
   ExternalLink
 } from "lucide-react";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 interface PurchaseOrderItem {
   id: string;
@@ -62,7 +63,6 @@ const STATUS_META: Record<PurchaseOrderStatus, { label: string; className: strin
   cancelled: { label: "Đã hủy", className: "bg-red-100 text-red-700" }
 };
 
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 const fmtDate = new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
 
 function formatDateOnly(iso: string | null | undefined): string {
@@ -240,9 +240,9 @@ export default function PurchaseOrderDetailPage() {
           />
           <Field label="Nhà cung cấp" value={order.supplier_name || "—"} />
           <Field label="Địa chỉ" value="—" />
-          <Field label="Công nợ" value={fmtMoney.format(order.total)} suffix=" đ" />
-          <Field label="Tổng đơn nhập" value={fmtMoney.format(totalCost)} suffix=" đ" highlight />
-          <Field label="Trả hàng" value="0" suffix=" đ" />
+          <Field label="Công nợ" value={formatCurrencyVND(order.total)} />
+          <Field label="Tổng đơn nhập" value={formatCurrencyVND(totalCost)} highlight />
+          <Field label="Trả hàng" value={formatCurrencyVND(0)} />
           <Field label="Chi nhánh" value={order.branch || "—"} />
           <Field label="Chính sách nhập" value="Theo đơn đặt hàng" />
           <Field label="Chính sách giá" value="—" />
@@ -341,13 +341,13 @@ export default function PurchaseOrderDetailPage() {
                       {Number(it.received_qty).toLocaleString("vi-VN")}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {fmtMoney.format(Number(it.unit_cost))}
+                      {formatCurrencyVND(Number(it.unit_cost))}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {fmtMoney.format(Number(it.discount) || 0)}
+                      {formatCurrencyVND(Number(it.discount) || 0)}
                     </td>
                     <td className="px-3 py-2 text-right font-medium tabular-nums">
-                      {fmtMoney.format(Number(it.line_total))}
+                      {formatCurrencyVND(Number(it.line_total))}
                     </td>
                   </tr>
                 ))}
@@ -365,7 +365,7 @@ export default function PurchaseOrderDetailPage() {
                   </td>
                   <td colSpan={2}></td>
                   <td className="px-3 py-2 text-right font-bold tabular-nums">
-                    {fmtMoney.format(totalCost)} đ
+                    {formatCurrencyVND(totalCost)}
                   </td>
                 </tr>
               </tfoot>

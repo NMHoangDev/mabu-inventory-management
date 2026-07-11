@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { formatCurrencyVND } from "@/lib/shared/format";
 import {
   ArrowLeft,
   Printer,
@@ -101,8 +102,6 @@ const NEXT_ACTIONS: { v: ShippingStatus; label: string; icon: React.ReactNode; c
   { v: "cancelled", label: "Hủy giao", icon: <XCircle className="w-4 h-4" />, color: "bg-red-500 hover:bg-red-600" },
   { v: "returning", label: "Giao lại", icon: <Truck className="w-4 h-4" />, color: "bg-yellow-500 hover:bg-yellow-600" },
 ];
-
-const fmt = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
@@ -390,12 +389,12 @@ export default function ShippingDetailPage() {
           <section className="bg-white rounded-lg border border-slate-200 p-6">
             <h3 className="text-sm font-semibold text-slate-700 mb-4">Tiền & phí</h3>
             <dl className="text-sm space-y-3">
-              <Row label="Tiền thu hộ (COD)" value={`${fmt.format(shipping.cod_amount)} đ`} />
-              <Row label="Phí vận chuyển" value={`${fmt.format(shipping.shipping_fee)} đ`} />
+              <Row label="Tiền thu hộ (COD)" value={formatCurrencyVND(shipping.cod_amount)} />
+              <Row label="Phí vận chuyển" value={formatCurrencyVND(shipping.shipping_fee)} />
               <Row label="Khối lượng" value={`${shipping.weight} g`} />
               <div className="pt-3 border-t border-slate-100 flex justify-between font-semibold text-slate-800">
                 <span>Tổng cộng</span>
-                <span>{fmt.format(shipping.cod_amount + shipping.shipping_fee)} đ</span>
+                <span>{formatCurrencyVND(shipping.cod_amount + shipping.shipping_fee)}</span>
               </div>
             </dl>
           </section>

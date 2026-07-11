@@ -16,6 +16,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInOutBalance } from "@/services/reportService";
+import { formatCurrencyVND } from "@/lib/shared/format";
 
 // Không có bảng ledger lịch sử nên không thể vẽ "tồn kho tuyệt đối theo
 // ngày" một cách trung thực — thay bằng biến động luỹ kế (nhập - xuất cộng
@@ -147,7 +148,7 @@ export default function InOutBalancePage() {
                   key: "export_qty", label: "Xuất trong kỳ", align: "right",
                   render: (v) => <span className="text-red-500">{fmtMoney.format(Number(v))}</span>
                 },
-                { key: "import_value", label: "Giá trị nhập", align: "right", render: (v) => fmtMoney.format(Number(v)) },
+                { key: "import_value", label: "Giá trị nhập", align: "right", render: (v) => formatCurrencyVND(Number(v)) },
               ]}
               data={d.items}
             />

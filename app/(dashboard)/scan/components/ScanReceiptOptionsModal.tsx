@@ -15,7 +15,7 @@ import {
   Sparkles,
   X
 } from "lucide-react";
-import { cleanInvoiceProductName } from "@/lib/shared/format";
+import { cleanInvoiceProductName, formatCurrencyVND } from "@/lib/shared/format";
 
 interface MatchedProduct {
   id: string;
@@ -66,8 +66,6 @@ type DecisionMap = Record<
   string,
   { action: "add_stock" | "new"; productId: string | null }
 >;
-
-const fmtMoney = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
 function readJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
@@ -466,7 +464,7 @@ export default function ScanReceiptOptionsModal({
             </span>
             {data ? (
               <span className="font-medium text-slate-700">
-                Tổng: {fmtMoney.format(totalAmount)} đ
+                Tổng: {formatCurrencyVND(totalAmount)}
               </span>
             ) : null}
           </div>
@@ -616,7 +614,7 @@ function DecisionsRow({
         />
       </td>
       <td className="px-3 py-2.5 text-right align-top font-medium tabular-nums">
-        {fmtMoney.format(lineTotal)}
+        {formatCurrencyVND(lineTotal)}
       </td>
       <td className="relative px-3 py-2.5 align-top">
         <SkuActionCell
