@@ -304,6 +304,29 @@ async function ensureConversationInSupabase(
           e instanceof Error ? e.message : e
         );
       }
+    } else if (!resolvedName || FALLBACK_NAME_RE.test(resolvedName.trim())) {
+      // USER (DM): không có sender_name dùng được (vd người lạ nhắn tin chờ,
+      // dName chưa kịp populate lúc SSE bắn) → gọi bridge /user-info để lấy
+      // tên thật, tương tự /group-info cho group. Trước đây nhánh này không
+      // có gì → conv kẹt vĩnh viễn ở tên fallback "Zalo <id>".
+      try {
+        const info = await zaloApi.getUserInfo(threadId, accountId);
+        if (info?.ok) {
+          resolvedName = info.user_name;
+          resolvedAvatar = info.avatar_url;
+          // eslint-disable-next-line no-console
+          console.log(
+            `[ZALO_FE][USER_NAME] threadId=${threadId} name="${resolvedName}"`
+          );
+        }
+      } catch (e) {
+        // bridge offline → fallback
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[ZALO_FE][USER_NAME_ERR] threadId=${threadId}`,
+          e instanceof Error ? e.message : e
+        );
+      }
     }
     const finalName =
       resolvedName || (threadType === "group" ? `Group ${threadId}` : `Zalo ${threadId}`);

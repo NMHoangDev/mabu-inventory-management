@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GoogleGenAI, createPartFromUri, createUserContent } from "@google/genai";
-import { cleanInvoiceProductName, fixMojibakeText, normalizeFinancials, parseNumeric } from "../shared/format";
+import { fixMojibakeText, normalizeFinancials, parseNumeric } from "../shared/format";
 import { invoiceExtractResultSchema, type InvoiceDocument, type InvoiceExtractResult, type InvoiceRow } from "../shared/schema";
 import { persistUploadedBuffer } from "./storage";
 
@@ -19,9 +19,7 @@ Extract every item line separately.
 Keep Vietnamese text exactly as shown.
 Normalize numbers by removing thousand separators when possible.
 CRITICAL - Product Name Extraction:
-- The "inputProductName" field must contain ONLY the actual product item name as it appears in the invoice line.
-- EXCLUDE any of the following from inputProductName: manufacturer names (NSX:), brand names, model numbers that appear after "NSX:", "MH:", "Model:", "KT:", product quality descriptors like "Mới 100%", "Không hiệu", "Không hiệu.", "Mới100%", supplier/company names after "NSX:".
-- Example: If invoice line is "Ví cầm tay cho nữ, mã Meow, dạng gấp, có cúc bấm và dây cầm, lót trong bằng vải dệt, giả da PU, KT:12*3*9.5cm, NSX:Baisier Leather Co.,Ltd. Mới 100%" then inputProductName should be "Ví cầm tay cho nữ, mã Meow, dạng gấp, có cúc bấm và dây cầm, lót trong bằng vải dệt, giả da PU, KT:12*3*9.5cm" — stop before "NSX:" and "Mới 100%".
+- The "inputProductName" field must contain the FULL product item name exactly as it appears in the invoice line, including any manufacturer/brand/model/dimension/quality tokens (e.g. "NSX:", "MH:", "Model:", "KT:", "Mới 100%"). Do NOT strip or omit anything — copy the entire line verbatim.
 Schema:
 {
   "invoiceDate": "",
@@ -153,10 +151,7 @@ function toStoredRows(result: InvoiceExtractResult, document: InvoiceDocument) {
       supplierName: result.supplierName,
       invoiceSymbol: result.invoiceSymbol,
       invoiceNumber: result.invoiceNumber,
-      // Strip MH/KT/NSX/Model ngay khi lưu DB — OCR Gemini hay kèm theo các
-      // token này trong inputProductName. Card preview trên /products sẽ
-      // hiển thị sạch, không cần clean lại lúc render.
-      inputProductName: cleanInvoiceProductName(item.inputProductName),
+      inputProductName: item.inputProductName,
       internalProductCode: "",
       adjustedInvoiceName: "",
       retailName: "",

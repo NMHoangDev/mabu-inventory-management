@@ -421,6 +421,77 @@ router.get('/all-platform/zalo/group-info', async (req, res) => {
   }
 });
 
+// ── User info (DM) ──────────────────────────────────────────────────────────
+//
+// Tương đương /group-info nhưng cho thread `user` (DM 1-1) — dùng khi thread
+// mới xuất hiện mà tin nhắn SSE/catch-up không kèm sender_name hợp lệ (vd
+// người lạ nhắn tin chờ, hoặc dName chưa kịp populate). Trước đây các thread
+// này bị kẹt vĩnh viễn ở tên fallback "Zalo <id>" vì chỉ group mới có endpoint
+// resolve tên thật — DM không có gì tương ứng.
+//
+// `getUserInfo(userId)` gọi ZCA `/api/social/friend/getprofiles/v2`, trả về
+// `{ changed_profiles: Record<key, User> }` — key có suffix "_0" nên lấy giá
+// trị đầu tiên thay vì tra theo userId thô.
+//
+// Cache 60s per userId, cùng cơ chế với group-info.
+router.get('/all-platform/zalo/user-info', async (req, res) => {
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+    const userId = String(req.query.user_id || "").trim();
+    if (!userId) {
+      return res.status(400).json({ error: 'missing user_id' });
+    }
+
+    ctx.__singleUserCache = ctx.__singleUserCache || {};
+    const cached = ctx.__singleUserCache[userId];
+    const now = Date.now();
+    if (cached && cached.ts > now - 60_000) {
+      return res.json(cached.payload);
+    }
+
+    let profile;
+    try {
+      const response = await ctx.api.getUserInfo(userId);
+      const profiles = response?.changed_profiles || {};
+      profile = Object.values(profiles)[0] || null;
+    } catch (e) {
+      logger.warn(
+        `[${ctx.accountId}] user-info: getUserInfo(${userId}) failed`,
+        { err: e?.message, code: e?.code }
+      );
+      return res.status(502).json({
+        ok: false,
+        error: 'getUserInfo failed',
+        detail: e?.message,
+        thread_id: userId,
+      });
+    }
+
+    const name = profile?.zaloName || profile?.displayName;
+    if (!profile || !name) {
+      return res.status(404).json({
+        ok: false,
+        error: 'user not found or empty name',
+        thread_id: userId,
+      });
+    }
+
+    const payload = {
+      ok: true,
+      thread_id: userId,
+      thread_type: 'user',
+      user_name: name,
+      avatar_url: profile.avatar || null,
+    };
+    ctx.__singleUserCache[userId] = { ts: now, payload };
+    return res.json(payload);
+  } catch (err) {
+    logger.error('GET user-info error', { err: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Conversations: sync (force refresh) ────────────────────────────────────────
 //
 // Đơn giản là gọi lại /conversations rồi trả summary. Đếm số bạn + nhóm.

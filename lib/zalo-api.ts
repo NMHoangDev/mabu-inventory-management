@@ -315,6 +315,40 @@ export const zaloApi = {
     }
   },
 
+  /**
+   * Lấy thông tin 1 user cụ thể (tên + avatar) từ Zalo bridge — tương đương
+   * getGroupInfo nhưng cho DM. Dùng khi thread `user` mới xuất hiện mà
+   * sender_name không có sẵn (SSE/catch-up thiếu dName) → tránh kẹt vĩnh viễn
+   * ở tên fallback "Zalo <id>".
+   */
+  async getUserInfo(userId: string, accountId: string = ZALO_ACCOUNT_ID): Promise<{
+    ok: boolean;
+    thread_id: string;
+    thread_type: "user";
+    user_name: string;
+    avatar_url: string | null;
+  } | null> {
+    if (!userId) return null;
+    try {
+      const data = await request<{
+        ok: boolean;
+        thread_id: string;
+        thread_type: "user";
+        user_name: string;
+        avatar_url: string | null;
+      }>(
+        `/api/all-platform/zalo/user-info?account_id=${encodeURIComponent(accountId)}&user_id=${encodeURIComponent(userId)}`,
+        { timeoutMs: 10_000 }
+      );
+      return data && data.ok ? data : null;
+    } catch (e) {
+      if (e instanceof ZaloApiError && (e.status === 404 || e.status === 401 || e.status === 502)) {
+        return null;
+      }
+      return null;
+    }
+  },
+
   async getMessages(
     conversationId: string,
     limit = 100,
