@@ -239,7 +239,7 @@ export async function POST(req: NextRequest) {
       // SSE không mang theo tên thread → KHÔNG được overwrite tên đã sync từ bridge.
       const { data: cur } = await supabase
         .from("zalo_conversations_ui")
-        .select("unread_count,conversation_name,avatar_url")
+        .select("unread_count,conversation_name,avatar_url,thread_type")
         .eq("account_id", accountId)
         .eq("conversation_id", convId)
         .maybeSingle();
@@ -248,9 +248,18 @@ export async function POST(req: NextRequest) {
         ? 0
         : (cur?.unread_count || 0) + 1;
 
+      // thread_type "group" đã lưu trong DB luôn thắng threadType truyền vào body:
+      // request FE (SSE handler) fallback "user" khi payload thiếu thread_type/isGroup
+      // (xem useZalo.ts) — nếu để threadType đó thắng thì 1 group đã biết chắc (DB
+      // đang "group") sẽ bị hạ cấp thành "user" mỗi khi có tin nhắn tới mà payload
+      // thiếu marker group, xoá mất phân loại đúng vĩnh viễn (không có thread nào
+      // đổi từ group sang user theo thời gian nên "group" trong DB luôn đáng tin hơn).
+      const effectiveThreadType =
+        cur?.thread_type === "group" ? "group" : threadType;
+
       // Giữ tên cũ nếu có; nếu chưa có thì fallback đơn giản.
       const fallbackName =
-        threadType === "group" ? `Group ${threadId}` : `Zalo ${threadId}`;
+        effectiveThreadType === "group" ? `Group ${threadId}` : `Zalo ${threadId}`;
 
       await supabase
         .from("zalo_conversations_ui")
@@ -258,7 +267,7 @@ export async function POST(req: NextRequest) {
           {
             account_id: accountId,
             thread_id: threadId,
-            thread_type: threadType,
+            thread_type: effectiveThreadType,
             conversation_id: convId,
             // Ưu tiên: payload SSE (nếu có) > DB hiện tại > fallback
             conversation_name:

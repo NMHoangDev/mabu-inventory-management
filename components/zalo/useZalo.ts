@@ -251,6 +251,17 @@ async function ensureConversationInSupabase(
     const hasWrongType =
       threadType === "group" && !!existing?.thread_type && existing.thread_type !== "group";
     const needsResolve = isFallbackName || hasWrongType;
+    // Thread_type "group" đã lưu trong DB là tín hiệu đáng tin cậy hơn threadType
+    // do caller TRUYỀN VÀO — vì threadType nhiều lúc chỉ là guess ("user" mặc định
+    // của openConversation khi thread chưa có trong local state, xem useZalo.ts
+    // openConversation). Nếu để threadType (guess) thắng, 1 group đã resolve tên
+    // thật trước đó sẽ bị ENSURE_CONV ghi đè lại thành thread_type="user" +
+    // name="Zalo <id>" — đúng bug "mất tên group, hiện lại Group/Zalo <id>" khi
+    // mở lại conversation sau khi state local bị reset (vd đổi/nối tài khoản Zalo).
+    // Type thật của 1 thread Zalo (user/group) không đổi theo thời gian nên 1 khi
+    // đã biết là "group" thì luôn ưu tiên, guess "user" không được phép hạ cấp nó.
+    const effectiveThreadType: "user" | "group" =
+      existing?.thread_type === "group" ? "group" : threadType;
     if (existing && !needsResolve) {
       // eslint-disable-next-line no-console
       console.log(
@@ -269,7 +280,7 @@ async function ensureConversationInSupabase(
     //    - User: dùng sender_name từ SSE (thường là tên người gửi)
     let resolvedName: string | undefined = fallbackName;
     let resolvedAvatar: string | null = existing?.avatar_url ?? null;
-    if (threadType === "group") {
+    if (effectiveThreadType === "group") {
       try {
         const info = await zaloApi.getGroupInfo(threadId, accountId);
         if (info?.ok) {
@@ -329,11 +340,11 @@ async function ensureConversationInSupabase(
       }
     }
     const finalName =
-      resolvedName || (threadType === "group" ? `Group ${threadId}` : `Zalo ${threadId}`);
+      resolvedName || (effectiveThreadType === "group" ? `Group ${threadId}` : `Zalo ${threadId}`);
     const conv = {
       conversation_id: threadId,
       thread_id: threadId,
-      thread_type: threadType,
+      thread_type: effectiveThreadType,
       conversation_name: finalName,
       account_id: accountId,
       avatar_url: resolvedAvatar,
@@ -354,7 +365,7 @@ async function ensureConversationInSupabase(
     const action = existing ? "updated" : "inserted";
     // eslint-disable-next-line no-console
     console.log(
-      `[ZALO_FE][ENSURE_CONV] threadId=${threadId} type=${threadType} action=${action} name="${finalName}" upsert=${postRes.status}`
+      `[ZALO_FE][ENSURE_CONV] threadId=${threadId} type=${effectiveThreadType} action=${action} name="${finalName}" upsert=${postRes.status}`
     );
   } catch (err) {
     // Dùng console.error để chắc chắn hiện (debug có thể bị tắt trong prod).
