@@ -649,7 +649,7 @@ export default function ProductsPage() {
                     disabled={isReadOnly}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full border rounded-md pl-10 pr-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50 disabled:text-slate-600"
+                    className="w-full border border-slate-200/70 rounded-lg pl-10 pr-3 py-2.5 text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 disabled:text-slate-600 shadow-sm"
                     placeholder="Nhập tên sản phẩm"
                   />
                   <span className="absolute left-3.5 top-2.5 text-primary">
@@ -665,7 +665,7 @@ export default function ProductsPage() {
                     disabled={isReadOnly}
                     value={sku}
                     onChange={(e) => setSku(e.target.value)}
-                    className="w-full border rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50 disabled:text-slate-600"
+                    className="w-full border border-slate-200/70 rounded-lg px-3 py-2 text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 disabled:text-slate-600 shadow-sm"
                     placeholder="Mã SKU định danh"
                   />
                 </div>
@@ -676,7 +676,7 @@ export default function ProductsPage() {
                     disabled={isReadOnly}
                     value={barcode}
                     onChange={(e) => setBarcode(e.target.value)}
-                    className="w-full border rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50"
+                    className="w-full border border-slate-200/70 rounded-lg px-3 py-2 text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 shadow-sm"
                     placeholder="Mã vạch sản phẩm"
                   />
                 </div>
@@ -687,7 +687,7 @@ export default function ProductsPage() {
                     disabled={isReadOnly}
                     value={unit}
                     onChange={(e) => setUnit(e.target.value)}
-                    className="w-full border rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50"
+                    className="w-full border border-slate-200/70 rounded-lg px-3 py-2 text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 shadow-sm"
                     placeholder="Cái, hộp, chiếc..."
                   />
                 </div>
@@ -699,7 +699,7 @@ export default function ProductsPage() {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={5}
-                  className="w-full border rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50"
+                  className="w-full border border-slate-200/70 rounded-lg px-3 py-2.5 text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 shadow-sm"
                   placeholder="Nhập mô tả sản phẩm chi tiết..."
                 />
               </div>
@@ -717,7 +717,7 @@ export default function ProductsPage() {
                       disabled={isReadOnly}
                       value={price}
                       onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))}
-                      className="w-full border rounded-md pl-3 pr-8 py-2 text-right text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50 font-bold"
+                      className="w-full border border-slate-200/70 rounded-lg pl-3 pr-8 py-2 text-right text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 font-bold shadow-sm"
                     />
                     <span className="absolute right-3 top-2 text-slate-400 text-xs">đ</span>
                   </div>
@@ -730,7 +730,7 @@ export default function ProductsPage() {
                       disabled={isReadOnly}
                       value={compareAtPrice}
                       onChange={(e) => setCompareAtPrice(e.target.value.replace(/[^\d]/g, ""))}
-                      className="w-full border rounded-md pl-3 pr-8 py-2 text-right text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50"
+                      className="w-full border border-slate-200/70 rounded-lg pl-3 pr-8 py-2 text-right text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 shadow-sm"
                     />
                     <span className="absolute right-3 top-2 text-slate-400 text-xs">đ</span>
                   </div>
@@ -743,7 +743,7 @@ export default function ProductsPage() {
                       disabled={isReadOnly}
                       value={costPrice}
                       onChange={(e) => setCostPrice(e.target.value.replace(/[^\d]/g, ""))}
-                      className="w-full border rounded-md pl-3 pr-8 py-2 text-right text-sm outline-none focus:ring-1 focus:ring-primary disabled:bg-slate-50"
+                      className="w-full border border-slate-200/70 rounded-lg pl-3 pr-8 py-2 text-right text-sm outline-none transition-all focus:ring-4 focus:ring-primary/10 focus:border-primary hover:border-primary/40 disabled:bg-slate-50 shadow-sm"
                     />
                     <span className="absolute right-3 top-2 text-slate-400 text-xs">đ</span>
                   </div>
@@ -945,7 +945,7 @@ export default function ProductsPage() {
             {/* Product Image */}
             <section className="bg-white rounded-lg border p-5 shadow-sm space-y-3">
               <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">Ảnh sản phẩm</h2>
-              <div className="border border-dashed rounded-lg p-6 flex flex-col items-center justify-center bg-slate-50">
+              <div className="border border-dashed rounded-lg p-6 flex flex-col items-center justify-center bg-slate-50 relative transition-all hover:bg-slate-100 hover:border-primary/50 group/upload cursor-pointer overflow-hidden">
                 {imageUrl ? (
                   <div className="relative group w-full aspect-square rounded overflow-hidden border">
                     <img src={imageUrl} alt="Preview" className="w-full h-full object-cover" />
@@ -962,7 +962,24 @@ export default function ProductsPage() {
                 ) : (
                   <>
                     <ImageIcon className="h-8 w-8 text-slate-400 mb-1" />
-                    <span className="text-[10px] text-slate-500 text-center">Gán liên kết hình ảnh trực tiếp từ URL bên dưới</span>
+                    <span className="text-[10px] text-slate-500 text-center">Gán liên kết hình ảnh trực tiếp từ URL bên dưới hoặc bấm vào đây để chọn file ảnh (lưu dạng Base64 để test)</span>
+                    {!isReadOnly && (
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setImageUrl(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                    )}
                   </>
                 )}
               </div>
@@ -1252,6 +1269,8 @@ export default function ProductsPage() {
                       <th className="px-6 py-3 font-semibold text-slate-500 uppercase tracking-wider text-xs text-center">Đơn vị</th>
                       <th className="px-6 py-3 font-semibold text-slate-500 uppercase tracking-wider text-xs text-center">Phân loại</th>
                       <th className="px-6 py-3 font-semibold text-slate-500 uppercase tracking-wider text-xs text-right">Giá bán lẻ</th>
+                      <th className="px-6 py-3 font-semibold text-slate-500 uppercase tracking-wider text-xs text-right">Giá bán sĩ</th>
+                      <th className="px-6 py-3 font-semibold text-slate-500 uppercase tracking-wider text-xs text-right">Giá vốn</th>
                       <th className="w-28 px-6 py-3 text-center font-semibold text-slate-500 uppercase tracking-wider text-xs">Thao tác</th>
                     </tr>
                   </thead>
@@ -1313,9 +1332,15 @@ export default function ProductsPage() {
                         <td className="px-6 py-4 text-right font-semibold text-slate-700 tabular-nums">
                           {fmtCurrency(Number(p.price) || 0)}
                         </td>
+                        <td className="px-6 py-4 text-right text-slate-600 tabular-nums">
+                          {fmtCurrency(Number(p.compare_at_price) || 0)}
+                        </td>
+                        <td className="px-6 py-4 text-right text-slate-600 tabular-nums">
+                          {fmtCurrency(Number(p.cost_price) || 0)}
+                        </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <button 
+                            <button
                               onClick={() => openForm(p, true)}
                               className="rounded p-1.5 text-slate-600 hover:bg-slate-100 transition-colors"
                               title="Xem chi tiết"

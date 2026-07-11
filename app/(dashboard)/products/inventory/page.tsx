@@ -158,7 +158,7 @@ export default function ProductInventoryPage() {
                 <th className="px-4 py-3 text-center">Ngày khởi tạo</th>
                 <th className="px-4 py-3 text-right">Giá bán lẻ</th>
                 <th className="px-4 py-3 text-right">Giá nhập</th>
-                <th className="px-4 py-3 text-right">Giá bán buôn</th>
+                <th className="px-4 py-3 text-right">Giá bán sĩ</th>
               </tr>
             </thead>
             <tbody className="divide-y">

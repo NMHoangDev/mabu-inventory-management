@@ -11,6 +11,7 @@ import {
   Download,
   FileText,
   Filter,
+  Image as ImageIcon,
   Loader2,
   PackagePlus,
   RotateCcw,
@@ -1117,6 +1118,26 @@ function SummaryProductLinkModal({
     // sửa được, chỉ là gợi ý hợp lý thay vì để trống.
     costPrice: cleanInvoice(row.unitPriceAfterTax) || cleanInvoice(row.unitPrice)
   });
+  const [manualImageUrl, setManualImageUrl] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function handleImagePick(file: File) {
+    setUploadingImage(true);
+    setManualError("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/uploads/products", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Không tải lên được ảnh.");
+      setManualImageUrl(data.url);
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : "Không tải lên được ảnh.");
+    } finally {
+      setUploadingImage(false);
+    }
+  }
   const menuRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1290,6 +1311,16 @@ function SummaryProductLinkModal({
         return;
       }
       const created = await createRes.json();
+
+      // Gán ảnh vừa upload (nếu có) vào product_images — products KHÔNG có
+      // cột image_url, ảnh luôn sống ở bảng riêng (xem CLAUDE.md).
+      if (manualImageUrl && created?.id) {
+        await fetch(`/api/products/${created.id}/images`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images: [{ url: manualImageUrl }] })
+        }).catch(() => undefined);
+      }
 
       // Auto-fill cả 3 cột tên từ tên user vừa nhập: tên hàng đầu vào, tên bán lẻ
       // và tên chỉnh lại. Nếu 1 trong 3 cột đã có sẵn giá trị thì GIỮ NGUYÊN
@@ -1484,6 +1515,46 @@ function SummaryProductLinkModal({
                 >
                   <X className="h-4 w-4" />
                 </button>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                  Ảnh sản phẩm
+                </label>
+                <div
+                  onClick={() => !uploadingImage && imageInputRef.current?.click()}
+                  className="relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed border-slate-300 bg-slate-50 hover:border-primary/50 hover:bg-slate-100"
+                >
+                  {uploadingImage ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                  ) : manualImageUrl ? (
+                    <>
+                      <img src={manualImageUrl} alt="Preview" className="h-full w-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setManualImageUrl("");
+                        }}
+                        className="absolute inset-0 flex items-center justify-center bg-black/55 text-[10px] font-bold text-white opacity-0 transition-opacity hover:opacity-100"
+                      >
+                        Xoá ảnh
+                      </button>
+                    </>
+                  ) : (
+                    <ImageIcon className="h-6 w-6 text-slate-300" />
+                  )}
+                </div>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImagePick(file);
+                    e.target.value = "";
+                  }}
+                />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
