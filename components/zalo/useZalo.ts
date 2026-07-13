@@ -1436,10 +1436,18 @@ if (type === "new_message") {
         return raw;
       })();
 
+      // QUAN TRỌNG: phải ưu tiên account đang chọn trên UI (accountIdRef.current)
+      // TRƯỚC biến môi trường NEXT_PUBLIC_ZALO_ACCOUNT_ID — trước đây thứ tự bị
+      // đảo ngược nên dù đổi account switcher sang "dev" (hay bất kỳ account
+      // nào khác "shop-owner"), request vẫn luôn import vào account mặc định
+      // trong .env (thường là "shop-owner"), khiến account khác không bao giờ
+      // đăng nhập được dù extension báo "thành công" (vì nó login thật vào
+      // account khác, không phải account đang chọn).
       const accountId =
+        accountIdRef.current ||
         (typeof process !== "undefined" &&
           process.env.NEXT_PUBLIC_ZALO_ACCOUNT_ID) ||
-        accountIdRef.current;
+        "shop-owner";
 
       // Extension tự mở Zalo tab (nếu cần) → extract cookie → POST về bridge.
       const result = await ext.importSession({
