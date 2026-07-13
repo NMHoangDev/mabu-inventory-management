@@ -15,7 +15,17 @@
  *               tất cả target cùng lúc (nhanh, giữ tag "đã chuyển tiếp").
  *   - image/file → tải file từ Zalo CDN (resolveImageUrls) rồi gửi lại từng
  *               target qua api.sendMessage({attachments}) — zca-js không hỗ
- *               trợ forward-by-reference cho media.
+ *               trợ forward-by-reference cho media. Nhiều ảnh gửi cùng lúc
+ *               (1 "album") tới TỪ CÙNG 1 người trong TỪNG group nguồn được
+ *               gom lại (xem IMAGE_BATCH_MS/queueImageForBatch) rồi forward
+ *               trong 1 lệnh sendMessage({attachments: [...]}) duy nhất —
+ *               BẮT BUỘC phải gom vì zca-js chỉ gắn metadata nhóm ảnh
+ *               (groupLayoutId/idInGroup) khi `attachments` có >1 phần tử
+ *               trong CÙNG 1 lệnh gọi; Zalo lại luôn gửi mỗi ảnh trong 1
+ *               album như 1 sự kiện WS tin nhắn RIÊNG BIỆT (không phải 1 tin
+ *               kèm nhiều ảnh) nên nếu forward ngay theo từng sự kiện, mỗi
+ *               ảnh sẽ ra 1 tin nhắn tách rời ở phía nhận thay vì gộp thành
+ *               1 khối ảnh như bản gốc (bug quan sát được 2026-07-13).
  *   - sticker → gửi lại bằng api.sendSticker({id, cateId, type}).
  *   - loại khác (link share, video call, ...) → log 'unsupported', bỏ qua.
  *
@@ -61,11 +71,22 @@ const RULES_CACHE_TTL_MS = 8000;
 const FORWARD_DELAY_MS = Number(process.env.ZALO_FORWARD_DELAY_MS || 10000);
 const RETRY_DELAY_MS = 1500;
 const MAX_PER_MIN = Number(process.env.ZALO_FORWARD_MAX_PER_MIN || 60);
+// Cửa sổ chờ gom nhiều ảnh gửi cùng lúc (1 "album") thành 1 lượt forward.
+// Zalo bắn mỗi ảnh trong 1 album như 1 message event riêng, cách nhau vài
+// chục-vài trăm ms tuỳ tốc độ upload/mạng — 1200ms đủ rộng để gom hết ảnh
+// trong 1 lần gửi thực tế, mà không làm ảnh đơn lẻ (không thuộc album nào)
+// bị trễ đáng kể khi forward.
+const IMAGE_BATCH_MS = Number(process.env.ZALO_FORWARD_IMAGE_BATCH_MS || 1200);
 
 const rulesCacheByAccount = new Map(); // accountId -> { fetchedAt, rulesByMaster: Map<threadId, rule[]> }
 const forwardedIds = new Set(); // `${accountId}_${msgId}` — id do chính engine gửi
 const processedSource = new Set(); // `${accountId}:${threadId}:${msgId}` — chống xử lý trùng 1 nguồn
 const rateState = new Map(); // accountId -> { windowStart, count }
+// Gom ảnh cùng batch — key `${accountId}:${threadId}:${senderUid}`, value
+// { imageUrls, sourceMsgIds, rules, api, timer }. Chỉ sống trong bộ nhớ,
+// không cần persist (mất khi restart bridge là chấp nhận được, ảnh đang dở
+// dang batch cùng lắm bị forward rời — không mất dữ liệu).
+const imageBatches = new Map();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -349,6 +370,43 @@ async function forwardMedia({ accountId, api, rules, threadId, sourceMsgId, imag
   }
 }
 
+// ── Gom ảnh cùng 1 batch (1 người, 1 group nguồn) trước khi forward ─────────
+// Mỗi ảnh trong 1 "album" Zalo gửi tới như 1 message event riêng — reset timer
+// mỗi khi có ảnh mới thuộc cùng batch, chỉ thực sự forward khi im lặng đủ
+// IMAGE_BATCH_MS (không còn ảnh nào tới thêm) → gộp toàn bộ ảnh gom được vào
+// 1 lệnh forwardMedia() duy nhất (nhiều attachments → zca-js tự gắn metadata
+// nhóm ảnh, xem sendMessage.js#handleAttachment isMultiFile).
+function queueImageForBatch({ accountId, api, rules, threadId, sourceMsgId, senderUid, imageUrls }) {
+  const key = `${accountId}:${threadId}:${senderUid || 'unknown'}`;
+  let batch = imageBatches.get(key);
+  if (!batch) {
+    batch = { imageUrls: [], sourceMsgIds: [], timer: null };
+    imageBatches.set(key, batch);
+  }
+  batch.imageUrls.push(...imageUrls);
+  if (sourceMsgId) batch.sourceMsgIds.push(sourceMsgId);
+  // rules/api có thể lệch nhẹ giữa các ảnh trong cùng batch (rules cache
+  // refresh, session reconnect...) — luôn dùng bản mới nhất khi flush.
+  batch.accountId = accountId;
+  batch.api = api;
+  batch.rules = rules;
+  batch.threadId = threadId;
+  if (batch.timer) clearTimeout(batch.timer);
+  batch.timer = setTimeout(() => {
+    imageBatches.delete(key);
+    forwardMedia({
+      accountId: batch.accountId,
+      api: batch.api,
+      rules: batch.rules,
+      threadId: batch.threadId,
+      sourceMsgId: batch.sourceMsgIds[0] || null,
+      imageUrls: batch.imageUrls,
+    }).catch((err) => {
+      logger.error(`[forward] [${batch.accountId}] forwardMedia batch flush failed: ${err.message}`);
+    });
+  }, IMAGE_BATCH_MS);
+}
+
 // ── Sticker: gửi lại qua sendSticker({id, cateId, type}) từng target ────────
 async function forwardSticker({ accountId, api, rules, threadId, sourceMsgId, sticker }) {
   const payload = {
@@ -437,7 +495,7 @@ export async function handleIncomingGroupMessage({ accountId, api, msg, threadId
 
     const imageUrls = resolveImageUrls(msg);
     if (imageUrls.length > 0) {
-      await forwardMedia({ accountId, api, rules, threadId, sourceMsgId, imageUrls });
+      queueImageForBatch({ accountId, api, rules, threadId, sourceMsgId, senderUid: msg.data?.uidFrom || null, imageUrls });
       return;
     }
 
