@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import { chatwootService } from './chatwootService.js';
 import { logger } from '../utils/logger.js';
 import crypto from 'crypto';
-import { persistIncomingMessage, catchUpRecentMessages } from './supabaseSync.js';
+import { persistIncomingMessage, catchUpRecentMessages, reconcileFallbackConversationNames } from './supabaseSync.js';
 import { handleIncomingGroupMessage } from './forwardEngine.js';
 import * as accountRegistry from './accountRegistry.js';
 
@@ -557,6 +557,7 @@ async function attachListener(accountId, api, inboxId) {
         threadType: payload.thread_type,
         msg,
         isSelf: payload.is_self,
+        api,
       }).catch((err) => {
         logger.error(
           `[${accountId}] persistIncomingMessage err thread=${payload.thread_id}`,
@@ -759,6 +760,17 @@ async function attachListener(accountId, api, inboxId) {
   catchUpRecentMessages({ accountId, api, count: 50 }).catch((err) => {
     logger.warn(
       `[${accountId}] catchUpRecentMessages failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  });
+
+  // Sửa các conversation đang kẹt tên tạm "Group <id>" / "Zalo <id>" từ TRƯỚC
+  // (tạo ra bởi bridge/FE trước khi có fix tự-resolve) — chạy mỗi lần
+  // login/reconnect, không cần frontend mở tab.
+  reconcileFallbackConversationNames({ accountId, api }).catch((err) => {
+    logger.warn(
+      `[${accountId}] reconcileFallbackConversationNames failed: ${
         err instanceof Error ? err.message : String(err)
       }`
     );

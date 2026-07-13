@@ -51,6 +51,7 @@ import fs from 'fs';
 import path from 'path';
 import { ThreadType } from 'zca-js';
 import { sessionManager } from '../services/sessionManager.js';
+import { resolveGroupInfo, resolveUserInfo } from '../services/threadInfoResolver.js';
 import { logger } from '../utils/logger.js';
 
 const router = Router();
@@ -359,6 +360,8 @@ router.get('/all-platform/zalo/conversations', async (req, res) => {
 // tin cậy hơn nhiều so với `getAllGroups`.
 //
 // Cache 60s per groupId — ZCA rate-limit khá nghiêm với endpoint này.
+// Cache dùng chung module threadInfoResolver.js với supabaseSync.js (bridge
+// tự resolve tên group ngay khi persist message, không cần FE gọi route này).
 router.get('/all-platform/zalo/group-info', async (req, res) => {
   try {
     const ctx = requireLoggedIn(req, res);
@@ -368,53 +371,9 @@ router.get('/all-platform/zalo/group-info', async (req, res) => {
       return res.status(400).json({ error: 'missing group_id' });
     }
 
-    // Cache 60s per groupId để tránh gọi ZCA liên tục (rate-limit).
-    ctx.__singleGroupCache = ctx.__singleGroupCache || {};
-    const cached = ctx.__singleGroupCache[groupId];
-    const now = Date.now();
-    if (cached && cached.ts > now - 60_000) {
-      return res.json(cached.payload);
-    }
-
-    // Gọi getGroupInfo trực tiếp — endpoint ZCA /api/group/getmg-v2.
-    // ZCA throws ZcaApiError nếu lỗi (cookie hết hạn, rate-limit, v.v.)
-    let groupData;
-    try {
-      const response = await ctx.api.getGroupInfo(groupId);
-      groupData = response?.gridInfoMap?.[groupId] || null;
-    } catch (e) {
-      logger.warn(
-        `[${ctx.accountId}] group-info: getGroupInfo(${groupId}) failed`,
-        { err: e?.message, code: e?.code }
-      );
-      return res.status(502).json({
-        ok: false,
-        error: 'getGroupInfo failed',
-        detail: e?.message,
-        thread_id: groupId,
-      });
-    }
-
-    if (!groupData || !groupData.name) {
-      return res.status(404).json({
-        ok: false,
-        error: 'group not found or empty name',
-        thread_id: groupId,
-      });
-    }
-
-    const payload = {
-      ok: true,
-      thread_id: groupId,
-      thread_type: 'group',
-      group_name: groupData.name,
-      group_desc: groupData.desc || null,
-      avatar_url: groupData.fullAvt || groupData.avt || null,
-      member_count: groupData.totalMember || (groupData.memberIds?.length || 0),
-      group_type: groupData.type === 2 ? 'community' : 'group',
-    };
-    ctx.__singleGroupCache[groupId] = { ts: now, payload };
-    return res.json(payload);
+    const payload = await resolveGroupInfo(ctx.api, ctx.accountId, groupId);
+    const status = payload.ok ? 200 : payload.error === 'group not found or empty name' ? 404 : 502;
+    return res.status(status).json(payload);
   } catch (err) {
     logger.error('GET group-info error', { err: err.message });
     res.status(500).json({ error: err.message });
@@ -433,19 +392,12 @@ router.get('/all-platform/zalo/group-info', async (req, res) => {
 // `{ changed_profiles: Record<key, User> }` — key có suffix "_0" nên lấy giá
 // trị đầu tiên thay vì tra theo userId thô.
 //
-// Cache 60s per userId cho kết quả THÀNH CÔNG, cùng cơ chế với group-info.
-//
-// Negative cache (thất bại) dùng TTL dài hơn hẳn (10 phút): `getUserInfo` gọi
-// endpoint `/api/social/friend/getprofiles/v2` — endpoint này chỉ trả hồ sơ
-// cho user đã là BẠN BÈ trên Zalo. Với người lạ nhắn tin (chưa kết bạn), ZCA
-// trả lỗi code:112 ("Lỗi không xác định") — lỗi này KHÔNG transient, nó sẽ
-// fail y hệt mỗi lần gọi cho tới khi 2 bên kết bạn. Trước đây không cache lỗi
-// này → mỗi lần FE mở lại conversation / tab focus / poll (xem ENSURE_RETRY ở
-// useZalo.ts) đều gọi thẳng ZCA thật, dồn dập trong vài giây — vừa vô ích vừa
-// có rủi ro bị Zalo rate-limit/đánh dấu tài khoản thật đang dùng.
-const USER_INFO_SUCCESS_TTL_MS = 60_000;
-const USER_INFO_FAILURE_TTL_MS = 10 * 60_000;
-
+// Cache 60s (thành công) / 10 phút (thất bại) — dùng chung module
+// threadInfoResolver.js với supabaseSync.js. Negative cache dài hơn hẳn vì
+// `getUserInfo` gọi endpoint `/api/social/friend/getprofiles/v2` — endpoint
+// này chỉ trả hồ sơ cho user đã là BẠN BÈ trên Zalo. Với người lạ nhắn tin
+// (chưa kết bạn), ZCA trả lỗi code:112 ("Lỗi không xác định") — lỗi này
+// KHÔNG transient, sẽ fail y hệt mỗi lần gọi cho tới khi 2 bên kết bạn.
 router.get('/all-platform/zalo/user-info', async (req, res) => {
   try {
     const ctx = requireLoggedIn(req, res);
@@ -455,56 +407,9 @@ router.get('/all-platform/zalo/user-info', async (req, res) => {
       return res.status(400).json({ error: 'missing user_id' });
     }
 
-    ctx.__singleUserCache = ctx.__singleUserCache || {};
-    const cached = ctx.__singleUserCache[userId];
-    const now = Date.now();
-    if (cached) {
-      const ttl = cached.failed ? USER_INFO_FAILURE_TTL_MS : USER_INFO_SUCCESS_TTL_MS;
-      if (cached.ts > now - ttl) {
-        return res.status(cached.status).json(cached.payload);
-      }
-    }
-
-    let profile;
-    try {
-      const response = await ctx.api.getUserInfo(userId);
-      const profiles = response?.changed_profiles || {};
-      profile = Object.values(profiles)[0] || null;
-    } catch (e) {
-      logger.warn(
-        `[${ctx.accountId}] user-info: getUserInfo(${userId}) failed`,
-        { err: e?.message, code: e?.code }
-      );
-      const payload = {
-        ok: false,
-        error: 'getUserInfo failed',
-        detail: e?.message,
-        thread_id: userId,
-      };
-      ctx.__singleUserCache[userId] = { ts: now, payload, status: 502, failed: true };
-      return res.status(502).json(payload);
-    }
-
-    const name = profile?.zaloName || profile?.displayName;
-    if (!profile || !name) {
-      const payload = {
-        ok: false,
-        error: 'user not found or empty name',
-        thread_id: userId,
-      };
-      ctx.__singleUserCache[userId] = { ts: now, payload, status: 404, failed: true };
-      return res.status(404).json(payload);
-    }
-
-    const payload = {
-      ok: true,
-      thread_id: userId,
-      thread_type: 'user',
-      user_name: name,
-      avatar_url: profile.avatar || null,
-    };
-    ctx.__singleUserCache[userId] = { ts: now, payload, status: 200, failed: false };
-    return res.json(payload);
+    const payload = await resolveUserInfo(ctx.api, ctx.accountId, userId);
+    const status = payload.ok ? 200 : payload.error === 'user not found or empty name' ? 404 : 502;
+    return res.status(status).json(payload);
   } catch (err) {
     logger.error('GET user-info error', { err: err.message });
     res.status(500).json({ error: err.message });

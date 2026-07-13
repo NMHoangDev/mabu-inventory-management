@@ -16,6 +16,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { logger } from '../utils/logger.js';
 import { ThreadType } from 'zca-js';
+import { resolveGroupInfo, resolveUserInfo } from './threadInfoResolver.js';
+
+// Nhận diện tên thread fallback ("Group <id>" / "Zalo <id>") — PHẢI khớp
+// FALLBACK_NAME_RE ở useZalo.ts (frontend đọc/so tên theo đúng format này để
+// biết khi nào cần tự resolve lại). Dùng ở đây để bridge tự phát hiện conversation
+// đang bị kẹt tên tạm và tự gọi ZCA resolve — không cần đợi FE mở tab.
+const FALLBACK_NAME_RE = /^(Group|Zalo)\s+\d+$/;
 
 let _client = null;
 let _warnedMissing = false;
@@ -210,16 +217,21 @@ export function resolveImageUrls(msg) {
 // tự sửa được dù frontend có logic resolve lại tên thật.
 //
 // Quy tắc:
-//   - GROUP: KHÔNG bao giờ set tên từ senderName. Row mới → fallback
-//     `[Nhóm] Zalo Nhóm <id>` (tên thật sẽ được frontend resolve qua bridge
-//     /group-info — xem ensureConversationInSupabase trong useZalo.ts). Row
-//     đã có → luôn giữ nguyên, không đụng vào.
-//   - USER (DM): senderName của đối phương là tên hợp lệ.
-//     - Row mới (chưa có) → dùng senderName (nếu incoming + có tên) hoặc fallback.
-//     - Row đã có + tin incoming (isSelf=false) + senderName hợp lệ → UPDATE
-//       name (đối phương đổi tên Zalo, hoặc lần đầu có tên thật).
-//     - Row đã có + tin mình gửi (isSelf=true) → KHÔNG đụng, giữ nguyên.
-async function resolveConversationName(accountId, conversationId, threadId, threadType, senderName, isSelf) {
+//   - GROUP: KHÔNG bao giờ set tên từ senderName (senderName chỉ là 1 thành
+//     viên bất kỳ, không phải tên nhóm). Nếu row chưa có HOẶC tên hiện tại
+//     vẫn là fallback `Group <id>` → bridge tự gọi ZCA getGroupInfo() ngay
+//     (qua threadInfoResolver, có cache) để lấy tên thật — KHÔNG còn phụ
+//     thuộc FE mở tab mới resolve được (xem lịch sử bug 2026-07-13: nhiều
+//     nhóm kẹt vĩnh viễn ở "Group <id>" vì chỉ FE mới gọi /group-info, và
+//     chỉ khi có tab đang mở + SSE sống đúng lúc tin nhắn đến).
+//   - USER (DM): senderName của đối phương là tên hợp lệ, dùng ngay không
+//     cần gọi API. Nếu senderName rỗng (hiếm, catch-up cũ) và tên hiện tại
+//     vẫn là fallback → thử getUserInfo() qua threadInfoResolver — CHỈ
+//     thành công nếu 2 bên đã là bạn bè trên Zalo (giới hạn của ZCA), người
+//     lạ nhắn tin vẫn phải chờ FE fallback DOM-scrape (chỉ trình duyệt làm
+//     được, bridge không có DOM).
+//   - Tin mình gửi (isSelf=true) vào row đã có → không đụng tên, giữ nguyên.
+async function resolveConversationName(accountId, conversationId, threadId, threadType, senderName, isSelf, api) {
   try {
     const sb = getClient();
     if (!sb) return null;
@@ -231,27 +243,33 @@ async function resolveConversationName(accountId, conversationId, threadId, thre
       .maybeSingle();
     if (error) return null;
 
+    const currentName = data?.conversation_name?.trim() || null;
+    const needsResolve = !data || (currentName && FALLBACK_NAME_RE.test(currentName));
+
     if (threadType === 'group') {
-      // Format `Group <id>` phải khớp FALLBACK_NAME_RE ở useZalo.ts
-      // (/^(Group|Zalo)\s+\d+$/) — đây là format fallback DUY NHẤT dùng
-      // xuyên suốt cả bridge + FE (route.ts toRow(), ensureConversationInSupabase).
-      // Dùng format khác (vd cũ "[Nhóm] Zalo Nhóm <id>") sẽ khiến FE không
-      // nhận ra đây là tên tạm → không tự resolve sang tên nhóm thật qua
-      // /group-info được.
+      if (!needsResolve) return null; // đã có tên thật — giữ nguyên
+      const info = await resolveGroupInfo(api, accountId, threadId);
+      if (info?.ok && info.group_name) return info.group_name;
+      // Resolve thất bại (session chưa sẵn/rate-limit/lỗi ZCA) — vẫn phải trả
+      // 1 giá trị cho row MỚI (không thể để conversation_name null lúc insert),
+      // row ĐÃ CÓ thì giữ nguyên tên tạm cũ, tránh ghi liên tục cùng 1 fallback.
       if (!data) return `Group ${threadId}`;
-      return null; // giữ tên cũ — senderName KHÔNG bao giờ đúng cho group
+      return null;
     }
 
     // USER (DM)
-    if (!data) {
-      // Row mới — dùng fallback hoặc senderName (nếu incoming + có tên)
-      if (!isSelf && senderName && senderName.trim().length > 0) return senderName;
-      return `Zalo ${threadId}`;
+    if (!isSelf && senderName && senderName.trim().length > 0) {
+      // senderName hợp lệ — dùng ngay, không cần gọi API (rẻ + luôn đúng cho DM).
+      if (data && currentName === senderName.trim()) return null; // không đổi gì, khỏi ghi
+      return senderName;
     }
-    // Row đã có
-    if (isSelf) return null; // giữ tên cũ
-    if (senderName && senderName.trim().length > 0) return senderName; // update tên mới
-    return null; // giữ tên cũ
+    if (!needsResolve) return null; // tên hiện tại đã thật (không phải fallback) — giữ nguyên
+    if (!isSelf) {
+      const info = await resolveUserInfo(api, accountId, threadId);
+      if (info?.ok && info.user_name) return info.user_name;
+    }
+    if (!data) return `Zalo ${threadId}`;
+    return null;
   } catch {
     return null;
   }
@@ -264,6 +282,7 @@ export async function persistIncomingMessage({
   msg,
   isSelf,
   isCatchUp = false,
+  api = null,
 }) {
   const sb = getClient();
   if (!sb) return { ok: false, reason: 'no-supabase-client' };
@@ -358,7 +377,8 @@ const conversationId = threadId;
       threadId,
       threadType,
       senderName,
-      isSelf
+      isSelf,
+      api
     );
 
     const { error: convErr } = await sb
@@ -402,6 +422,65 @@ const conversationId = threadId;
       { err: e instanceof Error ? e.message : String(e) }
     );
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Quét toàn bộ zalo_conversations_ui của 1 account, tìm các row đang kẹt tên
+ * fallback (`Group <id>` / `Zalo <id>`) và tự resolve tên thật qua ZCA ngay
+ * tại bridge — bù cho các row bị tạo TRƯỚC KHI có fix tự-resolve trong
+ * persistIncomingMessage (hoặc row mà lần resolve tại thời điểm nhận tin đã
+ * fail do rate-limit/session chưa sẵn sàng). Gọi 1 lần mỗi khi bridge
+ * login/reconnect (xem sessionManager.js, cạnh catchUpRecentMessages) —
+ * không cần frontend mở tab.
+ *
+ * @param {object} args
+ * @param {string} args.accountId
+ * @param {object} args.api — zca-js API instance
+ * @returns {Promise<{ok: boolean, scanned: number, fixed: number}>}
+ */
+export async function reconcileFallbackConversationNames({ accountId, api }) {
+  const sb = getClient();
+  if (!sb || !api) return { ok: false, scanned: 0, fixed: 0 };
+
+  try {
+    const { data, error } = await sb
+      .from('zalo_conversations_ui')
+      .select('conversation_id, thread_id, thread_type, conversation_name')
+      .eq('account_id', accountId);
+    if (error) {
+      logger.warn(`[supabase-sync] [${accountId}] reconcile: query failed`, { err: error.message });
+      return { ok: false, scanned: 0, fixed: 0 };
+    }
+
+    const stuck = (data || []).filter(
+      (row) => row.conversation_name && FALLBACK_NAME_RE.test(row.conversation_name.trim())
+    );
+    let fixed = 0;
+    for (const row of stuck) {
+      const threadId = row.thread_id || row.conversation_id;
+      const info =
+        row.thread_type === 'group'
+          ? await resolveGroupInfo(api, accountId, threadId)
+          : await resolveUserInfo(api, accountId, threadId);
+      const realName = info?.ok ? info.group_name || info.user_name : null;
+      if (!realName) continue;
+      const { error: updErr } = await sb
+        .from('zalo_conversations_ui')
+        .update({ conversation_name: realName })
+        .eq('account_id', accountId)
+        .eq('conversation_id', row.conversation_id);
+      if (!updErr) fixed++;
+    }
+    logger.info(
+      `[supabase-sync] [${accountId}] reconcile fallback names: scanned=${data?.length || 0} stuck=${stuck.length} fixed=${fixed}`
+    );
+    return { ok: true, scanned: data?.length || 0, fixed };
+  } catch (e) {
+    logger.warn(`[supabase-sync] [${accountId}] reconcile failed`, {
+      err: e instanceof Error ? e.message : String(e),
+    });
+    return { ok: false, scanned: 0, fixed: 0 };
   }
 }
 
@@ -475,6 +554,7 @@ export async function catchUpRecentMessages({ accountId, api, count = 50 }) {
           },
           isSelf,
           isCatchUp: true,
+          api,
         });
         if (result.ok) persisted++;
         else skipped++;
