@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const ORDER_STATUSES = ["new", "processing", "completed", "cancelled", "all"] as const;
     const PAYMENT_STATUSES = ["unpaid", "partial", "paid", "refunded", "all"] as const;
     const FULFILLMENT_STATUSES = ["unshipped", "confirmed", "packing", "shipping", "shipped", "returned", "all"] as const;
-    const SOURCES = ["store", "facebook", "website", "zalo", "other", "all"] as const;
+    const SOURCES = ["store", "facebook", "website", "zalo", "other", "pos", "all"] as const;
     function pickEnum<T extends readonly string[]>(values: T, raw: string | null): T[number] | undefined {
       if (!raw) return undefined;
       return (values as readonly string[]).includes(raw) ? (raw as T[number]) : undefined;
@@ -65,7 +65,7 @@ const createSchema = z.object({
   payment_status: z.enum(["unpaid", "partial", "paid", "refunded"]).optional(),
   fulfillment_status: z.enum(["unshipped", "confirmed", "packing", "shipping", "shipped", "returned"]).optional(),
   payment_method: z.enum(["cod", "bank_transfer", "card", "cash"]).optional(),
-  source: z.enum(["store", "facebook", "website", "zalo", "other"]).optional(),
+  source: z.enum(["store", "facebook", "website", "zalo", "other", "pos"]).optional(),
   branch: z.string().optional(),
   staff: z.string().optional(),
   note: z.string().optional(),

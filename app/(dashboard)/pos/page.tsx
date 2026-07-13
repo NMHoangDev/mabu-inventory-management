@@ -438,7 +438,7 @@ export default function PosPage() {
           fulfillment_status: "shipped",
           payment_status: paymentStatus,
           payment_method: activeTab.paymentMethod,
-          source: "store",
+          source: "pos",
           branch: BRANCH_NAME,
           staff: staffName,
           note: activeTab.note,

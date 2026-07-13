@@ -77,6 +77,7 @@ const SOURCE_LABEL: Record<string, string> = {
   website: "Website",
   zalo: "Zalo",
   other: "Khác",
+  pos: "Bán tại quầy (POS)",
 };
 const STATUS_CLASS: Record<string, string> = {
   new: "bg-blue-100 text-blue-700",
@@ -161,7 +162,7 @@ export default function OrdersPage() {
     revenue_today: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"all" | "draft" | "returned">("all");
+  const [tab, setTab] = useState<"all" | "draft" | "returned" | "pos">("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -177,6 +178,7 @@ export default function OrdersPage() {
       if (search) params.set("search", search);
       if (tab === "draft") params.set("status", "new");
       if (tab === "returned") params.set("fulfillment_status", "returned");
+      if (tab === "pos") params.set("source", "pos");
       if (paymentFilter !== "all") params.set("payment_status", paymentFilter);
       if (shipmentFilter !== "all") params.set("fulfillment_status", shipmentFilter);
       if (sourceFilter !== "all") params.set("source", sourceFilter);
@@ -309,6 +311,7 @@ export default function OrdersPage() {
         <TabButton active={tab === "all"} onClick={() => setTab("all")}>Tất cả đơn hàng</TabButton>
         <TabButton active={tab === "draft"} onClick={() => setTab("draft")}>Đơn draft</TabButton>
         <TabButton active={tab === "returned"} onClick={() => setTab("returned")}>Đơn hoàn trả</TabButton>
+        <TabButton active={tab === "pos"} onClick={() => setTab("pos")}>Đơn từ POS</TabButton>
       </div>
 
       {/* Data Table */}

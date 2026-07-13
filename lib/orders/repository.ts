@@ -12,7 +12,7 @@ export type PaymentStatus = "unpaid" | "partial" | "paid" | "refunded";
 // "confirmed"/"packing" thêm cho luồng xử lý đơn website: xác nhận → đóng gói
 // → đang giao → đã giao, trước khi giao cho đơn vị vận chuyển/tự giao.
 export type FulfillmentStatus = "unshipped" | "confirmed" | "packing" | "shipping" | "shipped" | "returned";
-export type OrderSource = "store" | "facebook" | "website" | "zalo" | "other";
+export type OrderSource = "store" | "facebook" | "website" | "zalo" | "other" | "pos";
 // COD: payment_status chỉ chuyển "paid" khi fulfillment_status đạt "shipped"
 // (thu tiền lúc giao xong). bank_transfer/card: khách trả trước, payment_status
 // có thể "paid" ngay cả khi fulfillment_status còn "unshipped" (chưa giao).

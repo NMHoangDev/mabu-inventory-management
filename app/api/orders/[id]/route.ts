@@ -23,7 +23,7 @@ const updateSchema = z.object({
   payment_status: z.enum(["unpaid", "partial", "paid", "refunded"]).optional(),
   fulfillment_status: z.enum(["unshipped", "confirmed", "packing", "shipping", "shipped", "returned"]).optional(),
   payment_method: z.enum(["cod", "bank_transfer", "card", "cash"]).optional(),
-  source: z.enum(["store", "facebook", "website", "zalo", "other"]).optional(),
+  source: z.enum(["store", "facebook", "website", "zalo", "other", "pos"]).optional(),
   branch: z.string().optional(),
   staff: z.string().optional(),
   note: z.string().optional(),

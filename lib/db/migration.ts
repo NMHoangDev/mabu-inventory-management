@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 22; // Bumped: product_suppliers (liên kết NCC ↔ sản phẩm cung cấp)
+const SCHEMA_VERSION = 23; // Bumped: orders.source thêm 'pos' (phân biệt đơn tạo từ trang POS)
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -1104,6 +1104,25 @@ async function migrate() {
     );
     create index if not exists idx_product_suppliers_product  on product_suppliers(product_id);
     create index if not exists idx_product_suppliers_supplier on product_suppliers(supplier_id);
+  `);
+
+  // 20. Phân biệt đơn tạo từ trang POS (/pos) với đơn tạo tại quầy qua form
+  // /orders/new — trước đây cả 2 đều dùng chung source='store' nên không lọc
+  // riêng được đơn POS. Thêm 'pos' vào enum source.
+  await client.query(`
+    alter table orders drop constraint if exists orders_source_check;
+    alter table orders add constraint orders_source_check
+      check (source in ('store', 'facebook', 'website', 'zalo', 'other', 'pos'));
+
+    -- Backfill 1 lần: đơn POS tạo TRƯỚC migration này không có cách nào phân
+    -- biệt được với đơn 'store' thường qua field chính thức nào (source đều
+    -- là 'store'). Dấu hiệu duy nhất đang có là branch — POS hardcode branch
+    -- "Chi nhánh mặc định" (xem app/(dashboard)/pos/page.tsx, BRANCH_NAME),
+    -- trong khi /orders/new chỉ cho chọn "Chi nhánh chính" / "Chi nhánh trung
+    -- tâm" / "Kho Quận 1" (không bao giờ ra "Chi nhánh mặc định"). Dùng tạm
+    -- dấu hiệu này để gắn lại nhãn 'pos' cho dữ liệu lịch sử.
+    update orders set source = 'pos'
+      where source = 'store' and branch = 'Chi nhánh mặc định';
   `);
 } finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);
