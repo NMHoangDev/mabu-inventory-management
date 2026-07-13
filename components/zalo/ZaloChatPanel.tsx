@@ -1,8 +1,50 @@
 "use client";
 
 import { Image as ImageIcon, Loader2, MessageCircle, Paperclip, RefreshCw, Send, User, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ZaloConversation, ZaloMessage } from "@/lib/zalo-api";
+
+// Zalo gửi mỗi ảnh trong 1 "album" nhiều ảnh như 1 tin nhắn RIÊNG BIỆT (xem
+// services/zalo-bridge/src/services/forwardEngine.js — queueImageForBatch có
+// cùng lý do) — nếu render y nguyên từng row sẽ ra nhiều bubble tách rời dù
+// người dùng chọn gửi/nhận cùng lúc. Gom các tin liên tiếp chỉ có ảnh (không
+// kèm chữ), cùng người gửi, cách nhau trong 1 khoảng ngắn → 1 bubble nhiều ảnh,
+// khớp với cách Zalo hiển thị album thật.
+const IMAGE_GROUP_WINDOW_MS = 3000;
+
+function isImageOnlyMessage(m: ZaloMessage): boolean {
+  return Array.isArray(m.image_urls) && m.image_urls.length > 0 && !m.content?.trim();
+}
+
+function groupImageMessagesForDisplay(messages: ZaloMessage[]): ZaloMessage[] {
+  const grouped: ZaloMessage[] = [];
+  for (const m of messages) {
+    const last = grouped[grouped.length - 1];
+    const withinWindow =
+      !!last &&
+      Math.abs(
+        new Date(m.timestamp || 0).getTime() - new Date(last.timestamp || 0).getTime()
+      ) <= IMAGE_GROUP_WINDOW_MS;
+
+    if (
+      last &&
+      isImageOnlyMessage(m) &&
+      isImageOnlyMessage(last) &&
+      last.sender_id === m.sender_id &&
+      last.is_sent === m.is_sent &&
+      withinWindow
+    ) {
+      grouped[grouped.length - 1] = {
+        ...last,
+        image_urls: [...(last.image_urls || []), ...(m.image_urls || [])],
+        timestamp: m.timestamp || last.timestamp,
+      };
+      continue;
+    }
+    grouped.push(m);
+  }
+  return grouped;
+}
 
 interface Props {
   conv: ZaloConversation | null;
@@ -119,6 +161,10 @@ export function ZaloChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
+  // Chỉ gộp CHO HIỂN THỊ — không đụng vào `messages` gốc (state ở useZalo.ts
+  // vẫn giữ nguyên từng row để dedupe/refetch logic không bị ảnh hưởng).
+  const displayMessages = useMemo(() => groupImageMessagesForDisplay(messages), [messages]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
@@ -185,7 +231,7 @@ export function ZaloChatPanel({
           </div>
         ) : (
           <div className="space-y-3">
-            {messages.map((m, idx) => {
+            {displayMessages.map((m, idx) => {
               // Key ổn định để React không re-mount khi setMessages thay thế
               // list bằng list mới (vd SSE refresh). Ưu tiên message_id; nếu
               // row SSE cũ không có id (trước fix), dùng composite key từ
