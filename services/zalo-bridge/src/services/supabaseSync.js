@@ -110,27 +110,46 @@ function resolveMessageId(msg) {
  * (xem zca-js/dist/apis/sendMessage.js, uploadAttachment.js) — Zalo protocol
  * dùng chung field name cho cả gửi/nhận.
  */
+// Self-echo của tin ẢNH TỰ GỬI (isSelf) đôi khi kèm placeholder link chung
+// chung của Zalo (vd "https://zaloapp.com" — không có path, không phải ảnh
+// thật) ở field `href` TRƯỚC KHI CDN xử lý xong ảnh thật — nếu nhận field này
+// theo đúng thứ tự ưu tiên như bình thường, `image_urls` sẽ lưu nhầm link rác
+// → ảnh hiển thị vỡ (bug quan sát được 2026-07-13, tin do "Kho Sỉ Hcm" tự gửi).
+// Validate: 1 URL ảnh thật luôn có path (không chỉ là domain trần).
+function isValidImageUrl(url) {
+  if (typeof url !== 'string' || url.length === 0) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.length > 1; // "/" (root, không path) → coi như rác
+  } catch {
+    return false;
+  }
+}
+
 function extractOneImageUrl(contentObj) {
   if (!contentObj || typeof contentObj !== 'object') return null;
   // Self-echo của tin gửi từ chính bridge (SEND_MEDIA_API / forwardMedia) đôi
   // khi bọc field ảnh trong `params` thay vì để phẳng ở top-level — xem shape
   // gửi đi ở zca-js/dist/apis/sendMessage.js handleAttachment() (data.params.*).
   const p = contentObj.params && typeof contentObj.params === 'object' ? contentObj.params : null;
-  const url =
-    contentObj.hdUrl ||
-    contentObj.oriUrl ||
-    contentObj.normalUrl ||
-    contentObj.rawUrl ||
-    contentObj.href ||
-    contentObj.thumbUrl ||
-    contentObj.thumb ||
-    p?.hdUrl ||
-    p?.oriUrl ||
-    p?.normalUrl ||
-    p?.rawUrl ||
-    p?.thumbUrl ||
-    null;
-  return typeof url === 'string' && url.length > 0 ? url : null;
+  const candidates = [
+    contentObj.hdUrl,
+    contentObj.oriUrl,
+    contentObj.normalUrl,
+    contentObj.rawUrl,
+    contentObj.href,
+    contentObj.thumbUrl,
+    contentObj.thumb,
+    p?.hdUrl,
+    p?.oriUrl,
+    p?.normalUrl,
+    p?.rawUrl,
+    p?.thumbUrl,
+  ];
+  // Duyệt theo đúng thứ tự ưu tiên chất lượng, bỏ qua candidate nào không phải
+  // URL ảnh thật (thay vì chỉ validate mỗi kết quả cuối) — để vẫn rớt xuống
+  // được field hợp lệ tiếp theo nếu field ưu tiên cao hơn là placeholder rác.
+  return candidates.find(isValidImageUrl) || null;
 }
 
 /**
@@ -172,13 +191,13 @@ export function resolveImageUrls(msg) {
 
   // Fallback — field top-level cũ, giữ lại phòng trường hợp payload khác (vd CMRecent).
   if (Array.isArray(d.imageUrls)) {
-    return d.imageUrls.filter((u) => typeof u === 'string' && u.length > 0);
+    return d.imageUrls.filter(isValidImageUrl);
   }
-  if (typeof d.thumb === 'string' && d.thumb.length > 0) return [d.thumb];
+  if (isValidImageUrl(d.thumb)) return [d.thumb];
   if (Array.isArray(d.attachments)) {
     return d.attachments
       .map((a) => (typeof a === 'string' ? a : a?.url || a?.href))
-      .filter((u) => typeof u === 'string' && u.length > 0);
+      .filter(isValidImageUrl);
   }
   return [];
 }
