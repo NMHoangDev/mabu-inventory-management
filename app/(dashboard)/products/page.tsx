@@ -67,6 +67,9 @@ export default function ProductsPage() {
   // Standard products state
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [categories, setCategories] = useState<any[]>([]);
   const [copiedSku, setCopiedSku] = useState<string | null>(null);
 
@@ -145,10 +148,16 @@ export default function ProductsPage() {
         fetch("/api/products"),
         fetch("/api/categories")
       ]);
-      if (prodRes.ok) setProducts(await prodRes.json());
+      if (prodRes.ok) {
+        setProducts(await prodRes.json());
+        setLoadError("");
+      } else {
+        setLoadError("Không tải được danh sách sản phẩm. Vui lòng thử lại.");
+      }
       if (catRes.ok) setCategories(await catRes.json());
     } catch (err) {
       console.error(err);
+      setLoadError("Không tải được danh sách sản phẩm. Vui lòng thử lại.");
     } finally {
       setLoading(false);
     }
@@ -231,6 +240,20 @@ export default function ProductsPage() {
       return matchesSearch && matchesChannel && matchesCategory;
     });
   }, [products, searchQuery, channelFilter, categoryFilter]);
+
+  // Reset về trang 1 khi bộ lọc thay đổi để không "kẹt" ở trang trống.
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, channelFilter, categoryFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedProducts = useMemo(
+    () => filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filteredProducts, currentPage]
+  );
+  const pageStart = filteredProducts.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredProducts.length);
 
   // Candidate grouping from scanned rows
   const appliedDocumentIds = useMemo(
@@ -923,7 +946,7 @@ export default function ProductsPage() {
                   {name || "Tên sản phẩm mẫu"}
                 </div>
                 <div className="text-emerald-700 text-[10px]">
-                  https://invoiceflow.sapo.vn/products/{sku || name ? (sku || name).toLowerCase().replace(/[^a-z0-9]+/g, "-") : ""}
+                  https://website-cua-ban.vn/products/{sku || name ? (sku || name).toLowerCase().replace(/[^a-z0-9]+/g, "-") : ""}
                 </div>
                 <div className="text-slate-600 line-clamp-2">
                   {description || "Chưa có mô tả chi tiết sản phẩm."}
@@ -1232,6 +1255,15 @@ export default function ProductsPage() {
               )}
             </div>
 
+            {loadError ? (
+              <div className="mx-6 mt-3 flex items-center justify-between gap-3 rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+                <span>{loadError}</span>
+                <button onClick={loadData} className="shrink-0 font-semibold hover:underline">
+                  Thử lại
+                </button>
+              </div>
+            ) : null}
+
             {/* Table data grid */}
             <div className="overflow-x-auto">
               {loading ? (
@@ -1267,7 +1299,7 @@ export default function ProductsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredProducts.map((p) => (
+                    {pagedProducts.map((p) => (
                       <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-6 py-4">
                           <input type="checkbox" className="rounded border-slate-300 text-primary focus:ring-primary" disabled />
@@ -1365,16 +1397,24 @@ export default function ProductsPage() {
             {/* Pagination footer */}
             <div className="px-6 py-4 border-t flex items-center justify-between text-xs text-slate-500 bg-slate-50/20">
               <div>
-                Từ 1 đến {filteredProducts.length} trên tổng {filteredProducts.length} kết quả
+                Từ {pageStart} đến {pageEnd} trên tổng {filteredProducts.length} kết quả
               </div>
               <div className="flex items-center gap-2">
-                <button className="w-7 h-7 flex items-center justify-center rounded border bg-white cursor-not-allowed opacity-50">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                  className="w-7 h-7 flex items-center justify-center rounded border bg-white enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   <ChevronLeft className="h-3.5 w-3.5" />
                 </button>
-                <button className="w-7 h-7 flex items-center justify-center bg-primary text-white rounded font-semibold text-xs">
-                  1
-                </button>
-                <button className="w-7 h-7 flex items-center justify-center rounded border bg-white cursor-not-allowed opacity-50">
+                <span className="px-2 font-semibold text-slate-600">
+                  Trang {currentPage}/{totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="w-7 h-7 flex items-center justify-center rounded border bg-white enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   <ChevronRight className="h-3.5 w-3.5" />
                 </button>
               </div>

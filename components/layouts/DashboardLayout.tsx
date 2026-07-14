@@ -151,7 +151,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      <nav className={`flex-1 overflow-y-auto ${isCollapsed ? "px-2" : "px-3"} py-4`}>
+      <nav className={`no-scrollbar flex-1 overflow-y-auto ${isCollapsed ? "px-2" : "px-3"} py-4`}>
         {navGroups.map((group) => (
           <div key={group} className="mb-6 last:mb-0">
             {!isCollapsed ? (
@@ -218,11 +218,11 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
       {!isCollapsed ? (
         <div className="flex w-full shrink-0 items-center gap-2 border-t border-sidebar-border px-3 py-2">
           <div className="brand-gradient grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[10px] font-semibold text-primary-foreground shadow-elegant">
-            NV
+            IF
           </div>
           <div className="min-w-0 text-[11px] leading-tight">
-            <div className="truncate font-medium text-sidebar-foreground">Công ty ABC</div>
-            <div className="truncate text-sidebar-foreground opacity-60">nhân viên · kho HCM</div>
+            <div className="truncate font-medium text-sidebar-foreground">InvoiceFlow Manager</div>
+            <div className="truncate text-sidebar-foreground opacity-60">Quản lý kho &amp; bán hàng</div>
           </div>
         </div>
       ) : null}

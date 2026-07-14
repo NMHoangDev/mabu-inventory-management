@@ -19,6 +19,7 @@ interface SupplierRow {
   last_order_at: string | null;
   created_at: string;
   product_count: number;
+  group_name?: string;
 }
 
 function formatDate(iso: string): string {
@@ -143,10 +144,10 @@ export default function SuppliersPage() {
             downloadCsv(`nha-cung-cap-${Date.now()}.csv`, rows, [
               { label: "Mã nhà cung cấp", value: (r) => r.code },
               { label: "Tên nhà cung cấp", value: (r) => r.name },
-              { label: "Nhóm", value: () => "Khác" },
+              { label: "Nhóm", value: (r) => r.group_name || "" },
               { label: "Email", value: (r) => r.email },
               { label: "Số điện thoại", value: (r) => r.phone },
-              { label: "Trạng thái", value: () => "Đang giao dịch" },
+              { label: "Trạng thái", value: (r) => (r.status === "inactive" ? "Ngừng giao dịch" : "Đang giao dịch") },
             ])
           }
           className="flex items-center gap-1 hover:text-blue-600"
@@ -287,14 +288,16 @@ export default function SuppliersPage() {
                           {row.name}
                         </Link>
                       </td>
-                      <td className="p-4 text-slate-500">Khác</td>
+                      <td className="p-4 text-slate-500">{row.group_name || "—"}</td>
                       <td className="p-4 text-slate-500">{row.email || "—"}</td>
                       <td className="p-4 text-slate-500">{row.phone || "—"}</td>
                       <td className="p-4 text-right tabular-nums text-slate-600">{row.product_count}</td>
                       <td className="p-4">
-                        <span className="text-green-600 text-xs font-semibold">
-                          Đang giao dịch
-                        </span>
+                        {row.status === "inactive" ? (
+                          <span className="text-slate-500 text-xs font-semibold">Ngừng giao dịch</span>
+                        ) : (
+                          <span className="text-green-600 text-xs font-semibold">Đang giao dịch</span>
+                        )}
                       </td>
                       <td className="p-4">
                         <div className="flex items-center justify-end gap-1">

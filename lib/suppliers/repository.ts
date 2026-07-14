@@ -39,6 +39,7 @@ export interface SupplierListRow {
   last_order_at: string | null;
   created_at: string;
   product_count: number;
+  group_name: string;
 }
 
 function num(value: unknown): number {
@@ -125,11 +126,13 @@ export async function listSuppliers(args?: {
 
   const rowsResult = await pool.query(
     `select s.id, s.code, s.name, s.phone, s.email, s.status, s.total_purchased, s.total_orders, s.last_order_at, s.created_at,
-            coalesce(pc.cnt, 0)::int as product_count
+            coalesce(pc.cnt, 0)::int as product_count,
+            coalesce(g.name, '') as group_name
      from suppliers s
      left join (
        select supplier_id, count(*)::int as cnt from product_suppliers group by supplier_id
      ) pc on pc.supplier_id = s.id
+     left join supplier_groups g on g.id = s.group_id
      ${whereClause}
      order by s.created_at desc
      limit $${paramIdx} offset $${paramIdx + 1}`,
@@ -148,7 +151,8 @@ export async function listSuppliers(args?: {
       total_orders: num(row.total_orders),
       last_order_at: row.last_order_at,
       created_at: row.created_at,
-      product_count: num(row.product_count)
+      product_count: num(row.product_count),
+      group_name: str(row.group_name)
     })),
     total
   };

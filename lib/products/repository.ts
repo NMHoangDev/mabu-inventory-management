@@ -231,6 +231,9 @@ export interface ProductInput {
   category_id?: string | null;
   brand_id?: string | null;
   product_type_id?: string | null;
+  // Form gửi lên theo TÊN (không phải id) — được resolve/tạo mới thành id khi lưu.
+  brand_name?: string;
+  product_type_name?: string;
   tags?: string[];
   sales_channels?: string[];
   theme_template?: string;
@@ -285,17 +288,45 @@ export async function getProducts() {
       b.name as brand_name,
       t.name as type_name,
       count(distinct pv.id)::int as variant_count,
-      coalesce(sum(il.quantity), 0)::int as total_inventory
+      -- Tồn kho thật nằm ở products.stock (được lib/orders/repository.ts cập nhật
+      -- khi đơn completed). Bảng inventory_levels/product_variants gần như không
+      -- dùng nên KHÔNG lấy tồn kho từ đó (trước đây luôn ra ~0).
+      coalesce(p.stock, 0)::int as total_inventory
     from products p
     left join categories c on c.id = p.category_id
     left join brands b on b.id = p.brand_id
     left join product_types t on t.id = p.product_type_id
     left join product_variants pv on pv.product_id = p.id
-    left join inventory_levels il on il.variant_id = pv.id
     group by p.id, c.name, b.name, t.name
     order by p.created_at desc
   `);
   return res.rows;
+}
+
+// Resolve tên thương hiệu → id (tạo mới nếu chưa có). brands.name là unique.
+async function resolveBrandId(client: any, name?: string): Promise<string | null> {
+  const n = (name ?? "").trim();
+  if (!n) return null;
+  const res = await client.query(
+    `insert into brands (name) values ($1)
+     on conflict (name) do update set name = excluded.name
+     returning id`,
+    [n]
+  );
+  return res.rows[0]?.id ?? null;
+}
+
+// Resolve tên loại sản phẩm → id (tạo mới nếu chưa có). product_types.name là unique.
+async function resolveProductTypeId(client: any, name?: string): Promise<string | null> {
+  const n = (name ?? "").trim();
+  if (!n) return null;
+  const res = await client.query(
+    `insert into product_types (name) values ($1)
+     on conflict (name) do update set name = excluded.name
+     returning id`,
+    [n]
+  );
+  return res.rows[0]?.id ?? null;
 }
 
 export async function createProduct(input: ProductInput) {
@@ -341,7 +372,11 @@ export async function createProduct(input: ProductInput) {
   const client = await pool.connect();
   try {
     await client.query("begin");
-    
+
+    // 0. Resolve brand/type theo TÊN (form không gửi id) → id, tạo mới nếu cần.
+    const brandId = input.brand_id || (await resolveBrandId(client, input.brand_name));
+    const productTypeId = input.product_type_id || (await resolveProductTypeId(client, input.product_type_name));
+
     // 1. Insert product
     const pSku = input.sku || `SKU-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const productRes = await client.query(`
@@ -367,8 +402,8 @@ export async function createProduct(input: ProductInput) {
       input.weight ?? 0,
       input.weight_unit || "g",
       input.category_id || null,
-      input.brand_id || null,
-      input.product_type_id || null,
+      brandId,
+      productTypeId,
       input.tags || [],
       input.sales_channels || [],
       input.theme_template || "product",
@@ -523,6 +558,21 @@ export async function updateProduct(id: string, input: ProductInput) {
     const published =
       input.published !== undefined ? input.published : existing.published_at !== null;
 
+    // 0. Resolve brand/type theo TÊN (form gửi tên, không phải id). Giữ nguyên
+    // giá trị cũ nếu form không đụng tới brand/type.
+    const brandId =
+      input.brand_id !== undefined
+        ? input.brand_id
+        : input.brand_name !== undefined
+          ? await resolveBrandId(client, input.brand_name)
+          : existing.brand_id;
+    const productTypeId =
+      input.product_type_id !== undefined
+        ? input.product_type_id
+        : input.product_type_name !== undefined
+          ? await resolveProductTypeId(client, input.product_type_name)
+          : existing.product_type_id;
+
     // 1. Update product main details
     await client.query(`
       update products set
@@ -548,6 +598,8 @@ export async function updateProduct(id: string, input: ProductInput) {
         seo_title = $20,
         seo_description = $21,
         published_at = case when $22 then coalesce(published_at, now()) else null end,
+        brand_id = $24,
+        product_type_id = $25,
         updated_at = now()
       where id = $23
     `, [
@@ -573,7 +625,9 @@ export async function updateProduct(id: string, input: ProductInput) {
       input.seo_title ?? existing.seo_title,
       input.seo_description ?? existing.seo_description,
       published,
-      id
+      id,
+      brandId,
+      productTypeId
     ]);
 
     // 2. Upsert product_catalog for mapping consistency (chỉ khi có sku —

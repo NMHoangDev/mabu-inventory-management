@@ -208,7 +208,10 @@ export async function GET(request: Request) {
       let p = 1;
       if (dateFrom) { where.push(`gr.received_at >= $${p++}`); params.push(dateFrom); }
       if (dateTo) { where.push(`gr.received_at <= $${p++}::date + interval '1 day'`); params.push(dateTo); }
-      const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
+      // gr.paid > 0 luôn là 1 điều kiện WHERE — gộp vào mảng để không tạo SQL
+      // lỗi ("... gr  AND gr.paid > 0") khi không truyền khoảng ngày.
+      where.push(`gr.paid > 0`);
+      const whereSQL = `WHERE ${where.join(" AND ")}`;
 
       const result = await pool.query(`
         select
@@ -216,7 +219,7 @@ export async function GET(request: Request) {
           count(gr.id) as payment_count,
           sum(gr.paid)::numeric as total_paid
         from goods_receipts gr
-        ${whereSQL} AND gr.paid > 0
+        ${whereSQL}
         group by gr.payment_method
         order by total_paid desc
       `, params);

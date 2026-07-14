@@ -5,156 +5,9 @@
 
 export type DateRange = { from: string; to: string };
 
-// ─── Mock data generators ─────────────────────────────────────────────────────
-
-function mockDailyData(from: string, to: string) {
-  const pts: { day: string; receipt_count: number; total_amount: number }[] = [];
-  const d0 = new Date(from);
-  const d1 = new Date(to);
-  for (let d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
-    pts.push({
-      day: new Date(d).toISOString().slice(0, 10),
-      receipt_count: Math.round(1 + Math.random() * 5),
-      total_amount: Math.round((20 + Math.random() * 80) * 1e6),
-    });
-  }
-  return pts;
-}
-
-function mockSupplierData() {
-  const names = ["Công ty ABC", "Nhà phân phối XYZ", "Tổng công ty DM", "Đại lý Minh Anh", "Cửa hàng Hùng Phát"];
-  return names.map((supplier_name) => {
-    const total_amount = Math.round((50 + Math.random() * 300) * 1e6);
-    const total_paid = Math.round(total_amount * (0.5 + Math.random() * 0.4));
-    return { supplier_name, receipt_count: Math.round(5 + Math.random() * 30), total_amount, total_paid, unpaid: total_amount - total_paid };
-  });
-}
-
-function mockProductData() {
-  return Array.from({ length: 15 }, (_, i) => ({
-    sku: `SKU-${String(i + 1).padStart(4, "0")}`,
-    product_name: `Sản phẩm ${String.fromCharCode(65 + (i % 26))}${i > 25 ? Math.floor(i / 26) : ""}`,
-    total_qty: Math.round(10 + Math.random() * 200),
-    avg_price: Math.round(80000 + Math.random() * 200000),
-    total_amount: 0,
-  })).map((p) => ({ ...p, total_amount: p.total_qty * p.avg_price }));
-}
-
-function mockOrderData() {
-  const statuses = ["Hoàn thành", "Đang xử lý", "Đã hủy", "Chờ duyệt"];
-  const suppliers = ["Công ty ABC", "Nhà phân phối XYZ", "Tổng công ty DM"];
-  const staffs = ["Nguyễn Văn A", "Trần Thị B", "Lê Văn C"];
-  return Array.from({ length: 20 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - Math.floor(i / 3));
-    const total = Math.round((5 + Math.random() * 100) * 1e6);
-    return {
-      code: `PN${String(d.getFullYear()).slice(-2)}${String(d.getMonth() + 1).padStart(2, "0")}${String(i + 1).padStart(4, "0")}`,
-      supplier_name: suppliers[i % suppliers.length],
-      staff: staffs[i % staffs.length],
-      received_at: d.toISOString(),
-      receipt_status: statuses[i % statuses.length],
-      total, paid: Math.round(total * 0.8), unpaid: Math.round(total * 0.2),
-      item_count: Math.round(1 + Math.random() * 10),
-    };
-  });
-}
-
-function mockPaymentDaily(from: string, to: string) {
-  return Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (13 - i));
-    return {
-      day: d.toISOString().slice(0, 10),
-      total_paid: Math.round((20 + Math.random() * 60) * 1e6),
-      total_unpaid: Math.round((5 + Math.random() * 20) * 1e6),
-    };
-  });
-}
-
-function mockPaymentMethodData() {
-  return [
-    { method: "Tiền mặt", payment_count: Math.round(5 + Math.random() * 20), total_paid: Math.round((50 + Math.random() * 150) * 1e6) },
-    { method: "Chuyển khoản", payment_count: Math.round(3 + Math.random() * 15), total_paid: Math.round((80 + Math.random() * 200) * 1e6) },
-    { method: "Quẹt thẻ", payment_count: Math.round(2 + Math.random() * 10), total_paid: Math.round((30 + Math.random() * 80) * 1e6) },
-    { method: "Ví điện tử", payment_count: Math.round(1 + Math.random() * 5), total_paid: Math.round((10 + Math.random() * 40) * 1e6) },
-  ];
-}
-
-function mockPaymentBranchData() {
-  return [
-    { branch: "Chi nhánh Q.1", receipt_count: Math.round(8 + Math.random() * 20), total_amount: Math.round((80 + Math.random() * 200) * 1e6), total_paid: 0, unpaid: 0 },
-    { branch: "Chi nhánh Q.3", receipt_count: Math.round(6 + Math.random() * 15), total_amount: Math.round((60 + Math.random() * 150) * 1e6), total_paid: 0, unpaid: 0 },
-    { branch: "Chi nhánh Hà Nội", receipt_count: Math.round(4 + Math.random() * 10), total_amount: Math.round((40 + Math.random() * 100) * 1e6), total_paid: 0, unpaid: 0 },
-    { branch: "Chi nhánh Đà Nẵng", receipt_count: Math.round(3 + Math.random() * 8), total_amount: Math.round((30 + Math.random() * 80) * 1e6), total_paid: 0, unpaid: 0 },
-    { branch: "Chi nhánh Cần Thơ", receipt_count: Math.round(2 + Math.random() * 5), total_amount: Math.round((20 + Math.random() * 50) * 1e6), total_paid: 0, unpaid: 0 },
-  ].map((b) => ({ ...b, total_paid: Math.round(b.total_amount * 0.7), unpaid: Math.round(b.total_amount * 0.3) }));
-}
-
-function mockInventoryDetail() {
-  return Array.from({ length: 20 }, (_, i) => {
-    const qty = Math.round(5 + Math.random() * 200);
-    return {
-      id: String(i),
-      product_name: `Sản phẩm ${String.fromCharCode(65 + i)}`,
-      sku: `SKU-${String(i + 1).padStart(4, "0")}`,
-      category_name: ["Điện tử", "Thời trang", "Thực phẩm", "Gia dụng"][i % 4],
-      branch: ["Kho Q.1", "Kho Q.3", "Kho Hà Nội"][i % 3],
-      available_quantity: qty,
-      reserved_quantity: Math.round(Math.random() * 10),
-      cost_price: Math.round(50000 + Math.random() * 500000),
-      total_value: 0,
-      status: "active",
-    };
-  }).map((p) => ({ ...p, total_value: p.available_quantity * p.cost_price }));
-}
-
-function mockBelowThreshold() {
-  return Array.from({ length: 10 }, (_, i) => ({
-    id: String(i),
-    product_name: `Sản phẩm ${String.fromCharCode(65 + i)}`,
-    sku: `SKU-${String(i + 1).padStart(4, "0")}`,
-    category_name: ["Điện tử", "Thời trang", "Thực phẩm"][i % 3],
-    branch: ["Kho Q.1", "Kho Q.3", "Kho Hà Nội"][i % 3],
-    current_qty: Math.round(1 + Math.random() * 15),
-    min_stock: Math.round(20 + Math.random() * 30),
-    shortage: 0,
-  })).map((p) => ({ ...p, shortage: Math.max(0, p.min_stock - p.current_qty) }));
-}
-
-function mockAboveThreshold() {
-  return Array.from({ length: 10 }, (_, i) => ({
-    id: String(i),
-    product_name: `Sản phẩm ${String.fromCharCode(65 + i)}`,
-    sku: `SKU-${String(i + 1).padStart(4, "0")}`,
-    category_name: ["Điện tử", "Thời trang", "Thực phẩm"][i % 3],
-    branch: ["Kho Q.1", "Kho Q.3", "Kho Hà Nội"][i % 3],
-    current_qty: Math.round(80 + Math.random() * 300),
-    max_stock: Math.round(50 + Math.random() * 100),
-    excess: 0,
-    cost_price: Math.round(30000 + Math.random() * 200000),
-    capital_locked: 0,
-  })).map((p) => ({ ...p, excess: Math.max(0, p.current_qty - p.max_stock), capital_locked: Math.max(0, p.current_qty - p.max_stock) * p.cost_price }));
-}
-
-function mockStockCheck() {
-  const statuses = ["Hoàn thành", "Đang kiểm kê", "Chưa duyệt"];
-  const branches = ["Kho Q.1", "Kho Q.3", "Kho Hà Nội", "Kho Đà Nẵng"];
-  const staffs = ["Nguyễn Văn A", "Trần Thị B", "Lê Văn C"];
-  return Array.from({ length: 15 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - i * 3);
-    return {
-      id: String(i),
-      code: `KK${String(d.getFullYear()).slice(-2)}${String(d.getMonth() + 1).padStart(2, "0")}${String(i + 1).padStart(4, "0")}`,
-      branch: branches[i % branches.length],
-      staff: staffs[i % staffs.length],
-      status: statuses[i % statuses.length],
-      total_items: Math.round(10 + Math.random() * 50),
-      variance_items: Math.round(Math.random() * 5),
-      created_at: d.toISOString(),
-    };
-  });
-}
-
 // ─── API calls ────────────────────────────────────────────────────────────────
+// Không còn mock generator: mọi báo cáo chỉ hiển thị dữ liệu thật từ API
+// (hoặc rỗng nếu chưa có dữ liệu) — không bao giờ tạo số liệu giả/ngẫu nhiên.
 
 async function apiFetch<T>(url: string): Promise<T | null> {
   try {
@@ -226,8 +79,7 @@ export async function fetchPurchaseSummary(range: DateRange): Promise<PurchaseRe
     return { total_receipts, total_quantity: 0, total_amount, total_paid, total_unpaid: total_amount - total_paid };
   }
 
-  // Mock fallback
-  return { total_receipts: 50, total_quantity: 500, total_amount: 500e6, total_paid: 350e6, total_unpaid: 150e6 };
+  return { total_receipts: 0, total_quantity: 0, total_amount: 0, total_paid: 0, total_unpaid: 0 };
 }
 
 export async function fetchPurchaseByTime(range: DateRange): Promise<{
@@ -372,8 +224,7 @@ export async function fetchPurchaseByOrder(range: DateRange): Promise<{
     return { orders, summary: { total_receipts: orders.length, total_amount: orders.reduce((s: number, o: any) => s + o.total, 0), completed: 0, cancelled: 0 } };
   }
 
-  const mockOrders = mockOrderData();
-  return { orders: mockOrders, summary: { total_receipts: mockOrders.length, total_amount: mockOrders.reduce((s, o) => s + o.total, 0), completed: Math.round(mockOrders.length * 0.7), cancelled: Math.round(mockOrders.length * 0.1) } };
+  return { orders: [], summary: { total_receipts: 0, total_amount: 0, completed: 0, cancelled: 0 } };
 }
 
 export async function fetchPaymentByTime(range: DateRange): Promise<{
@@ -390,7 +241,7 @@ export async function fetchPaymentByTime(range: DateRange): Promise<{
     return { daily: data.daily, payments: [], summary: { total_amount: total_paid + total_unpaid, total_paid, total_unpaid } };
   }
 
-  return { daily: mockPaymentDaily(range.from, range.to), payments: [], summary: { total_amount: 500e6, total_paid: 350e6, total_unpaid: 150e6 } };
+  return { daily: [], payments: [], summary: { total_amount: 0, total_paid: 0, total_unpaid: 0 } };
 }
 
 export async function fetchPaymentByStaff(range: DateRange): Promise<{
@@ -445,7 +296,7 @@ export async function fetchPaymentByMethod(range: DateRange): Promise<{
     return { methods: data.methods, summary: { total_amount: total_paid, total_paid } };
   }
 
-  return { methods: mockPaymentMethodData(), summary: { total_amount: 500e6, total_paid: 350e6 } };
+  return { methods: [], summary: { total_amount: 0, total_paid: 0 } };
 }
 
 export async function fetchPaymentByBranch(range: DateRange): Promise<{
@@ -461,7 +312,7 @@ export async function fetchPaymentByBranch(range: DateRange): Promise<{
     return { branches: data.branches, summary: { total_amount, total_paid, total_unpaid: total_amount - total_paid } };
   }
 
-  return { branches: mockPaymentBranchData(), summary: { total_amount: 500e6, total_paid: 350e6, total_unpaid: 150e6 } };
+  return { branches: [], summary: { total_amount: 0, total_paid: 0, total_unpaid: 0 } };
 }
 
 // ─── Inventory Reports ───────────────────────────────────────────────────────
@@ -494,7 +345,7 @@ export async function fetchInventorySummary(): Promise<InventorySummary> {
     return { total_products: products.length, total_stock: products.reduce((s, p: any) => s + (p.total_inventory ?? 0), 0), total_value: products.reduce((s, p: any) => s + ((p.total_inventory ?? 0) * (p.cost_price ?? 0)), 0) };
   }
 
-  return { total_products: 50, total_stock: 5000, total_value: 250e6 };
+  return { total_products: 0, total_stock: 0, total_value: 0 };
 }
 
 export async function fetchInventoryDetail(range: DateRange): Promise<{
@@ -525,7 +376,7 @@ export async function fetchInventoryDetail(range: DateRange): Promise<{
     return { items, summary: { total_quantity: items.reduce((s: number, i: typeof items[0]) => s + i.available_quantity, 0), total_reserved: 0, total_value: items.reduce((s: number, i: typeof items[0]) => s + i.total_value, 0) } };
   }
 
-  return { items: mockInventoryDetail(), summary: { total_quantity: 2000, total_reserved: 100, total_value: 250e6 } };
+  return { items: [], summary: { total_quantity: 0, total_reserved: 0, total_value: 0 } };
 }
 
 export async function fetchInventoryLedger(range: DateRange): Promise<{
@@ -547,7 +398,7 @@ export async function fetchInventoryLedger(range: DateRange): Promise<{
     };
   }
 
-  return { entries: [], summary: { total_import: 2000, total_export: 1500, total_count: 50 } };
+  return { entries: [], summary: { total_import: 0, total_export: 0, total_count: 0 } };
 }
 
 export async function fetchBelowThreshold(range: DateRange): Promise<{
@@ -562,7 +413,7 @@ export async function fetchBelowThreshold(range: DateRange): Promise<{
     return { items, summary: { total_shortage: items.reduce((s: number, i: any) => s + (i.shortage ?? 0), 0), total_count: items.length } };
   }
 
-  return { items: mockBelowThreshold(), summary: { total_shortage: 200, total_count: 10 } };
+  return { items: [], summary: { total_shortage: 0, total_count: 0 } };
 }
 
 export async function fetchAboveThreshold(range: DateRange): Promise<{
@@ -577,7 +428,7 @@ export async function fetchAboveThreshold(range: DateRange): Promise<{
     return { items, summary: { total_excess: items.reduce((s: number, i: any) => s + (i.excess ?? 0), 0), capital_locked: items.reduce((s: number, i: any) => s + (i.capital_locked ?? 0), 0) } };
   }
 
-  return { items: mockAboveThreshold(), summary: { total_excess: 300, capital_locked: 50e6 } };
+  return { items: [], summary: { total_excess: 0, capital_locked: 0 } };
 }
 
 export async function fetchInOutBalance(range: DateRange): Promise<{
@@ -623,5 +474,5 @@ export async function fetchStockCheck(range: DateRange): Promise<{
     return { checks: checks.slice(0, 20).map((c: any) => ({ code: c.code, branch: c.branch, staff: c.staff, status: c.status, total_items: c.total_items, variance_items: c.variance_items, created_at: c.created_at })), summary: { total_checks: checks.length, completed: checks.filter((c: any) => c.status === "completed" || c.status === "balanced").length } };
   }
 
-  return { checks: mockStockCheck(), summary: { total_checks: 15, completed: 10 } };
+  return { checks: [], summary: { total_checks: 0, completed: 0 } };
 }

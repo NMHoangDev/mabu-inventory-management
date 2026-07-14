@@ -98,8 +98,9 @@ export default function InventoryProductDetailPage() {
     return <div className="rounded-lg border bg-white p-8 text-center text-red-600">{error || "Không tìm thấy sản phẩm."}</div>;
   }
 
-  const firstImage = product.images[0] || "";
-  const secondImage = product.images[1] || firstImage;
+  // Chỉ hiển thị ảnh thật; nếu chưa có ảnh thì hiện 1 ô placeholder (không nhân
+  // đôi cùng 1 ảnh như trước).
+  const galleryImages = product.images.length ? product.images.slice(0, 4) : [""];
 
   return (
     <section className="space-y-6">
@@ -110,28 +111,23 @@ export default function InventoryProductDetailPage() {
         </Link>
         <div className="flex gap-3">
           <button className="h-9 rounded-md border border-primary px-6 text-sm font-semibold text-primary hover:bg-blue-50" onClick={() => router.back()} type="button">Thoát</button>
-          <button className="inline-flex h-9 items-center gap-2 rounded-md border border-red-500 px-5 text-sm font-semibold text-red-500 hover:bg-red-50" type="button"><Trash2 className="h-4 w-4" />Xoá</button>
           <Link className="inline-flex h-9 items-center rounded-md bg-primary px-5 text-sm font-semibold text-white hover:opacity-90" href="/products">Sửa sản phẩm</Link>
         </div>
       </div>
 
       <div>
         <h2 className="text-xl font-bold text-slate-800">{product.name}</h2>
-        <button className="mt-2 inline-flex h-8 items-center gap-2 rounded-md border bg-white px-3 text-sm text-slate-600 hover:bg-slate-50" type="button">
-          <Copy className="h-4 w-4" />
-          Sao chép
-        </button>
       </div>
 
       <section className="overflow-hidden rounded-lg border bg-white shadow-soft">
         <div className="flex items-center border-b px-4 py-3">
           <h3 className="font-bold text-slate-800">Thông tin sản phẩm</h3>
-          <span className="ml-3 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700">{product.status === "active" ? "Đang giao dịch" : product.status}</span>
+          <span className={`ml-3 rounded-full px-2 py-0.5 text-xs font-medium ${product.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{product.status === "active" ? "Đang giao dịch" : "Ngừng giao dịch"}</span>
         </div>
         <div className="grid grid-cols-1 gap-8 p-6 md:grid-cols-3">
           <div className="space-y-3 text-sm">
             <div className="flex"><span className="w-28 text-slate-500">Mã SKU</span><span className="text-slate-900">: {product.sku || "---"}</span></div>
-            <div className="flex"><span className="w-28 text-slate-500">Mã barcode</span><span className="text-slate-900">: {product.barcode || product.sku || "---"}</span></div>
+            <div className="flex"><span className="w-28 text-slate-500">Mã barcode</span><span className="text-slate-900">: {product.barcode || "---"}</span></div>
             <div className="flex"><span className="w-28 text-slate-500">Khối lượng</span><span className="text-slate-900">: {product.weight ? `${fmtNumber(product.weight)}${product.weight_unit}` : "---"}</span></div>
             <div className="flex"><span className="w-28 text-slate-500">Đơn vị tính</span><span className="text-slate-900">: {product.unit || "---"}</span></div>
             <div className="flex"><span className="w-28 text-slate-500">Phân loại</span><span className="text-slate-900">: {product.type_name || "Sản phẩm thường"}</span></div>
@@ -145,8 +141,8 @@ export default function InventoryProductDetailPage() {
             <div className="flex"><span className="w-36 text-slate-500">Ngày tạo</span><span className="text-slate-900">: {fmtDateTime(product.created_at)}</span></div>
             <div className="flex"><span className="w-36 text-slate-500">Ngày cập nhật cuối</span><span className="text-slate-900">: {fmtDateTime(product.updated_at)}</span></div>
           </div>
-          <div className="flex gap-4">
-            {[firstImage, secondImage].map((image, index) => (
+          <div className="flex flex-wrap gap-4">
+            {galleryImages.map((image, index) => (
               <div key={index} className="grid h-24 w-24 place-items-center overflow-hidden rounded-md border bg-slate-50 p-1 text-slate-400">
                 {image ? <img alt={`${product.name} ${index + 1}`} className="h-full w-full object-cover" src={image} /> : <ImageIcon className="h-7 w-7" />}
               </div>
@@ -160,11 +156,8 @@ export default function InventoryProductDetailPage() {
           <div className="border-b px-4 py-3 font-bold text-slate-800">Giá sản phẩm</div>
           <div className="grid grid-cols-1 gap-y-4 p-6 text-sm sm:grid-cols-2">
             <div className="flex"><span className="w-32 text-slate-500">Giá bán lẻ</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.price)}</span></div>
-            <div className="flex"><span className="w-32 text-slate-500">Giá Sỉ</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.wholesale_price)}</span></div>
-            <div className="flex"><span className="w-32 text-slate-500">Giá Sỉ Lớn</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.wholesale_price)}</span></div>
-            <div />
+            <div className="flex"><span className="w-32 text-slate-500">Giá bán sỉ</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.wholesale_price)}</span></div>
             <div className="flex"><span className="w-32 text-slate-500">Giá nhập</span><span className="font-medium text-slate-900">: {formatCurrencyVND(product.cost_price)}</span></div>
-            <div className="flex"><span className="w-32 text-slate-500">Giá Nhập = 0</span><span className="font-medium text-slate-900">: {product.cost_price === 0 ? "0" : "---"}</span></div>
           </div>
         </section>
 
@@ -216,11 +209,6 @@ export default function InventoryProductDetailPage() {
               ))}
             </tbody>
           </table>
-        </div>
-        <div className="flex items-center justify-between border-t bg-slate-50 px-4 py-2 text-slate-400">
-          <ArrowLeft className="h-4 w-4" />
-          <div className="relative mx-4 h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200"><div className="absolute inset-y-0 left-0 w-full rounded-full bg-slate-400" /></div>
-          <ArrowLeft className="h-4 w-4 rotate-180" />
         </div>
       </section>
     </section>

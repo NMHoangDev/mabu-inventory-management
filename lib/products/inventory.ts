@@ -114,19 +114,17 @@ export async function listInventoryProducts(): Promise<InventoryProduct[]> {
       coalesce(b.name, '') as brand_name,
       coalesce(t.name, 'Sáº£n pháº©m thÆ°á»ng') as type_name,
       coalesce(img.url, '') as image_url,
-      coalesce(sum(il.quantity), 0)::numeric as total_inventory,
-      coalesce(sum(il.quantity_on_hold), 0)::numeric as on_hold_quantity,
-      greatest(coalesce(sum(il.quantity), 0) - coalesce(sum(il.quantity_on_hold), 0), 0)::numeric as available_quantity
+      -- Tồn kho thật ở products.stock; inventory_levels gần như không dùng.
+      coalesce(p.stock, 0)::numeric as total_inventory,
+      0::numeric as on_hold_quantity,
+      coalesce(p.stock, 0)::numeric as available_quantity
     from products p
     left join categories c on c.id = p.category_id
     left join brands b on b.id = p.brand_id
     left join product_types t on t.id = p.product_type_id
-    left join product_variants pv on pv.product_id = p.id
-    left join inventory_levels il on il.variant_id = pv.id
     left join lateral (
       select url from product_images where product_id = p.id order by position asc limit 1
     ) img on true
-    group by p.id, c.name, b.name, t.name, img.url
     order by p.created_at desc
   `);
 
@@ -198,9 +196,10 @@ export async function getInventoryProductDetail(id: string): Promise<InventoryPr
       coalesce(b.name, '') as brand_name,
       coalesce(t.name, 'Sáº£n pháº©m thÆ°á»ng') as type_name,
       coalesce(imgs.images, '{}') as images,
-      coalesce(sum(il.quantity), 0)::numeric as total_inventory,
-      coalesce(sum(il.quantity_on_hold), 0)::numeric as on_hold_quantity,
-      greatest(coalesce(sum(il.quantity), 0) - coalesce(sum(il.quantity_on_hold), 0), 0)::numeric as available_quantity
+      -- Tồn kho thật ở products.stock; inventory_levels gần như không dùng.
+      coalesce(p.stock, 0)::numeric as total_inventory,
+      0::numeric as on_hold_quantity,
+      coalesce(p.stock, 0)::numeric as available_quantity
     from products p
     left join categories c on c.id = p.category_id
     left join brands b on b.id = p.brand_id
@@ -210,37 +209,33 @@ export async function getInventoryProductDetail(id: string): Promise<InventoryPr
       from product_images
       where product_id = p.id
     ) imgs on true
-    left join product_variants pv on pv.product_id = p.id
-    left join inventory_levels il on il.variant_id = pv.id
     where p.id = $1::uuid
-    group by p.id, c.name, b.name, t.name, imgs.images
     limit 1
   `, [id]);
 
   if (productResult.rows.length === 0) return null;
   const row = productResult.rows[0];
 
-  const locationResult = await pool.query(`
-    select
-      l.id,
-      l.name,
-      coalesce(sum(il.quantity), 0)::numeric as quantity,
-      coalesce(sum(il.quantity_on_hold), 0)::numeric as quantity_on_hold,
-      greatest(coalesce(sum(il.quantity), 0) - coalesce(sum(il.quantity_on_hold), 0), 0)::numeric as available_quantity,
-      coalesce(avg(pv.cost_price), avg(p.cost_price), 0)::numeric as cost_price,
-      0::numeric as incoming_quantity,
-      0::numeric as delivering_quantity,
-      null::numeric as min_stock,
-      null::numeric as max_stock,
-      coalesce(max(il.storage_location), '') as storage_location
-    from locations l
-    left join product_variants pv on pv.product_id = $1
-    left join inventory_levels il on il.location_id = l.id and il.variant_id = pv.id
-    left join products p on p.id = $1
-    where l.is_active = true
-    group by l.id, l.name, l.is_default, l.created_at
-    order by l.is_default desc, l.created_at asc
-  `, [id]);
+  // Tồn kho không được quản lý theo chi nhánh (inventory_levels không dùng thật) —
+  // thể hiện toàn bộ tồn ở 1 chi nhánh mặc định lấy từ products.stock.
+  const stock = numberValue(row.total_inventory);
+  const locationResult = {
+    rows: [
+      {
+        id: "default",
+        name: "Chi nhánh mặc định",
+        quantity: stock,
+        quantity_on_hold: 0,
+        available_quantity: stock,
+        cost_price: numberValue(row.cost_price),
+        incoming_quantity: 0,
+        delivering_quantity: 0,
+        min_stock: null,
+        max_stock: null,
+        storage_location: ""
+      }
+    ]
+  };
 
   const images = Array.isArray(row.images) ? row.images.map(textValue).filter(Boolean) : [];
   return {

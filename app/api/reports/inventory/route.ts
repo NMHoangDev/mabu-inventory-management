@@ -30,14 +30,13 @@ export async function GET(request: Request) {
 
     // ── Summary ─────────────────────────────────────────────────────────────
     if (groupBy === "summary") {
+      // Tồn kho thật ở products.stock (inventory_levels/product_variants không dùng).
       const result = await pool.query(`
         select
-          count(distinct p.id) as total_products,
-          coalesce(sum(il.quantity), 0)::numeric as total_stock,
-          coalesce(sum(il.quantity * pv.cost_price), 0)::numeric as total_value
+          count(*) as total_products,
+          coalesce(sum(p.stock), 0)::numeric as total_stock,
+          coalesce(sum(p.stock * coalesce(p.cost_price, 0)), 0)::numeric as total_value
         from products p
-        left join product_variants pv on pv.product_id = p.id
-        left join inventory_levels il on il.variant_id = pv.id
         where p.status = 'active' or p.status is null
       `);
 
@@ -57,18 +56,14 @@ export async function GET(request: Request) {
           p.name as product_name,
           coalesce(p.sku, '') as sku,
           coalesce(c.name, '') as category_name,
-          coalesce(l.name, 'Chi nhánh mặc định') as branch,
-          coalesce(sum(il.quantity), 0)::numeric as available_quantity,
-          coalesce(sum(il.quantity_on_hold), 0)::numeric as reserved_quantity,
-          coalesce(pv.cost_price, 0)::numeric as cost_price,
+          'Chi nhánh mặc định' as branch,
+          coalesce(p.stock, 0)::numeric as available_quantity,
+          0::numeric as reserved_quantity,
+          coalesce(p.cost_price, 0)::numeric as cost_price,
           p.status
         from products p
-        left join product_variants pv on pv.product_id = p.id and pv.position = 1
-        left join inventory_levels il on il.variant_id = pv.id
-        left join locations l on l.id = il.location_id
         left join categories c on c.id = p.category_id
-        group by p.id, p.name, p.sku, c.name, l.name, pv.cost_price, p.status
-        order by available_quantity asc
+        order by p.stock asc
         limit 200
       `);
 
@@ -96,6 +91,13 @@ export async function GET(request: Request) {
       if (dateFrom) { where.push(`gr.received_at >= $${p++}`); params.push(dateFrom); }
       if (dateTo) { where.push(`gr.received_at <= $${p++}::date + interval '1 day'`); params.push(dateTo); }
       const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
+      // Nửa "xuất kho" của UNION dùng bảng orders (không có gr) — phải lọc theo
+      // o.created_at với CÙNG placeholder $1/$2, không tái dùng điều kiện gr.*.
+      const orderWhere: string[] = [];
+      let op = 1;
+      if (dateFrom) { orderWhere.push(`o.created_at >= $${op++}`); }
+      if (dateTo) { orderWhere.push(`o.created_at <= $${op++}::date + interval '1 day'`); }
+      const orderWhereSQL = orderWhere.length ? `AND ${orderWhere.join(" AND ")}` : "";
 
       // Build combined ledger from goods receipts (imports) and orders (exports)
       const ledger = await pool.query(`
@@ -104,7 +106,7 @@ export async function GET(request: Request) {
           gr.code as reference,
           coalesce(gri.product_name, '—') as product_name,
           coalesce(gri.sku, '') as sku,
-          gr.branch,
+          coalesce(gr.branch, 'Chi nhánh mặc định') as branch,
           gr.staff,
           'Nhập kho' as movement_type,
           gri.received_qty::numeric as quantity_in,
@@ -118,8 +120,8 @@ export async function GET(request: Request) {
           o.created_at as movement_date,
           o.code as reference,
           coalesce(oi.product_name, '—') as product_name,
-          coalesce(oi.sku, '') as sku,
-          o.branch,
+          coalesce(oi.product_sku, '') as sku,
+          coalesce(o.branch, 'Chi nhánh mặc định') as branch,
           o.staff,
           'Xuất kho' as movement_type,
           0::numeric as quantity_in,
@@ -128,7 +130,7 @@ export async function GET(request: Request) {
         from orders o
         join order_items oi on oi.order_id = o.id
         where o.status != 'cancelled'
-        ${where.length ? `AND ${where.join(" AND ")}` : ""}
+        ${orderWhereSQL}
         order by movement_date desc
         limit 200
       `, params);
@@ -150,24 +152,22 @@ export async function GET(request: Request) {
 
     // ── Below threshold ───────────────────────────────────────────────────────
     if (groupBy === "below_threshold") {
+      // Định mức tối thiểu = products.reorder_point nếu đã cấu hình (>0), nếu chưa
+      // thì mặc định 10. Tồn kho thật lấy từ products.stock.
       const result = await pool.query(`
         select
           p.id,
           p.name as product_name,
           coalesce(p.sku, '') as sku,
           coalesce(c.name, '') as category_name,
-          coalesce(l.name, 'Chi nhánh mặc định') as branch,
-          coalesce(sum(il.quantity), 0)::numeric as current_qty,
-          coalesce(loc.min_stock, 10)::numeric as min_stock,
-          (coalesce(loc.min_stock, 10) - coalesce(sum(il.quantity), 0))::numeric as shortage
+          'Chi nhánh mặc định' as branch,
+          coalesce(p.stock, 0)::numeric as current_qty,
+          coalesce(nullif(p.reorder_point, 0), 10)::numeric as min_stock,
+          (coalesce(nullif(p.reorder_point, 0), 10) - coalesce(p.stock, 0))::numeric as shortage
         from products p
-        left join product_variants pv on pv.product_id = p.id and pv.position = 1
-        left join inventory_levels il on il.variant_id = pv.id
-        left join locations l on l.id = il.location_id
         left join categories c on c.id = p.category_id
-        left join location_stock_settings loc on loc.location_id = l.id and loc.product_id = p.id
-        group by p.id, p.name, p.sku, c.name, l.name, pv.cost_price, loc.min_stock
-        having coalesce(sum(il.quantity), 0) < coalesce(loc.min_stock, 10)
+        where (p.status = 'active' or p.status is null)
+          and coalesce(p.stock, 0) < coalesce(nullif(p.reorder_point, 0), 10)
         order by shortage desc
         limit 100
       `);
@@ -188,25 +188,24 @@ export async function GET(request: Request) {
 
     // ── Above threshold ───────────────────────────────────────────────────────
     if (groupBy === "above_threshold") {
+      // Không có cột định mức tối đa theo sản phẩm → dùng ngưỡng mặc định 200.
+      // Tồn kho thật lấy từ products.stock, giá vốn từ products.cost_price.
+      const MAX_STOCK_DEFAULT = 200;
       const result = await pool.query(`
         select
           p.id,
           p.name as product_name,
           coalesce(p.sku, '') as sku,
           coalesce(c.name, '') as category_name,
-          coalesce(l.name, 'Chi nhánh mặc định') as branch,
-          coalesce(sum(il.quantity), 0)::numeric as current_qty,
-          coalesce(loc.max_stock, 200)::numeric as max_stock,
-          (coalesce(sum(il.quantity), 0) - coalesce(loc.max_stock, 200))::numeric as excess,
-          coalesce(pv.cost_price, 0)::numeric as cost_price
+          'Chi nhánh mặc định' as branch,
+          coalesce(p.stock, 0)::numeric as current_qty,
+          ${MAX_STOCK_DEFAULT}::numeric as max_stock,
+          (coalesce(p.stock, 0) - ${MAX_STOCK_DEFAULT})::numeric as excess,
+          coalesce(p.cost_price, 0)::numeric as cost_price
         from products p
-        left join product_variants pv on pv.product_id = p.id and pv.position = 1
-        left join inventory_levels il on il.variant_id = pv.id
-        left join locations l on l.id = il.location_id
         left join categories c on c.id = p.category_id
-        left join location_stock_settings loc on loc.location_id = l.id and loc.product_id = p.id
-        group by p.id, p.name, p.sku, c.name, l.name, pv.cost_price, loc.max_stock
-        having coalesce(sum(il.quantity), 0) > coalesce(loc.max_stock, 200)
+        where (p.status = 'active' or p.status is null)
+          and coalesce(p.stock, 0) > ${MAX_STOCK_DEFAULT}
         order by excess desc
         limit 100
       `);

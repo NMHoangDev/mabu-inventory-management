@@ -675,8 +675,8 @@ export default function NewGoodsReceiptPage() {
                       className="flex-1 border border-slate-300 rounded px-2 py-1.5 text-sm"
                     >
                       <option value="cash">Tiền mặt</option>
-                      <option value="bank">Chuyển khoản</option>
-                      <option value="other">Khác</option>
+                      <option value="bank_transfer">Chuyển khoản</option>
+                      <option value="card">Thẻ</option>
                     </select>
                     <input
                       type="number"

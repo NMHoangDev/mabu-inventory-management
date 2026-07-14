@@ -485,13 +485,11 @@ export async function searchProducts(query: string) {
        p.sku,
        p.name,
        p.status,
-       p.image_url,
-       coalesce(string_agg(distinct pv.unit, ', '), '') as units,
-       coalesce(min(pv.cost_price), 0)::numeric as default_cost
+       coalesce((select url from product_images pi where pi.product_id = p.id order by pi.position asc limit 1), '') as image_url,
+       coalesce(p.unit, '') as units,
+       coalesce(p.cost_price, 0)::numeric as default_cost
      from products p
-     left join product_variants pv on pv.product_id = p.id
      where p.sku ilike $1 or p.name ilike $1 or p.barcode ilike $1
-     group by p.id
      order by p.name asc
      limit 20`,
     [q]

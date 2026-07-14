@@ -27,6 +27,7 @@ export interface GoodsReceiptItem {
   line_total: number;
   position: number;
   note: string;
+  stock_added_at?: string | null;
 }
 
 export interface GoodsReceipt {
@@ -151,7 +152,8 @@ function rowToReceipt(row: any, items: any[]): GoodsReceipt {
       discount: num(it.discount),
       line_total: num(it.line_total),
       position: num(it.position) || 1,
-      note: str(it.note)
+      note: str(it.note),
+      stock_added_at: it.stock_added_at ?? null
     }))
   };
 }
@@ -423,13 +425,11 @@ export async function searchProductsForReceipt(query: string): Promise<GoodsRece
        p.id as product_id,
        p.sku,
        p.name as product_name,
-       coalesce(string_agg(distinct pv.unit, ', '), '') as unit,
-       p.image_url,
-       coalesce(min(pv.cost_price), 0)::numeric as default_cost
+       coalesce(p.unit, '') as unit,
+       coalesce((select url from product_images pi where pi.product_id = p.id order by pi.position asc limit 1), '') as image_url,
+       coalesce(p.cost_price, 0)::numeric as default_cost
      from products p
-     left join product_variants pv on pv.product_id = p.id
      where p.sku ilike $1 or p.name ilike $1
-     group by p.id
      order by p.name asc
      limit 20`,
     [q]

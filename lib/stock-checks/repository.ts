@@ -21,6 +21,7 @@ export interface StockCheckItem {
   variance_reason: string;
   note: string;
   position: number;
+  stock_applied_at?: string | null;
 }
 
 export interface StockCheck {
@@ -109,7 +110,8 @@ function rowToCheck(row: any, items: any[]): StockCheck {
       variance: num(it.variance),
       variance_reason: str(it.variance_reason),
       note: str(it.note),
-      position: num(it.position) || 1
+      position: num(it.position) || 1,
+      stock_applied_at: it.stock_applied_at ?? null
     }))
   };
 }
