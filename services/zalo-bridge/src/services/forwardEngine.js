@@ -37,10 +37,15 @@
  *     vệ runtime bổ sung.
  *   - Rate limit đơn giản theo account (mặc định 60 lượt forward/phút) để
  *     tránh spam group / bị Zalo rate-limit khi cấu hình sai.
- *   - Delay ~10s (FORWARD_DELAY_MS, override qua env ZALO_FORWARD_DELAY_MS)
- *     giữa mỗi lượt gửi (target/rule kế tiếp) để tránh chạm rate-limit phía
- *     Zalo — media/sticker luôn tuần tự + delay; text cũng delay giữa các
- *     rule (nếu 1 master có nhiều rule) dù trong 1 rule vẫn fan-out 1 lệnh.
+ *   - Delay ~10s (FORWARD_DELAY_MS, override qua env ZALO_FORWARD_DELAY_MS) ở
+ *     2 tầng: (1) NỘI BỘ giữa các target/rule kế tiếp trong CÙNG 1 lượt
+ *     chuyển tiếp (media/sticker tuần tự + delay; text delay giữa các rule
+ *     nếu 1 master có nhiều rule); (2) GIỮA CÁC LƯỢT chuyển tiếp khác nhau
+ *     (1 lượt = 1 tin text / 1 album ảnh / 1 sticker nguồn) qua hàng đợi
+ *     runSerialized() theo account — đảm bảo lượt sau LUÔN cách lượt trước
+ *     tối thiểu 10s dù 2 lượt được kích hoạt gần như đồng thời (vd 2 album
+ *     liên tiếp, hoặc text ngay sau ảnh) — trước đây chỉ delay ở tầng (1),
+ *     2 lượt riêng biệt có thể gửi gần như cùng lúc.
  *   - Retry 1 lần (withRetry, cách nhau ~1.5s) cho download ảnh và cho lệnh
  *     gửi (sendMessage/sendSticker/forwardMessage) — Zalo API đôi khi lỗi
  *     tạm thời (timeout, "Lỗi không xác định"...), retry giúp ảnh/tin không
@@ -72,11 +77,20 @@ const FORWARD_DELAY_MS = Number(process.env.ZALO_FORWARD_DELAY_MS || 10000);
 const RETRY_DELAY_MS = 1500;
 const MAX_PER_MIN = Number(process.env.ZALO_FORWARD_MAX_PER_MIN || 60);
 // Cửa sổ chờ gom nhiều ảnh gửi cùng lúc (1 "album") thành 1 lượt forward.
-// Zalo bắn mỗi ảnh trong 1 album như 1 message event riêng, cách nhau vài
-// chục-vài trăm ms tuỳ tốc độ upload/mạng — 1200ms đủ rộng để gom hết ảnh
-// trong 1 lần gửi thực tế, mà không làm ảnh đơn lẻ (không thuộc album nào)
-// bị trễ đáng kể khi forward.
-const IMAGE_BATCH_MS = Number(process.env.ZALO_FORWARD_IMAGE_BATCH_MS || 1200);
+// Zalo bắn mỗi ảnh trong 1 album như 1 message event riêng — khoảng cách giữa
+// 2 ảnh liên tiếp cùng album dao động vài chục ms tới vài giây tuỳ tốc độ
+// upload/mạng lúc gửi. Đối chiếu trực tiếp bảng zalo_forward_logs trên
+// production (2026-07-15): nhiều lượt "media" log cách nhau 1-3.6s trong
+// cùng 1 cụm — với cửa sổ cũ 1200ms, mọi khoảng cách này đều làm batch flush
+// sớm, tách 1 album thành nhiều lượt forward rời rạc (bug "lúc gom lúc
+// không"). Tăng lên 3000ms để chịu được phần lớn các khoảng cách quan sát
+// được, vẫn không làm ảnh đơn lẻ (không thuộc album) bị trễ đáng kể.
+const IMAGE_BATCH_MS = Number(process.env.ZALO_FORWARD_IMAGE_BATCH_MS || 3000);
+// Trần tối đa cho 1 batch (tính từ ảnh đầu tiên) — phòng trường hợp ảnh liên
+// tục dồn dập (album cực lớn / gửi liên tay) khiến timer bị reset mãi và
+// không bao giờ flush, làm ảnh bị trễ vô thời hạn. Ép flush khi chạm trần dù
+// vẫn còn ảnh mới tới trong IMAGE_BATCH_MS.
+const IMAGE_BATCH_MAX_WAIT_MS = Number(process.env.ZALO_FORWARD_IMAGE_BATCH_MAX_MS || 8000);
 
 const rulesCacheByAccount = new Map(); // accountId -> { fetchedAt, rulesByMaster: Map<threadId, rule[]> }
 const forwardedIds = new Set(); // `${accountId}_${msgId}` — id do chính engine gửi
@@ -87,9 +101,41 @@ const rateState = new Map(); // accountId -> { windowStart, count }
 // không cần persist (mất khi restart bridge là chấp nhận được, ảnh đang dở
 // dang batch cùng lắm bị forward rời — không mất dữ liệu).
 const imageBatches = new Map();
+// Hàng đợi tuần tự hoá TỪNG LƯỢT chuyển tiếp (1 lượt = 1 lần gọi forwardText/
+// forwardMedia/forwardSticker, tương ứng 1 tin/1 album/1 sticker nguồn) theo
+// account — đảm bảo LUÔN cách nhau tối thiểu FORWARD_DELAY_MS (10s) giữa lượt
+// này và lượt kế tiếp, kể cả khi 2 lượt tới gần nhau (vd 2 album liên tiếp)
+// thay vì chỉ delay giữa các target/rule BÊN TRONG 1 lượt như trước. Xem
+// runSerialized().
+const accountForwardQueue = new Map(); // accountId -> Promise (đuôi hàng đợi)
+const accountLastForwardFinishedAt = new Map(); // accountId -> timestamp
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Xếp `task` vào hàng đợi của account, đảm bảo chạy sau lượt trước đó ÍT NHẤT
+// FORWARD_DELAY_MS. Đọc + ghi `accountForwardQueue`/`accountLastForwardFinishedAt`
+// đều là code đồng bộ (không có await xen giữa) nên không có race-condition
+// dù nhiều lượt được kích hoạt gần như đồng thời (event message dồn dập).
+function runSerialized(accountId, task) {
+  const prevTail = accountForwardQueue.get(accountId) || Promise.resolve();
+  const nextTail = prevTail
+    .catch(() => {
+      /* lượt trước lỗi cũng không được chặn hàng đợi các lượt sau */
+    })
+    .then(async () => {
+      const lastFinishedAt = accountLastForwardFinishedAt.get(accountId) || 0;
+      const wait = FORWARD_DELAY_MS - (Date.now() - lastFinishedAt);
+      if (wait > 0) await sleep(wait);
+      try {
+        await task();
+      } finally {
+        accountLastForwardFinishedAt.set(accountId, Date.now());
+      }
+    });
+  accountForwardQueue.set(accountId, nextTail);
+  return nextTail;
 }
 
 // Retry đơn giản 1 lần cho các lệnh gọi hay flaky (download ảnh, gửi tin) —
@@ -376,11 +422,35 @@ async function forwardMedia({ accountId, api, rules, threadId, sourceMsgId, imag
 // IMAGE_BATCH_MS (không còn ảnh nào tới thêm) → gộp toàn bộ ảnh gom được vào
 // 1 lệnh forwardMedia() duy nhất (nhiều attachments → zca-js tự gắn metadata
 // nhóm ảnh, xem sendMessage.js#handleAttachment isMultiFile).
+// Có thêm trần IMAGE_BATCH_MAX_WAIT_MS (xem khai báo hằng số) để ép flush nếu
+// ảnh dồn dập liên tục làm timer bị reset mãi không dứt.
+function flushImageBatch(key) {
+  const batch = imageBatches.get(key);
+  if (!batch) return;
+  imageBatches.delete(key);
+  if (batch.timer) clearTimeout(batch.timer);
+  // Mỗi batch ảnh = 1 "lượt" chuyển tiếp riêng → chạy qua hàng đợi tuần tự để
+  // đảm bảo cách lượt trước đó (album khác, tin text, sticker...) ít nhất
+  // FORWARD_DELAY_MS, không chỉ delay nội bộ giữa các target trong batch này.
+  runSerialized(batch.accountId, () =>
+    forwardMedia({
+      accountId: batch.accountId,
+      api: batch.api,
+      rules: batch.rules,
+      threadId: batch.threadId,
+      sourceMsgId: batch.sourceMsgIds[0] || null,
+      imageUrls: batch.imageUrls,
+    })
+  ).catch((err) => {
+    logger.error(`[forward] [${batch.accountId}] forwardMedia batch flush failed: ${err.message}`);
+  });
+}
+
 function queueImageForBatch({ accountId, api, rules, threadId, sourceMsgId, senderUid, imageUrls }) {
   const key = `${accountId}:${threadId}:${senderUid || 'unknown'}`;
   let batch = imageBatches.get(key);
   if (!batch) {
-    batch = { imageUrls: [], sourceMsgIds: [], timer: null };
+    batch = { imageUrls: [], sourceMsgIds: [], timer: null, firstImageAt: Date.now() };
     imageBatches.set(key, batch);
   }
   batch.imageUrls.push(...imageUrls);
@@ -392,19 +462,16 @@ function queueImageForBatch({ accountId, api, rules, threadId, sourceMsgId, send
   batch.rules = rules;
   batch.threadId = threadId;
   if (batch.timer) clearTimeout(batch.timer);
-  batch.timer = setTimeout(() => {
-    imageBatches.delete(key);
-    forwardMedia({
-      accountId: batch.accountId,
-      api: batch.api,
-      rules: batch.rules,
-      threadId: batch.threadId,
-      sourceMsgId: batch.sourceMsgIds[0] || null,
-      imageUrls: batch.imageUrls,
-    }).catch((err) => {
-      logger.error(`[forward] [${batch.accountId}] forwardMedia batch flush failed: ${err.message}`);
-    });
-  }, IMAGE_BATCH_MS);
+
+  const elapsedSinceFirst = Date.now() - batch.firstImageAt;
+  if (elapsedSinceFirst >= IMAGE_BATCH_MAX_WAIT_MS) {
+    // Đã chạm trần — flush ngay, không đợi thêm dù mới có ảnh vừa tới.
+    flushImageBatch(key);
+    return;
+  }
+  const remainingUntilCap = IMAGE_BATCH_MAX_WAIT_MS - elapsedSinceFirst;
+  const waitMs = Math.min(IMAGE_BATCH_MS, remainingUntilCap);
+  batch.timer = setTimeout(() => flushImageBatch(key), waitMs);
 }
 
 // ── Sticker: gửi lại qua sendSticker({id, cateId, type}) từng target ────────
@@ -489,7 +556,9 @@ export async function handleIncomingGroupMessage({ accountId, api, msg, threadId
     const text = typeof rawContent === 'string' ? rawContent.trim() : '';
 
     if (text) {
-      await forwardText({ accountId, api, rules, threadId, sourceMsgId, msg, text });
+      // 1 tin text = 1 "lượt" chuyển tiếp riêng → qua hàng đợi tuần tự để
+      // đảm bảo cách lượt trước (album ảnh, sticker...) ít nhất FORWARD_DELAY_MS.
+      await runSerialized(accountId, () => forwardText({ accountId, api, rules, threadId, sourceMsgId, msg, text }));
       return;
     }
 
@@ -505,7 +574,7 @@ export async function handleIncomingGroupMessage({ accountId, api, msg, threadId
       Number.isFinite(Number(rawContent.id)) &&
       Number.isFinite(Number(rawContent.cateId))
     ) {
-      await forwardSticker({ accountId, api, rules, threadId, sourceMsgId, sticker: rawContent });
+      await runSerialized(accountId, () => forwardSticker({ accountId, api, rules, threadId, sourceMsgId, sticker: rawContent }));
       return;
     }
 
