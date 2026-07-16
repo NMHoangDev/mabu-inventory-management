@@ -1,8 +1,19 @@
 "use client";
 
-import { CheckCircle2, Loader2, MessageSquarePlus, Plus, Send, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CheckCircle2, FileIcon, Loader2, MessageSquarePlus, Paperclip, Plus, Send, Trash2, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { ZaloBroadcastResponse, ZaloBroadcastStatus, ZaloConversation } from "@/lib/zalo-api";
+
+interface Attachment {
+  file: File;
+  previewUrl: string | null;
+}
+
+interface BroadcastMessage {
+  id: number;
+  text: string;
+  attachments: Attachment[];
+}
 
 interface Props {
   conversations: ZaloConversation[];
@@ -11,12 +22,12 @@ interface Props {
   sending: boolean;
   status: ZaloBroadcastResponse | ZaloBroadcastStatus | null;
   /**
-   * Nhận toàn bộ messages[] (≥1). Hook xử lý việc gửi từng message lần lượt
-   * tới tất cả targets — backend tự động queue + delay 3s giữa các lần.
-   * Backward-compat: nếu hook cũ chỉ nhận content, có thể chỉ gửi message[0].
+   * Nhận toàn bộ messages[] (≥1), mỗi tin có thể kèm ảnh/file riêng. Hook xử
+   * lý việc gửi từng message lần lượt tới tất cả targets — backend tự động
+   * queue + delay 10s giữa mỗi lần gửi để an toàn.
    */
   onSend: (
-    messages: string[],
+    messages: Array<{ text: string; files?: File[] }>,
     targets: { id: string; name: string; thread_type?: "user" | "group" }[]
   ) => void;
 }
@@ -27,6 +38,15 @@ const TEMPLATES = [
   { label: "Cảm ơn", text: "Cảm ơn bạn đã ủng hộ shop. Hẹn gặp lại!" },
 ];
 
+let nextMessageId = 1;
+function emptyMessage(): BroadcastMessage {
+  return { id: nextMessageId++, text: "", attachments: [] };
+}
+
+function isMessageValid(m: BroadcastMessage): boolean {
+  return m.text.trim().length > 0 || m.attachments.length > 0;
+}
+
 export function ZaloBroadcastPanel({
   conversations,
   open,
@@ -35,9 +55,10 @@ export function ZaloBroadcastPanel({
   status,
   onSend,
 }: Props) {
-  const [messages, setMessages] = useState<string[]>([""]);
+  const [messages, setMessages] = useState<BroadcastMessage[]>([emptyMessage()]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -63,28 +84,62 @@ export function ZaloBroadcastPanel({
   };
 
   const updateMessage = (idx: number, value: string) => {
-    setMessages((prev) => prev.map((m, i) => (i === idx ? value : m)));
+    setMessages((prev) => prev.map((m, i) => (i === idx ? { ...m, text: value } : m)));
   };
 
   const addMessage = () => {
     if (messages.length >= 20) return; // Hard cap để tránh spam nhầm
-    setMessages((prev) => [...prev, ""]);
+    setMessages((prev) => [...prev, emptyMessage()]);
   };
 
   const removeMessage = (idx: number) => {
     setMessages((prev) => {
+      for (const a of prev[idx]?.attachments ?? []) {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      }
       const next = prev.filter((_, i) => i !== idx);
       // Luôn giữ ít nhất 1 message slot (không xoá hết).
-      return next.length === 0 ? [""] : next;
+      return next.length === 0 ? [emptyMessage()] : next;
     });
+  };
+
+  const addAttachments = (idx: number, files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const added: Attachment[] = Array.from(files).map((file) => ({
+      file,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+    }));
+    setMessages((prev) =>
+      prev.map((m, i) => (i === idx ? { ...m, attachments: [...m.attachments, ...added] } : m))
+    );
+  };
+
+  const removeAttachment = (msgIdx: number, attIdx: number) => {
+    setMessages((prev) =>
+      prev.map((m, i) => {
+        if (i !== msgIdx) return m;
+        const target = m.attachments[attIdx];
+        if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+        return { ...m, attachments: m.attachments.filter((_, j) => j !== attIdx) };
+      })
+    );
   };
 
   const applyTemplate = (idx: number, text: string) => {
     updateMessage(idx, text);
   };
 
+  const resetMessages = () => {
+    for (const m of messages) {
+      for (const a of m.attachments) {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      }
+    }
+    setMessages([emptyMessage()]);
+  };
+
   const handleSend = () => {
-    const validMessages = messages.map((m) => m.trim()).filter((m) => m.length > 0);
+    const validMessages = messages.filter(isMessageValid);
     if (validMessages.length === 0 || selected.size === 0) return;
     const targets = Array.from(selected).map((id) => {
       const c = conversations.find((x) => x.conversation_id === id);
@@ -96,12 +151,17 @@ export function ZaloBroadcastPanel({
           | "group",
       };
     });
-    onSend(validMessages, targets);
-    setMessages([""]);
+    onSend(
+      validMessages.map((m) => ({ text: m.text.trim(), files: m.attachments.map((a) => a.file) })),
+      targets
+    );
+    resetMessages();
     setSelected(new Set());
   };
 
-  const validCount = messages.filter((m) => m.trim().length > 0).length;
+  const validMessages = messages.filter(isMessageValid);
+  const validCount = validMessages.length;
+  const totalAttachments = validMessages.reduce((s, m) => s + m.attachments.length, 0);
 
   if (!open) return null;
 
@@ -115,7 +175,7 @@ export function ZaloBroadcastPanel({
             <div>
               <div className="text-base font-bold">Gửi tin nhắn hàng loạt</div>
               <div className="text-xs opacity-80">
-                Nhiều tin nhắn · nhiều người nhận · gửi tuần tự theo thứ tự
+                Nhiều tin nhắn · đính kèm ảnh/file · nhiều người nhận · gửi tuần tự theo thứ tự
               </div>
             </div>
           </div>
@@ -220,7 +280,7 @@ export function ZaloBroadcastPanel({
                     key={tpl.label}
                     onClick={() => {
                       // Apply cho message đầu tiên có nội dung; nếu tất cả rỗng → apply cho slot 0.
-                      const idx = messages.findIndex((m) => m.trim().length === 0);
+                      const idx = messages.findIndex((m) => m.text.trim().length === 0);
                       applyTemplate(idx === -1 ? 0 : idx, tpl.text);
                     }}
                     className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 transition hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700"
@@ -234,9 +294,9 @@ export function ZaloBroadcastPanel({
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {messages.map((msg, idx) => (
                 <div
-                  key={idx}
+                  key={msg.id}
                   className={`rounded-lg border-2 transition ${
-                    msg.trim().length > 0
+                    isMessageValid(msg)
                       ? "border-emerald-200 bg-emerald-50/30"
                       : "border-slate-200 bg-slate-50"
                   }`}
@@ -250,7 +310,8 @@ export function ZaloBroadcastPanel({
                         Tin nhắn #{idx + 1}
                       </span>
                       <span className="text-[10px] text-slate-500">
-                        {msg.trim().length > 0 ? `${msg.trim().length} ký tự` : "trống"}
+                        {msg.text.trim().length > 0 ? `${msg.text.trim().length} ký tự` : "trống"}
+                        {msg.attachments.length > 0 ? ` · ${msg.attachments.length} đính kèm` : ""}
                       </span>
                     </div>
                     {messages.length > 1 && (
@@ -264,12 +325,56 @@ export function ZaloBroadcastPanel({
                     )}
                   </div>
                   <textarea
-                    value={msg}
+                    value={msg.text}
                     onChange={(e) => updateMessage(idx, e.target.value)}
                     placeholder={`Nhập nội dung tin nhắn #${idx + 1}...`}
-                    className="block w-full resize-none rounded-b-md bg-white px-3 py-2 text-sm outline-none focus:bg-white"
+                    className="block w-full resize-none rounded-t-none bg-white px-3 py-2 text-sm outline-none focus:bg-white"
                     rows={3}
                   />
+                  <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/60 px-2.5 py-2">
+                    <input
+                      ref={(el) => {
+                        fileInputRefs.current[idx] = el;
+                      }}
+                      type="file"
+                      multiple
+                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.zip"
+                      className="hidden"
+                      onChange={(e) => {
+                        addAttachments(idx, e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                    <button
+                      onClick={() => fileInputRefs.current[idx]?.click()}
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-emerald-400 hover:text-emerald-700"
+                      title="Đính kèm ảnh/file"
+                    >
+                      <Paperclip className="h-3 w-3" />
+                      Đính kèm
+                    </button>
+                    {msg.attachments.map((att, attIdx) => (
+                      <div
+                        key={attIdx}
+                        className="group relative flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-600"
+                        title={att.file.name}
+                      >
+                        {att.previewUrl ? (
+                          <img src={att.previewUrl} alt={att.file.name} className="h-6 w-6 rounded object-cover" />
+                        ) : (
+                          <FileIcon className="h-4 w-4 text-slate-400" />
+                        )}
+                        <span className="max-w-[90px] truncate">{att.file.name}</span>
+                        <button
+                          onClick={() => removeAttachment(idx, attIdx)}
+                          className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500"
+                          title="Xoá đính kèm"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
 
@@ -296,8 +401,8 @@ export function ZaloBroadcastPanel({
               </span>
             ) : (
               <span>
-                Sẽ gửi <b>{validCount}</b> tin nhắn × <b>{selected.size}</b> người nhận = <b>{validCount * selected.size}</b> tin,
-                delay 3s mỗi lần để tránh bị Zalo chặn.
+                Sẽ gửi <b>{validCount}</b> tin nhắn{totalAttachments > 0 ? ` (${totalAttachments} đính kèm)` : ""} × <b>{selected.size}</b> người nhận = <b>{validCount * selected.size}</b> lượt gửi,
+                delay 10s mỗi lần để tránh bị Zalo chặn.
               </span>
             )}
           </div>

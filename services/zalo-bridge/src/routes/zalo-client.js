@@ -58,6 +58,11 @@ const router = Router();
 
 const DEFAULT_ACCOUNT = process.env.ZALO_DEFAULT_ACCOUNT || 'shop-owner';
 
+// Delay giữa MỌI lần gửi broadcast (giữa target và giữa message) — tăng lên
+// 10s theo yêu cầu để an toàn tránh chạm rate-limit Zalo (mirror pattern
+// FORWARD_DELAY_MS ở forwardEngine.js, nhưng đây là 2 feature/biến env riêng).
+const BROADCAST_DELAY_MS = Number(process.env.ZALO_BROADCAST_DELAY_MS || 10000);
+
 // Thư mục tạm cho file upload từ /send-media — dùng chung với webhook.js
 // (attachment Chatwoot) để nhất quán, dọn dẹp khi bridge start (xem index.js
 // "Cleaned up N leftover temporary attachment files").
@@ -778,38 +783,94 @@ router.post('/all-platform/zalo/broadcasts/preview', (req, res) => {
 
 // ── Broadcast: send ──────────────────────────────────────────────────────────
 //
-// Hỗ trợ 2 dạng payload (backward-compatible):
-//   • Cũ: { content: "tin nhắn duy nhất", targets: [...] }
-//   • Mới: { messages: ["msg 1", "msg 2", ...], targets: [...] }
+// multipart/form-data. Field `meta` = JSON string:
+//   { messages: [{ text: string }, ...], targets: [...] }
+// File đính kèm (ảnh/file) cho message thứ i gắn ở field `attachments_${i}`
+// (nhiều file/field được — multer .any() gom hết vào req.files).
 //
-// Hành vi: với MỖI message, gửi tuần tự tới TẤT CẢ targets, delay 3s giữa
-// mỗi lần gửi. Sau khi xong 1 message, delay 5s rồi mới chuyển sang message
-// tiếp theo (tránh bị Zalo rate-limit khi gửi liên tục nhiều round).
+// Hành vi: với MỖI message, gửi tuần tự tới TẤT CẢ targets, delay
+// BROADCAST_DELAY_MS (mặc định 10s, xem ZALO_BROADCAST_DELAY_MS) giữa MỌI
+// lần gửi — cả giữa target lẫn giữa message, không có delay riêng nào khác.
 //
 // Status trả về có thêm `current_message` (0-indexed) và `total_messages`
 // để UI hiển thị progress theo từng tin nhắn.
-router.post('/all-platform/zalo/broadcasts', async (req, res) => {
+function cleanupBroadcastFiles(req, extraPaths) {
+  const paths = (Array.isArray(req.files) ? req.files.map((f) => f.path) : []).concat(
+    Array.isArray(extraPaths) ? extraPaths : []
+  );
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    } catch (_) {
+      /* ignore cleanup error */
+    }
+  }
+}
+
+router.post('/all-platform/zalo/broadcasts', (req, res, next) => {
+  upload.any()(req, res, (err) => {
+    if (err) {
+      logger.warn(`[broadcast] multer error: ${err.message}`);
+      return res.status(400).json({ error: `upload_failed: ${err.message}` });
+    }
+    next();
+  });
+}, async (req, res) => {
+  // Hoisted ngoài try — để catch() cuối cùng vẫn dọn được file đã rename nếu
+  // lỗi xảy ra sau khi rename nhưng trước khi setImmediate nhận trách nhiệm dọn.
+  let allRenamedPaths = [];
   try {
     const ctx = requireLoggedIn(req, res);
-    if (!ctx) return;
-
-    const targets = Array.isArray(req.body?.targets) ? req.body.targets : [];
-
-    // Chuẩn hoá danh sách messages. Ưu tiên `messages[]`, fallback `content`.
-    let messages = [];
-    if (Array.isArray(req.body?.messages)) {
-      messages = req.body.messages
-        .map((m) => String(m || '').trim())
-        .filter((m) => m.length > 0);
-    } else if (typeof req.body?.content === 'string') {
-      const c = req.body.content.trim();
-      if (c) messages = [c];
+    if (!ctx) {
+      cleanupBroadcastFiles(req);
+      return;
     }
+
+    let meta;
+    try {
+      meta = JSON.parse(req.body?.meta || '{}');
+    } catch (_) {
+      cleanupBroadcastFiles(req);
+      return res.status(400).json({ error: 'meta must be a valid JSON string' });
+    }
+
+    const targets = Array.isArray(meta.targets) ? meta.targets : [];
+    const rawMessages = Array.isArray(meta.messages) ? meta.messages : [];
+
+    // Gom file đính kèm theo index message (field "attachments_<idx>").
+    const filesByIndex = new Map();
+    for (const f of Array.isArray(req.files) ? req.files : []) {
+      const m = /^attachments_(\d+)$/.exec(f.fieldname);
+      if (!m) continue;
+      const idx = Number(m[1]);
+      if (!filesByIndex.has(idx)) filesByIndex.set(idx, []);
+      filesByIndex.get(idx).push(f);
+    }
+
+    // Rename file tạm thêm đúng extension gốc (giống /send-media) để zca-js
+    // detect đúng loại file, rồi build danh sách messages hợp lệ (có text
+    // hoặc có ít nhất 1 file đính kèm).
+    const messages = [];
+    rawMessages.forEach((raw, idx) => {
+      const text = String((raw && raw.text) || '').trim();
+      const rawFiles = filesByIndex.get(idx) || [];
+      const attachmentPaths = rawFiles.map((f) => {
+        const ext = path.extname(f.originalname || '') || '';
+        const finalPath = ext ? `${f.path}${ext}` : f.path;
+        if (finalPath !== f.path) fs.renameSync(f.path, finalPath);
+        allRenamedPaths.push(finalPath);
+        return finalPath;
+      });
+      if (!text && attachmentPaths.length === 0) return;
+      messages.push({ text, attachmentPaths });
+    });
 
     if (messages.length === 0) {
-      return res.status(400).json({ error: 'messages (or content) is required' });
+      cleanupBroadcastFiles(req, allRenamedPaths);
+      return res.status(400).json({ error: 'messages (with text or attachment) is required' });
     }
     if (targets.length === 0) {
+      cleanupBroadcastFiles(req, allRenamedPaths);
       return res.status(400).json({ error: 'targets is required' });
     }
 
@@ -827,9 +888,10 @@ router.post('/all-platform/zalo/broadcasts', async (req, res) => {
       current_message: 0,
       total_messages: messages.length,
       // Per-message progress để UI có thể show "đang gửi message 2/5".
-      per_message: messages.map((_, idx) => ({
+      per_message: messages.map((m, idx) => ({
         index: idx,
-        preview: messages[idx].slice(0, 60),
+        preview: (m.text || '[Đính kèm ảnh/file]').slice(0, 60),
+        has_attachments: m.attachmentPaths.length > 0,
         sent: 0,
         failed: 0,
       })),
@@ -843,66 +905,81 @@ router.post('/all-platform/zalo/broadcasts', async (req, res) => {
       const errors = [];
       campaign.status = 'running';
 
-      for (let mIdx = 0; mIdx < messages.length; mIdx++) {
-        const msg = messages[mIdx];
-        campaign.current_message = mIdx;
+      try {
+        for (let mIdx = 0; mIdx < messages.length; mIdx++) {
+          const m = messages[mIdx];
+          campaign.current_message = mIdx;
 
-        for (let i = 0; i < targets.length; i++) {
-          const t = targets[i];
-          const parsed = parseThreadId(t.id || t.thread_id || t.conversation_id, ctx.accountId);
-          if (!parsed) {
-            totalFailed++;
-            campaign.failed = totalFailed;
-            campaign.per_message[mIdx].failed++;
-            errors.push(`[msg ${mIdx + 1}] ${t.id}: invalid id`);
-            campaign.errors = errors;
-            continue;
+          for (let i = 0; i < targets.length; i++) {
+            const t = targets[i];
+            const parsed = parseThreadId(t.id || t.thread_id || t.conversation_id, ctx.accountId);
+            if (!parsed) {
+              totalFailed++;
+              campaign.failed = totalFailed;
+              campaign.per_message[mIdx].failed++;
+              errors.push(`[msg ${mIdx + 1}] ${t.id}: invalid id`);
+              campaign.errors = errors;
+              continue;
+            }
+            // Ưu tiên thread_type client gửi lên (UI biết chính xác đâu là group/user).
+            // Sau đó đến parsed.threadType (parse từ prefix hoặc lookup cache).
+            // Fallback cuối: lookup cache threadTypeMap.
+            // Nếu vẫn 'unknown' → resolve on-the-fly bằng getGroupInfo (async).
+            let finalType =
+              t.thread_type === 'group' || t.threadType === 'group' || parsed.threadType === 'group'
+                ? 'group'
+                : null;
+            if (!finalType) {
+              const cached = lookupThreadType(ctx.accountId, parsed.threadId);
+              if (cached === 'group') finalType = 'group';
+            }
+            if (!finalType) {
+              finalType = await resolveThreadTypeAsync(ctx.accountId, ctx.api, parsed.threadId);
+            }
+            if (!finalType) {
+              totalFailed++;
+              campaign.failed = totalFailed;
+              campaign.per_message[mIdx].failed++;
+              errors.push(`[msg ${mIdx + 1}] ${t.id || t.thread_id}: thread_type_unknown`);
+              campaign.errors = errors;
+              continue;
+            }
+            try {
+              const content =
+                m.attachmentPaths.length > 0
+                  ? { msg: m.text, attachments: m.attachmentPaths.length === 1 ? m.attachmentPaths[0] : m.attachmentPaths }
+                  : { msg: m.text };
+              await sessionManager.sendMessage(ctx.accountId, parsed.threadId, finalType, content);
+              totalSent++;
+              campaign.sent = totalSent;
+              campaign.per_message[mIdx].sent++;
+            } catch (e) {
+              totalFailed++;
+              campaign.failed = totalFailed;
+              campaign.per_message[mIdx].failed++;
+              errors.push(`[msg ${mIdx + 1}] ${t.id}: ${e.message}`);
+              campaign.errors = errors;
+            }
+            // Delay giữa MỌI lần gửi (giữa target và giữa message) — bỏ qua
+            // sau lần gửi cuối cùng của toàn bộ campaign.
+            if (i < targets.length - 1 || mIdx < messages.length - 1) {
+              await new Promise((r) => setTimeout(r, BROADCAST_DELAY_MS));
+            }
           }
-          // Ưu tiên thread_type client gửi lên (UI biết chính xác đâu là group/user).
-          // Sau đó đến parsed.threadType (parse từ prefix hoặc lookup cache).
-          // Fallback cuối: lookup cache threadTypeMap.
-          // Nếu vẫn 'unknown' → resolve on-the-fly bằng getGroupInfo (async).
-          let finalType =
-            t.thread_type === 'group' || t.threadType === 'group' || parsed.threadType === 'group'
-              ? 'group'
-              : null;
-          if (!finalType) {
-            const cached = lookupThreadType(ctx.accountId, parsed.threadId);
-            if (cached === 'group') finalType = 'group';
-          }
-          if (!finalType) {
-            finalType = await resolveThreadTypeAsync(ctx.accountId, ctx.api, parsed.threadId);
-          }
-          if (!finalType) {
-            totalFailed++;
-            campaign.failed = totalFailed;
-            campaign.per_message[mIdx].failed++;
-            errors.push(`[msg ${mIdx + 1}] ${t.id || t.thread_id}: thread_type_unknown`);
-            campaign.errors = errors;
-            continue;
-          }
+        }
+      } finally {
+        campaign.status = 'completed';
+        campaign.current_message = messages.length;
+        // Dọn file tạm sau khi cả campaign đã gửi xong tới toàn bộ targets
+        // (không dọn sớm hơn — mỗi file được tái sử dụng qua nhiều target).
+        for (const p of allRenamedPaths) {
           try {
-            await sessionManager.sendMessage(ctx.accountId, parsed.threadId, finalType, { msg });
-            totalSent++;
-            campaign.sent = totalSent;
-            campaign.per_message[mIdx].sent++;
-          } catch (e) {
-            totalFailed++;
-            campaign.failed = totalFailed;
-            campaign.per_message[mIdx].failed++;
-            errors.push(`[msg ${mIdx + 1}] ${t.id}: ${e.message}`);
-            campaign.errors = errors;
-          }
-          // Delay giữa các target (3s). Bỏ qua delay nếu là target cuối
-          // của message hiện tại → chuyển sang block "delay giữa message"
-          // bên dưới (5s) thay vì cộng dồn 8s.
-          if (i < targets.length - 1 || mIdx < messages.length - 1) {
-            await new Promise(r => setTimeout(r, 3000));
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+          } catch (_) {
+            /* ignore cleanup error */
           }
         }
       }
-      campaign.status = totalFailed === 0 ? 'completed' : 'completed';
-      campaign.current_message = messages.length;
     });
 
     res.json({
@@ -913,6 +990,7 @@ router.post('/all-platform/zalo/broadcasts', async (req, res) => {
       total_jobs: targets.length * messages.length,
     });
   } catch (err) {
+    cleanupBroadcastFiles(req, allRenamedPaths);
     res.status(500).json({ error: err.message });
   }
 });

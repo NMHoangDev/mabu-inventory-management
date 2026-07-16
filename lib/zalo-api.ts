@@ -435,21 +435,32 @@ export const zaloApi = {
   async sendBroadcast(payload: {
     /**
      * Nhiều tin nhắn sẽ gửi LẦN LƯỢT tới TẤT CẢ targets theo thứ tự:
-     * tin 1 → hết targets → tin 2 → hết targets → ... Backend delay 3s
-     * giữa các lần gửi và 3s giữa message cuối → message kế tiếp.
+     * tin 1 → hết targets → tin 2 → hết targets → ... Backend delay 10s
+     * giữa MỌI lần gửi (giữa target và giữa message) để an toàn.
      *
-     * Backward-compatible: nếu chỉ truyền `content` (1 tin), backend
-     * wrap thành `[content]`.
+     * Mỗi tin nhắn có thể kèm ảnh/file riêng (`files`) — gửi lên bridge dưới
+     * dạng multipart, field `attachments_<index>` theo vị trí trong `messages`.
      */
-    content?: string;
-    messages?: string[];
+    messages: Array<{ text: string; files?: File[] }>;
     targets: ZaloBroadcastTarget[];
   }, accountId: string = ZALO_ACCOUNT_ID): Promise<ZaloBroadcastResponse> {
+    const fd = new FormData();
+    fd.append(
+      "meta",
+      JSON.stringify({
+        messages: payload.messages.map((m) => ({ text: m.text })),
+        targets: payload.targets,
+      })
+    );
+    payload.messages.forEach((m, idx) => {
+      (m.files ?? []).forEach((f) => fd.append(`attachments_${idx}`, f, f.name));
+    });
     return request(
       `/api/all-platform/zalo/broadcasts?account_id=${encodeURIComponent(accountId)}`,
       {
         method: "POST",
-        body: payload,
+        formData: fd,
+        timeoutMs: 120_000,
       }
     );
   },

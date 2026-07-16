@@ -46,6 +46,34 @@ type InventoryProductDetail = {
   }>;
 };
 
+type StockMovementEntry = {
+  id: string;
+  created_at: string;
+  movement_type: string;
+  action_label: string;
+  quantity_change: number;
+  resulting_stock: number;
+  reference_table: string;
+  reference_id: string;
+  reference_code: string;
+  customer_name: string;
+  staff: string;
+  branch: string;
+  note: string;
+};
+
+const REFERENCE_LINK_PREFIX: Record<string, string> = {
+  orders: "/orders/",
+  goods_receipts: "/products/goods-receipts/",
+  stock_checks: "/products/stock-checks/",
+};
+
+function referenceLinkFor(referenceTable: string, referenceId: string): string {
+  if (!referenceId) return "";
+  const prefix = REFERENCE_LINK_PREFIX[referenceTable];
+  return prefix ? `${prefix}${referenceId}` : "";
+}
+
 function fmtNumber(value: number) {
   return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value || 0);
 }
@@ -67,6 +95,10 @@ export default function InventoryProductDetailPage() {
   const [product, setProduct] = useState<InventoryProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"stock" | "history">("stock");
+  const [history, setHistory] = useState<StockMovementEntry[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +121,29 @@ export default function InventoryProductDetailPage() {
       cancelled = true;
     };
   }, [params.id]);
+
+  useEffect(() => {
+    if (activeTab !== "history" || history !== null || !params.id) return;
+    let cancelled = false;
+    async function loadHistory() {
+      setHistoryLoading(true);
+      setHistoryError("");
+      try {
+        const response = await fetch(`/api/inventory/products/${params.id}/history`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Không tải được lịch sử kho.");
+        if (!cancelled) setHistory(data.history ?? []);
+      } catch (err) {
+        if (!cancelled) setHistoryError(err instanceof Error ? err.message : "Không tải được lịch sử kho.");
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    }
+    loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, history, params.id]);
 
   if (loading) {
     return <div className="grid min-h-[420px] place-items-center rounded-lg border bg-white text-slate-500"><div><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" />Đang tải chi tiết sản phẩm...</div></div>;
@@ -173,43 +228,108 @@ export default function InventoryProductDetailPage() {
 
       <section className="overflow-hidden rounded-lg border bg-white shadow-soft">
         <div className="flex border-b">
-          <button className="border-b-2 border-primary px-6 py-3 text-sm font-semibold text-primary" type="button">Tồn kho</button>
-          <button className="px-6 py-3 text-sm font-semibold text-slate-500 hover:text-primary" type="button">Lịch sử kho</button>
+          <button
+            className={`px-6 py-3 text-sm font-semibold ${activeTab === "stock" ? "border-b-2 border-primary text-primary" : "text-slate-500 hover:text-primary"}`}
+            onClick={() => setActiveTab("stock")}
+            type="button"
+          >
+            Tồn kho
+          </button>
+          <button
+            className={`px-6 py-3 text-sm font-semibold ${activeTab === "history" ? "border-b-2 border-primary text-primary" : "text-slate-500 hover:text-primary"}`}
+            onClick={() => setActiveTab("history")}
+            type="button"
+          >
+            Lịch sử kho
+          </button>
         </div>
-        <div className="overflow-x-auto scrollbar-thin">
-          <table className="w-full min-w-[1200px] text-left text-sm">
-            <thead className="bg-slate-50 font-semibold text-slate-600">
-              <tr>
-                <th className="border-b px-4 py-3">Chi nhánh</th>
-                <th className="border-b px-4 py-3">Tồn kho <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Giá vốn <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Có thể bán <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Đang giao dịch <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Hàng đang về <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Hàng đang giao <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Tồn tối thiểu <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Tồn tối đa <InfoIcon /></th>
-                <th className="border-b px-4 py-3">Điểm lưu kho</th>
-              </tr>
-            </thead>
-            <tbody>
-              {product.locations.map((location) => (
-                <tr key={location.id} className="text-slate-700 hover:bg-slate-50">
-                  <td className="px-4 py-4">{location.name}</td>
-                  <td className="px-4 py-4 text-center">{fmtNumber(location.quantity)}</td>
-                  <td className="px-4 py-4 text-center">{formatCurrencyVND(location.cost_price)}</td>
-                  <td className="px-4 py-4 text-center">{fmtNumber(location.available_quantity)}</td>
-                  <td className="px-4 py-4 text-center">{fmtNumber(location.quantity_on_hold)}</td>
-                  <td className="px-4 py-4 text-center">{fmtNumber(location.incoming_quantity)}</td>
-                  <td className="px-4 py-4 text-center">{fmtNumber(location.delivering_quantity)}</td>
-                  <td className="px-4 py-4 text-center">{location.min_stock === null ? "---" : fmtNumber(location.min_stock)}</td>
-                  <td className="px-4 py-4 text-center">{location.max_stock === null ? "---" : fmtNumber(location.max_stock)}</td>
-                  <td className="px-4 py-4">{location.storage_location}</td>
+
+        {activeTab === "stock" ? (
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full min-w-[1200px] text-left text-sm">
+              <thead className="bg-slate-50 font-semibold text-slate-600">
+                <tr>
+                  <th className="border-b px-4 py-3">Chi nhánh</th>
+                  <th className="border-b px-4 py-3">Tồn kho <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Giá vốn <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Có thể bán <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Đang giao dịch <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Hàng đang về <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Hàng đang giao <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Tồn tối thiểu <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Tồn tối đa <InfoIcon /></th>
+                  <th className="border-b px-4 py-3">Điểm lưu kho</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {product.locations.map((location) => (
+                  <tr key={location.id} className="text-slate-700 hover:bg-slate-50">
+                    <td className="px-4 py-4">{location.name}</td>
+                    <td className="px-4 py-4 text-center">{fmtNumber(location.quantity)}</td>
+                    <td className="px-4 py-4 text-center">{formatCurrencyVND(location.cost_price)}</td>
+                    <td className="px-4 py-4 text-center">{fmtNumber(location.available_quantity)}</td>
+                    <td className="px-4 py-4 text-center">{fmtNumber(location.quantity_on_hold)}</td>
+                    <td className="px-4 py-4 text-center">{fmtNumber(location.incoming_quantity)}</td>
+                    <td className="px-4 py-4 text-center">{fmtNumber(location.delivering_quantity)}</td>
+                    <td className="px-4 py-4 text-center">{location.min_stock === null ? "---" : fmtNumber(location.min_stock)}</td>
+                    <td className="px-4 py-4 text-center">{location.max_stock === null ? "---" : fmtNumber(location.max_stock)}</td>
+                    <td className="px-4 py-4">{location.storage_location}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : historyLoading ? (
+          <div className="grid min-h-[200px] place-items-center text-slate-500">
+            <div><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" />Đang tải lịch sử kho...</div>
+          </div>
+        ) : historyError ? (
+          <div className="p-8 text-center text-red-600">{historyError}</div>
+        ) : !history || history.length === 0 ? (
+          <div className="p-8 text-center text-slate-500">Chưa có lịch sử thay đổi tồn kho cho sản phẩm này.</div>
+        ) : (
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full min-w-[1100px] text-left text-sm">
+              <thead className="bg-slate-50 font-semibold text-slate-600">
+                <tr>
+                  <th className="border-b px-4 py-3">Ngày ghi nhận</th>
+                  <th className="border-b px-4 py-3">Nhân viên</th>
+                  <th className="border-b px-4 py-3">Thao tác</th>
+                  <th className="border-b px-4 py-3">Số lượng thay đổi</th>
+                  <th className="border-b px-4 py-3">Tồn kho</th>
+                  <th className="border-b px-4 py-3">Mã chứng từ</th>
+                  <th className="border-b px-4 py-3">Khách hàng</th>
+                  <th className="border-b px-4 py-3">Chi nhánh</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((entry) => {
+                  const link = referenceLinkFor(entry.reference_table, entry.reference_id);
+                  return (
+                    <tr key={entry.id} className="text-slate-700 hover:bg-slate-50">
+                      <td className="whitespace-nowrap px-4 py-4">{fmtDateTime(entry.created_at)}</td>
+                      <td className="px-4 py-4">{entry.staff || "---"}</td>
+                      <td className="px-4 py-4">{entry.action_label}</td>
+                      <td className={`px-4 py-4 text-center font-medium ${entry.quantity_change > 0 ? "text-emerald-600" : entry.quantity_change < 0 ? "text-red-600" : "text-slate-500"}`}>
+                        {entry.quantity_change > 0 ? "+" : ""}{fmtNumber(entry.quantity_change)}
+                      </td>
+                      <td className="px-4 py-4 text-center">{fmtNumber(entry.resulting_stock)}</td>
+                      <td className="px-4 py-4">
+                        {link ? (
+                          <Link className="text-primary hover:underline" href={link}>{entry.reference_code || "---"}</Link>
+                        ) : (
+                          entry.reference_code || "---"
+                        )}
+                      </td>
+                      <td className="px-4 py-4">{entry.customer_name || "---"}</td>
+                      <td className="px-4 py-4">{entry.branch || "---"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </section>
   );

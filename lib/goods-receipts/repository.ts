@@ -1,6 +1,7 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
-import { addStockForGoodsReceiptItems } from "../inventory/receipts";
+import { addStockForGoodsReceiptItems, applyInventoryLevelDelta } from "../inventory/receipts";
+import { recordStockMovement } from "../inventory/stock-movements";
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -398,6 +399,224 @@ export async function createGoodsReceipt(input: CreateGoodsReceiptInput): Promis
     const result = await getGoodsReceipt(newRow.id);
     if (!result) throw new Error("Không tải được đơn nhập hàng vừa tạo.");
     return result;
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export interface UpdateGoodsReceiptInput {
+  supplier_id?: string | null;
+  supplier_name?: string;
+  supplier_phone?: string;
+  branch?: string;
+  staff?: string;
+  received_at?: string;
+  expected_date?: string | null;
+  note?: string;
+  tags?: string[];
+  discount?: number;
+  tax?: number;
+  payment_method?: string;
+  items?: GoodsReceiptItem[];
+}
+
+// Sửa tay đơn nhập hàng đã tạo (đôi khi nhập nhầm sản phẩm/số lượng/giá).
+// Cho phép sửa ở MỌI trạng thái, kể cả "completed" (đã cộng tồn kho) — khi đó
+// phải hoàn lại tồn kho cũ trước rồi cộng lại theo item mới, tránh cộng dồn/
+// lệch tồn. Mirror khối "chiều đi ngược" trong transitionGoodsReceiptStatus
+// (lib/inventory/receipts.ts) cho phần hoàn tồn, và addStockForGoodsReceiptItems
+// cho phần cộng lại — cả 2 đều dựa vào `stock_added_at` để idempotent.
+export async function updateGoodsReceipt(id: string, input: UpdateGoodsReceiptInput): Promise<GoodsReceipt | null> {
+  if (!isDatabaseConfigured) return null;
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+
+    const existingRes = await client.query(`select * from goods_receipts where id = $1::uuid`, [id]);
+    if (existingRes.rows.length === 0) {
+      await client.query("rollback");
+      return null;
+    }
+    const existing = existingRes.rows[0];
+
+    if (input.items) {
+      // 1. Hoàn lại tồn kho cho các item ĐÃ được cộng trước đó (bất kể
+      // receipt_status hiện tại là gì — chỉ cần stock_added_at có giá trị).
+      const addedItemsRes = await client.query(
+        `select gri.id, gri.product_id, gri.received_qty
+           from goods_receipt_items gri
+          where gri.goods_receipt_id = $1::uuid
+            and gri.stock_added_at is not null`,
+        [id]
+      );
+      for (const item of addedItemsRes.rows) {
+        const productId = item.product_id ? String(item.product_id) : null;
+        const qty = Number(item.received_qty ?? 0);
+        if (!productId || qty <= 0) continue;
+        const stockRes = await client.query(
+          `update products
+              set stock = greatest(0, coalesce(stock, 0) - $2),
+                  stock_updated_at = now(),
+                  updated_at = now()
+            where id = $1
+            returning stock`,
+          [productId, qty]
+        );
+        await applyInventoryLevelDelta(client, productId, -qty, `(sửa đơn nhập ${String(existing.code)})`);
+        await recordStockMovement(client, {
+          productId,
+          movementType: "goods_receipt_reverse",
+          quantityChange: -qty,
+          resultingStock: Number(stockRes.rows[0]?.stock ?? 0),
+          referenceTable: "goods_receipts",
+          referenceId: id,
+          referenceCode: String(existing.code),
+          staff: existing.staff,
+          branch: existing.branch,
+        });
+      }
+
+      // 2. Xoá toàn bộ item cũ, chèn lại theo danh sách mới.
+      await client.query(`delete from goods_receipt_items where goods_receipt_id = $1::uuid`, [id]);
+
+      const items = input.items
+        .filter((it) => it.product_name || it.sku)
+        .map((it, index) => {
+          const ord = num(it.ordered_qty);
+          const rec = num(it.received_qty);
+          const uc = num(it.unit_cost);
+          const disc = num(it.discount);
+          return {
+            purchase_order_item_id: it.purchase_order_item_id,
+            product_id: it.product_id,
+            sku: str(it.sku),
+            product_name: str(it.product_name),
+            unit: str(it.unit),
+            image_url: str(it.image_url),
+            ordered_qty: ord,
+            received_qty: rec,
+            unit_cost: uc,
+            discount: disc,
+            line_total: Math.max(ord * uc - disc, 0),
+            position: index + 1,
+            note: str(it.note)
+          };
+        });
+
+      for (const item of items) {
+        await client.query(
+          `insert into goods_receipt_items (
+            goods_receipt_id, purchase_order_item_id, product_id, sku,
+            product_name, unit, image_url, ordered_qty, received_qty,
+            unit_cost, discount, line_total, position, note
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            id,
+            item.purchase_order_item_id,
+            item.product_id,
+            item.sku,
+            item.product_name,
+            item.unit,
+            item.image_url,
+            item.ordered_qty,
+            item.received_qty,
+            item.unit_cost,
+            item.discount,
+            item.line_total,
+            item.position,
+            item.note
+          ]
+        );
+      }
+
+      // 3. Nếu đơn đang "completed", cộng lại tồn kho theo item MỚI ngay
+      // (item mới luôn có stock_added_at = NULL nên addStockForGoodsReceiptItems
+      // sẽ cộng toàn bộ, không bỏ sót).
+      if (String(existing.receipt_status) === "completed") {
+        await addStockForGoodsReceiptItems(client, id, String(existing.code));
+      }
+
+      const subtotal = items.reduce((sum, it) => sum + num(it.ordered_qty) * num(it.unit_cost), 0);
+      const discount = input.discount != null ? num(input.discount) : num(existing.discount);
+      const tax = input.tax != null ? num(input.tax) : num(existing.tax);
+      const totalCost = Math.max(subtotal - discount + tax, 0);
+      const totalQty = items.reduce((sum, it) => sum + num(it.received_qty), 0);
+
+      await client.query(
+        `update goods_receipts set subtotal = $2, discount = $3, tax = $4, total_cost = $5, total_quantity = $6, updated_at = now()
+         where id = $1`,
+        [id, subtotal, discount, tax, totalCost, totalQty]
+      );
+
+      // Đồng bộ trạng thái purchase_order liên kết (nếu có) theo received_qty
+      // mới — mirror khối tương ứng trong createGoodsReceipt.
+      if (existing.purchase_order_id) {
+        const allCompleted = items.length > 0 && items.every((it) => it.received_qty >= it.ordered_qty);
+        const anyReceived = items.some((it) => it.received_qty > 0);
+        const newPoStatus = allCompleted ? "completed" : anyReceived ? "partial" : "pending";
+        await client
+          .query(`update purchase_orders set status = $1, updated_at = now() where id = $2::uuid`, [
+            newPoStatus,
+            String(existing.purchase_order_id)
+          ])
+          .catch(() => undefined);
+      }
+    }
+
+    const otherFields = {
+      supplier_id: input.supplier_id !== undefined ? input.supplier_id : existing.supplier_id,
+      supplier_name: input.supplier_name !== undefined ? str(input.supplier_name) : existing.supplier_name,
+      supplier_phone: input.supplier_phone !== undefined ? str(input.supplier_phone) : existing.supplier_phone,
+      branch: input.branch !== undefined ? str(input.branch, "Chi nhánh mặc định") : existing.branch,
+      staff: input.staff !== undefined ? str(input.staff) : existing.staff,
+      received_at: input.received_at ?? existing.received_at,
+      expected_date: input.expected_date !== undefined ? input.expected_date : existing.expected_date,
+      note: input.note !== undefined ? str(input.note) : existing.note,
+      tags: input.tags ?? existing.tags,
+      payment_method: input.payment_method !== undefined ? str(input.payment_method, "cash") : existing.payment_method,
+      // discount/tax khi KHÔNG kèm items vẫn cho sửa riêng — nhưng total_cost
+      // phải recompute lại từ subtotal hiện có (đã cập nhật ở trên nếu có items).
+      discount: input.discount != null ? num(input.discount) : existing.discount,
+      tax: input.tax != null ? num(input.tax) : existing.tax
+    };
+
+    const subtotalForTotal = input.items ? undefined : num(existing.subtotal);
+    if (!input.items && (input.discount != null || input.tax != null)) {
+      const totalCost = Math.max(num(subtotalForTotal) - num(otherFields.discount) + num(otherFields.tax), 0);
+      await client.query(`update goods_receipts set total_cost = $2 where id = $1`, [id, totalCost]);
+    }
+
+    await client.query(
+      `update goods_receipts set
+        supplier_id = $2, supplier_name = $3, supplier_phone = $4,
+        branch = $5, staff = $6, received_at = $7, expected_date = $8,
+        note = $9, tags = $10, payment_method = $11, discount = $12, tax = $13,
+        updated_at = now()
+       where id = $1`,
+      [
+        id,
+        otherFields.supplier_id,
+        otherFields.supplier_name,
+        otherFields.supplier_phone,
+        otherFields.branch,
+        otherFields.staff,
+        otherFields.received_at,
+        otherFields.expected_date,
+        otherFields.note,
+        otherFields.tags,
+        otherFields.payment_method,
+        otherFields.discount,
+        otherFields.tax
+      ]
+    );
+
+    await client.query("commit");
+    return await getGoodsReceipt(id);
   } catch (err) {
     await client.query("rollback").catch(() => undefined);
     throw err;

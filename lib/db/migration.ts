@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 23; // Bumped: orders.source thêm 'pos' (phân biệt đơn tạo từ trang POS)
+const SCHEMA_VERSION = 25; // Bumped: stock_movements (lịch sử kho) + orders.discount_type (chiết khấu đơn theo % hoặc số tiền)
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -347,7 +347,15 @@ async function migrate() {
     -- Add code + type columns to customer_groups if they don't exist (idempotent)
     alter table customer_groups add column if not exists code text;
     alter table customer_groups add column if not exists type text default 'Cố định';
-    -- Backfill code for existing rows (idempotent - only updates nulls)
+
+    -- Seed 1 nhóm mặc định — form "Thêm khách hàng" bắt buộc chọn nhóm
+    -- (xem app/(dashboard)/customers/CustomerFormModal.tsx), cần có sẵn ít
+    -- nhất 1 lựa chọn để không khoá cứng luồng tạo khách hàng mới.
+    insert into customer_groups (name, description)
+      values ('Khách hàng thường', 'Nhóm mặc định')
+      on conflict (name) do nothing;
+
+    -- Backfill code cho các dòng (kể cả dòng vừa seed) - idempotent, chỉ update NULL.
     update customer_groups set code = upper(regexp_replace(name, '[^a-zA-Z0-9]', '', 'g')) where code is null;
   `);
 
@@ -1123,6 +1131,135 @@ async function migrate() {
     -- dấu hiệu này để gắn lại nhãn 'pos' cho dữ liệu lịch sử.
     update orders set source = 'pos'
       where source = 'store' and branch = 'Chi nhánh mặc định';
+  `);
+
+  // 21. Chiết khấu từng sản phẩm trong đơn (POS) — trước đây chỉ có chiết
+  // khấu tổng đơn (orders.discount), không lưu được chiết khấu theo dòng
+  // (vd giảm 5% riêng cho 1 sản phẩm). discount_value là con số người dùng
+  // nhập (đơn vị phụ thuộc discount_type) — lưu nguyên để hiển thị lại đúng
+  // ("10%" chứ không quy đổi mất về số tiền) khi xem/sửa đơn sau này.
+  await client.query(`
+    alter table order_items add column if not exists discount_type text not null default 'amount'
+      check (discount_type in ('amount', 'percent'));
+    alter table order_items add column if not exists discount_value numeric(18,2) not null default 0;
+  `);
+
+  // 22. Lịch sử kho (stock movement ledger) — trước đây products.stock bị
+  // UPDATE trực tiếp ở nhiều nơi (đơn hàng, nhập kho, kiểm kho) mà không ghi
+  // lại ai/khi nào/vì sao. Bảng này là log append-only cho tab "Lịch sử kho"
+  // ở trang chi tiết sản phẩm — mọi điểm trừ/cộng products.stock từ nay ghi
+  // 1 dòng vào đây (xem lib/orders/repository.ts, lib/inventory/receipts.ts,
+  // lib/goods-receipts/repository.ts, lib/stock-checks/repository.ts).
+  await client.query(`
+    create table if not exists stock_movements (
+      id               uuid primary key default gen_random_uuid(),
+      product_id       uuid not null references products(id) on delete cascade,
+      movement_type    text not null
+                       check (movement_type in (
+                         'initial', 'order_sale', 'order_restore',
+                         'goods_receipt', 'goods_receipt_reverse',
+                         'stock_check', 'stock_receipt'
+                       )),
+      quantity_change  numeric(18,3) not null,
+      resulting_stock  numeric(18,3) not null,
+      reference_table  text,
+      reference_id     uuid,
+      reference_code   text,
+      customer_name    text,
+      staff            text,
+      branch           text,
+      note             text,
+      created_at       timestamptz not null default now()
+    );
+    create index if not exists idx_stock_movements_product
+      on stock_movements(product_id, created_at desc, id desc);
+  `);
+
+  // Backfill 1 lần duy nhất (guard bằng "bảng còn trống") — dựng lại lịch sử
+  // cũ từ các bảng đã có sẵn dấu vết (goods_receipt_items.stock_added_at,
+  // order_items.stock_deducted_at, stock_check_items.stock_applied_at,
+  // stock_receipt_items). Dòng "initial" bù phần chênh lệch còn lại giữa
+  // products.stock hiện tại và tổng các movement dựng được, để tổng luôn
+  // khớp tồn kho thật kể cả với thay đổi không còn dấu vết nào (ví dụ sản
+  // phẩm được set tồn kho ban đầu qua đường không được log ở đây).
+  await client.query(`
+    do $$
+    begin
+      if not exists (select 1 from stock_movements limit 1) then
+
+        insert into stock_movements
+          (product_id, movement_type, quantity_change, resulting_stock,
+           reference_table, reference_id, reference_code, customer_name, staff, branch, created_at)
+        select
+          gri.product_id, 'goods_receipt', gri.received_qty, 0,
+          'goods_receipts', gr.id, gr.code, null, gr.staff, gr.branch, gri.stock_added_at
+        from goods_receipt_items gri
+        join goods_receipts gr on gr.id = gri.goods_receipt_id
+        where gri.stock_added_at is not null and gri.product_id is not null and gri.received_qty <> 0;
+
+        insert into stock_movements
+          (product_id, movement_type, quantity_change, resulting_stock,
+           reference_table, reference_id, reference_code, customer_name, staff, branch, created_at)
+        select
+          oi.product_id, 'order_sale', -oi.quantity, 0,
+          'orders', o.id, o.code, o.customer_name, o.staff, o.branch, oi.stock_deducted_at
+        from order_items oi
+        join orders o on o.id = oi.order_id
+        where oi.stock_deducted_at is not null and oi.product_id is not null and oi.quantity <> 0;
+
+        insert into stock_movements
+          (product_id, movement_type, quantity_change, resulting_stock,
+           reference_table, reference_id, reference_code, customer_name, staff, branch, created_at)
+        select
+          sci.product_id, 'stock_check', sci.variance, 0,
+          'stock_checks', sc.id, sc.code, null, sc.staff, sc.branch, sci.stock_applied_at
+        from stock_check_items sci
+        join stock_checks sc on sc.id = sci.stock_check_id
+        where sci.stock_applied_at is not null and sci.product_id is not null and sci.variance <> 0;
+
+        insert into stock_movements
+          (product_id, movement_type, quantity_change, resulting_stock,
+           reference_table, reference_id, reference_code, customer_name, staff, branch, created_at)
+        select
+          sri.product_id, 'stock_receipt', sri.quantity, 0,
+          'stock_receipts', sr.id, sr.code, null, sr.staff, sr.branch, sri.created_at
+        from stock_receipt_items sri
+        join stock_receipts sr on sr.id = sri.receipt_id
+        where sri.product_id is not null and sri.quantity <> 0;
+
+        insert into stock_movements
+          (product_id, movement_type, quantity_change, resulting_stock, created_at)
+        select
+          p.id, 'initial', p.stock - coalesce(m.total, 0), 0,
+          least(p.created_at, coalesce(m.min_created_at, p.created_at) - interval '1 second')
+        from products p
+        left join (
+          select product_id, sum(quantity_change) as total, min(created_at) as min_created_at
+          from stock_movements
+          group by product_id
+        ) m on m.product_id = p.id
+        where p.stock - coalesce(m.total, 0) <> 0;
+
+        update stock_movements sm
+        set resulting_stock = running.cum
+        from (
+          select id, sum(quantity_change) over (
+            partition by product_id order by created_at, id
+          ) as cum
+          from stock_movements
+        ) running
+        where running.id = sm.id;
+
+      end if;
+    end $$;
+  `);
+
+  // 23. Chiết khấu đơn hàng theo % hoặc số tiền cố định — trước đây
+  // orders.discount luôn là số tiền cố định (line-item đã có discount_type
+  // ở mục 21, order-level thì chưa). Xem lib/orders/repository.ts.
+  await client.query(`
+    alter table orders add column if not exists discount_type text not null default 'amount'
+      check (discount_type in ('amount', 'percent'));
   `);
 } finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);

@@ -22,7 +22,9 @@ import {
   Info,
   ShoppingCart,
   StickyNote,
-  X
+  X,
+  ChevronDown,
+  Loader2
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
 
@@ -46,11 +48,12 @@ interface Customer {
 }
 
 type PriceTier = "cost" | "wholesale" | "retail";
+type DiscountType = "amount" | "percent";
 
 const TIER_LABELS: Record<PriceTier, string> = {
   cost: "Giá vốn",
-  wholesale: "Giá sĩ",
-  retail: "Giá lẻ",
+  wholesale: "Giá bán sỉ",
+  retail: "Giá bán lẻ",
 };
 
 interface CartItem {
@@ -63,14 +66,57 @@ interface CartItem {
   price_wholesale: number;
   price_retail: number;
   price_tier: PriceTier;
+  custom_price: number | null;
+  discount_type: DiscountType;
+  discount_value: number;
   quantity: number;
 }
 
-// Đơn giá thực tế của 1 line = giá theo price_tier đang chọn (vốn/sĩ/lẻ).
+// Đơn giá theo bảng giá (vốn/sĩ/lẻ) đang chọn — dùng làm mặc định trước khi
+// người dùng tự sửa tay (xem unitPrice).
 function tierPrice(item: CartItem): number {
   if (item.price_tier === "cost") return item.price_cost;
   if (item.price_tier === "wholesale") return item.price_wholesale;
   return item.price_retail;
+}
+
+// Đơn giá thực tế của 1 dòng: ưu tiên giá đã tự sửa tay (custom_price), nếu
+// chưa sửa thì lấy theo bảng giá đang chọn.
+function unitPrice(item: CartItem): number {
+  return item.custom_price ?? tierPrice(item);
+}
+
+// Chiết khấu TỪNG SẢN PHẨM (không phải chiết khấu tổng đơn) — value hoặc %,
+// clamp về [0, thành tiền gốc trước chiết khấu] để không ra số âm.
+function lineBase(item: CartItem): number {
+  return unitPrice(item) * item.quantity;
+}
+function lineDiscountAmount(item: CartItem): number {
+  const base = lineBase(item);
+  const raw = item.discount_type === "percent" ? (base * item.discount_value) / 100 : item.discount_value;
+  return Math.min(base, Math.max(0, raw));
+}
+// Chiết khấu TỔNG ĐƠN (khác chiết khấu từng dòng ở trên) — tính trên phần
+// còn lại sau khi đã trừ chiết khấu từng dòng, clamp về [0, base].
+function orderDiscountAmount(base: number, discountType: DiscountType, discountValue: number): number {
+  const raw = discountType === "percent" ? (base * discountValue) / 100 : discountValue;
+  return Math.min(base, Math.max(0, raw));
+}
+function lineTotal(item: CartItem): number {
+  return Math.max(0, lineBase(item) - lineDiscountAmount(item));
+}
+
+function parseNum(text: string): number {
+  const v = Number(text.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(v) ? Math.max(0, v) : 0;
+}
+
+// Hiển thị số có dấu phẩy phân cách hàng nghìn trong input (vd 1,000,000) —
+// áp dụng cho mọi ô nhập số ở trang này. parseNum ở trên đã tự bỏ dấu phẩy
+// khi đọc lại giá trị nên không cần đổi logic onChange.
+function formatNumberInput(n: number): string {
+  if (!n) return "";
+  return n.toLocaleString("en-US");
 }
 
 const SOURCES = [
@@ -101,6 +147,9 @@ export default function NewOrderPage() {
   const [productHighlight, setProductHighlight] = useState(0);
 
   const [cart, setCart] = useState<CartItem[]>([]);
+  // Bảng giá mặc định áp cho SẢN PHẨM MỚI thêm vào đơn + các dòng chưa bị sửa
+  // giá tay (custom_price === null) khi đổi — hiển thị cạnh ô tìm sản phẩm.
+  const [priceTier, setPriceTier] = useState<PriceTier>("retail");
   const [source, setSource] = useState("store");
   const [branch, setBranch] = useState(BRANCHES[0]);
   const [orderDate, setOrderDate] = useState(fmtDate(new Date()));
@@ -108,11 +157,14 @@ export default function NewOrderPage() {
   const [note, setNote] = useState("");
 
   const [discount, setDiscount] = useState(0);
+  const [discountType, setDiscountType] = useState<DiscountType>("amount");
   const [shippingFee, setShippingFee] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "card">("cash");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Popup xem nhanh tồn kho — bấm icon ghi chú cạnh tên sản phẩm trong giỏ.
+  const [stockModalProductId, setStockModalProductId] = useState<string | null>(null);
 
   // ── Customer search (debounced + bỏ dấu hỗ trợ) ───────────────────────
   // Backend /api/orders/search-customers đã có unaccent + scoring.
@@ -149,10 +201,18 @@ export default function NewOrderPage() {
 
   const productInputRef = useRef<HTMLInputElement | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
-  // Ref theo product_id — dùng để nhảy focus tới đúng ô số lượng / nút chọn
-  // giá của dòng vừa thêm (xem addProduct + updateQty onKeyDown).
+  // Ref theo product_id — dùng để nhảy focus tới đúng ô số lượng / đơn giá
+  // của dòng vừa thêm (xem addProduct + updateQty onKeyDown).
   const qtyInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const tierButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  // Ghi chú đơn hàng dùng CHUNG cho cả đơn (không phải ghi chú riêng từng sản
+  // phẩm) — icon ghi chú trên mỗi dòng chỉ để tiện cuộn/focus nhanh tới đây
+  // thay vì phải kéo xuống cuối danh sách sản phẩm.
+  const orderNoteRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusOrderNote = useCallback(() => {
+    orderNoteRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    orderNoteRef.current?.focus();
+  }, []);
 
   // ── Customer actions ───────────────────────────────────────────────────
   const pickCustomer = useCallback((c: Customer) => {
@@ -186,7 +246,10 @@ export default function NewOrderPage() {
           price_cost: p.cost_price,
           price_wholesale: p.wholesale_price,
           price_retail: p.price,
-          price_tier: "retail" as PriceTier,
+          price_tier: priceTier,
+          custom_price: null,
+          discount_type: "amount" as DiscountType,
+          discount_value: 0,
           quantity: 1,
         },
       ];
@@ -210,7 +273,7 @@ export default function NewOrderPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ product_id: p.id }),
     }).catch(() => undefined);
-  }, []);
+  }, [priceTier]);
 
   const updateQty = (productId: string, qty: number) => {
     if (qty <= 0) {
@@ -220,16 +283,45 @@ export default function NewOrderPage() {
     setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, quantity: qty } : c)));
   };
 
-  const setTier = (productId: string, tier: PriceTier) => {
-    setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, price_tier: tier } : c)));
+  // Sửa tay Đơn giá của 1 dòng — cho phép chỉnh giá bán khác giá niêm yết.
+  const setCustomPrice = (productId: string, price: number) => {
+    setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, custom_price: price } : c)));
+  };
+
+  // Chiết khấu TỪNG SẢN PHẨM — value nhập tay, đơn vị theo discount_type.
+  const setItemDiscountValue = (productId: string, value: number) => {
+    setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, discount_value: value } : c)));
+  };
+  const toggleItemDiscountType = (productId: string) => {
+    setCart((prev) =>
+      prev.map((c) =>
+        c.product_id === productId ? { ...c, discount_type: c.discount_type === "percent" ? "amount" : "percent" } : c
+      )
+    );
+  };
+
+  // Đổi bảng giá áp dụng cho cả đơn (nút cạnh ô tìm sản phẩm) — chỉ re-price
+  // những dòng CHƯA sửa giá tay, giữ nguyên giá đã custom_price.
+  const handlePriceTierChange = (tier: PriceTier) => {
+    setPriceTier(tier);
+    setCart((prev) => prev.map((c) => (c.custom_price === null ? { ...c, price_tier: tier } : c)));
   };
 
   const removeItem = (productId: string) => {
     setCart((prev) => prev.filter((c) => c.product_id !== productId));
   };
 
-  const subtotal = useMemo(() => cart.reduce((s, c) => s + c.quantity * tierPrice(c), 0), [cart]);
-  const total = useMemo(() => Math.max(0, subtotal - discount + shippingFee), [subtotal, discount, shippingFee]);
+  const subtotal = useMemo(() => cart.reduce((s, c) => s + lineBase(c), 0), [cart]);
+  const itemDiscountTotal = useMemo(() => cart.reduce((s, c) => s + lineDiscountAmount(c), 0), [cart]);
+  const discountBase = useMemo(() => Math.max(0, subtotal - itemDiscountTotal), [subtotal, itemDiscountTotal]);
+  const discountAmount = useMemo(
+    () => orderDiscountAmount(discountBase, discountType, discount),
+    [discountBase, discountType, discount]
+  );
+  const total = useMemo(
+    () => Math.max(0, discountBase - discountAmount + shippingFee),
+    [discountBase, discountAmount, shippingFee]
+  );
 
   const submit = async (status: "new" | "completed") => {
     if (cart.length === 0) {
@@ -249,6 +341,7 @@ export default function NewOrderPage() {
         staff: STAFF,
         note,
         discount,
+        discount_type: discountType,
         shipping_fee: shippingFee,
         paid,
         payment_status: paid >= total && total > 0 ? "paid" : "unpaid",
@@ -262,7 +355,9 @@ export default function NewOrderPage() {
           unit: c.unit,
           image_url: c.image_url,
           quantity: c.quantity,
-          unit_price: tierPrice(c),
+          unit_price: unitPrice(c),
+          discount_type: c.discount_type,
+          discount_value: c.discount_value,
         })),
       };
       const res = await fetch("/api/orders", {
@@ -366,6 +461,8 @@ export default function NewOrderPage() {
               productResults={productResults}
               productHighlight={productHighlight}
               productInputRef={productInputRef}
+              priceTier={priceTier}
+              onPriceTierChange={handlePriceTierChange}
               onSearchChange={(v) => setProductSearch(v)}
               onPick={addProduct}
               onHighlight={setProductHighlight}
@@ -416,8 +513,8 @@ export default function NewOrderPage() {
                       <th className="p-2 pl-4 text-xs font-semibold text-[#404754] uppercase tracking-wider w-12">STT</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider">Sản phẩm</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Số lượng</th>
-                      <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Loại giá</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Đơn giá</th>
+                      <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Chiết khấu</th>
                       <th className="p-2 text-xs font-semibold text-[#404754] uppercase tracking-wider text-right">Thành tiền</th>
                       <th className="p-2 pr-4 w-10"></th>
                     </tr>
@@ -425,26 +522,46 @@ export default function NewOrderPage() {
                   <tbody className="divide-y divide-[#c0c6d6]">
                     {cart.map((c, idx) => (
                       <tr key={c.product_id} className="hover:bg-[#f6f9ff] transition-colors">
-                        <td className="p-4 text-center text-xs text-[#404754]">{idx + 1}</td>
-                        <td className="p-4">
-                          <div className="flex items-start gap-2">
-                            <div className="w-10 h-10 rounded border border-[#c0c6d6] flex-shrink-0 bg-white overflow-hidden">
+                        <td className="p-5 text-center text-xs text-[#404754]">{idx + 1}</td>
+                        <td className="p-5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-14 h-14 rounded border border-[#c0c6d6] flex-shrink-0 bg-white overflow-hidden">
                               {c.image_url ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img src={c.image_url} alt="" className="w-full h-full object-cover" />
                               ) : (
                                 <div className="w-full h-full bg-[#ebf5ff] flex items-center justify-center text-[#c0c6d6]">
-                                  <ReceiptText className="w-5 h-5" />
+                                  <ReceiptText className="w-6 h-6" />
                                 </div>
                               )}
                             </div>
                             <div>
-                              <p className="text-sm text-[#005baf] font-medium">{c.product_name}</p>
-                              <p className="text-xs text-[#404754]">SKU: {c.product_sku || "—"}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-sm text-[#005baf] font-medium">{c.product_name}</p>
+                                <button
+                                  type="button"
+                                  onClick={() => setStockModalProductId(c.product_id)}
+                                  title="Xem nhanh tồn kho"
+                                  className="text-[#404754] hover:text-[#005baf] transition-colors"
+                                >
+                                  <Info className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <div className="mt-1 flex items-center gap-1.5">
+                                <p className="text-xs text-[#404754]">SKU: {c.product_sku || "—"}</p>
+                                <button
+                                  type="button"
+                                  onClick={focusOrderNote}
+                                  title="Ghi chú đơn hàng"
+                                  className="text-[#404754] hover:text-[#005baf] transition-colors"
+                                >
+                                  <StickyNote className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </td>
-                        <td className="p-4 text-right">
+                        <td className="p-5 text-right">
                           <div className="inline-flex border border-[#717785] rounded overflow-hidden">
                             <button
                               onClick={() => updateQty(c.product_id, c.quantity - 1)}
@@ -457,18 +574,17 @@ export default function NewOrderPage() {
                                 qtyInputRefs.current[c.product_id] = el;
                               }}
                               type="text"
-                              value={c.quantity}
-                              onChange={(e) => {
-                                const v = parseInt(e.target.value || "0", 10);
-                                updateQty(c.product_id, isNaN(v) ? 0 : v);
-                              }}
+                              value={formatNumberInput(c.quantity)}
+                              onChange={(e) => updateQty(c.product_id, Math.round(parseNum(e.target.value)))}
                               onFocus={(e) => e.target.select()}
                               onKeyDown={(e) => {
-                                // UX: sau khi gõ số lượng, Enter nhảy tiếp qua nút
-                                // chọn loại giá (vốn/sĩ/lẻ) của ĐÚNG dòng này.
+                                // UX: sau khi gõ số lượng, Enter nhảy tiếp qua ô
+                                // Đơn giá của ĐÚNG dòng này.
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  tierButtonRefs.current[c.product_id]?.focus();
+                                  const el = priceInputRefs.current[c.product_id];
+                                  el?.focus();
+                                  el?.select();
                                 }
                               }}
                               className="w-12 text-center border-none text-xs focus:ring-0"
@@ -481,49 +597,40 @@ export default function NewOrderPage() {
                             </button>
                           </div>
                         </td>
-                        <td className="p-4 text-right">
-                          <div className="inline-flex gap-1 justify-end" role="group" aria-label="Chọn loại giá">
-                            {(["cost", "wholesale", "retail"] as PriceTier[]).map((tier, tierIdx, arr) => (
-                              <button
-                                key={tier}
-                                type="button"
-                                // Ref gắn vào nút đang ACTIVE — ô số lượng nhảy Enter
-                                // tới đây nên phải luôn là nút đang chọn của dòng này.
-                                ref={
-                                  c.price_tier === tier
-                                    ? (el) => {
-                                        tierButtonRefs.current[c.product_id] = el;
-                                      }
-                                    : undefined
-                                }
-                                onClick={() => setTier(c.product_id, tier)}
-                                onKeyDown={(e) => {
-                                  // ← → để duyệt nhanh giữa 3 loại giá cùng dòng.
-                                  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-                                    e.preventDefault();
-                                    const dir = e.key === "ArrowRight" ? 1 : -1;
-                                    const nextTier = arr[(tierIdx + dir + arr.length) % arr.length];
-                                    setTier(c.product_id, nextTier);
-                                    (e.currentTarget.parentElement?.children[
-                                      (tierIdx + dir + arr.length) % arr.length
-                                    ] as HTMLButtonElement | undefined)?.focus();
-                                  }
-                                }}
-                                title={TIER_LABELS[tier]}
-                                className={`px-1.5 py-1 rounded text-[10px] font-semibold transition-colors ${
-                                  c.price_tier === tier
-                                    ? "bg-[#005baf] text-white"
-                                    : "bg-[#ebf5ff] text-[#005baf] hover:bg-[#d9eafa]"
-                                }`}
-                              >
-                                {tier === "cost" ? "Vốn" : tier === "wholesale" ? "Sĩ" : "Lẻ"}
-                              </button>
-                            ))}
+                        <td className="p-5 text-right">
+                          <input
+                            ref={(el) => {
+                              priceInputRefs.current[c.product_id] = el;
+                            }}
+                            type="text"
+                            value={formatNumberInput(unitPrice(c))}
+                            onChange={(e) => setCustomPrice(c.product_id, parseNum(e.target.value))}
+                            onFocus={(e) => e.target.select()}
+                            className="w-24 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm outline-none"
+                          />
+                        </td>
+                        <td className="p-5 text-right">
+                          <div className="inline-flex items-center gap-1 justify-end">
+                            <input
+                              type="text"
+                              value={formatNumberInput(c.discount_value)}
+                              onChange={(e) => setItemDiscountValue(c.product_id, parseNum(e.target.value))}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0"
+                              className="w-16 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => toggleItemDiscountType(c.product_id)}
+                              title="Đổi đơn vị chiết khấu (số tiền / phần trăm)"
+                              className="w-7 shrink-0 px-1.5 py-1 rounded text-[10px] font-semibold bg-[#ebf5ff] text-[#005baf] hover:bg-[#d9eafa] transition-colors"
+                            >
+                              {c.discount_type === "percent" ? "%" : "đ"}
+                            </button>
                           </div>
                         </td>
-                        <td className="p-4 text-right text-sm">{formatCurrencyVND(tierPrice(c))}</td>
-                        <td className="p-4 text-right text-sm font-semibold">{formatCurrencyVND(tierPrice(c) * c.quantity)}</td>
-                        <td className="p-4 text-right">
+                        <td className="p-5 text-right text-sm font-semibold">{formatCurrencyVND(lineTotal(c))}</td>
+                        <td className="p-5 text-right">
                           <button
                             onClick={() => removeItem(c.product_id)}
                             className="text-[#404754] hover:text-[#ba1a1a] transition-colors p-1 rounded"
@@ -543,6 +650,7 @@ export default function NewOrderPage() {
               <div className="flex items-start gap-2">
                 <StickyNote className="w-5 h-5 text-[#404754] mt-1" />
                 <textarea
+                  ref={orderNoteRef}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Ghi chú đơn hàng"
@@ -608,10 +716,7 @@ export default function NewOrderPage() {
           </section>
 
           {/* Promotion ticker */}
-          <div className="bg-[#0074db] text-white px-4 py-2 rounded flex items-center gap-2">
-            <Megaphone className="w-4 h-4" />
-            <span className="text-xs truncate">Đang có chương trình: Giảm 10% cho đơn hàng trên 500k</span>
-          </div>
+         
 
           {/* Payment summary */}
           <section className="bg-white border border-[#c0c6d6] rounded p-4 flex-1 flex flex-col">
@@ -620,27 +725,51 @@ export default function NewOrderPage() {
                 <span className="text-sm text-[#404754]">Tổng tiền sản phẩm ({cart.length})</span>
                 <span className="text-sm font-medium">{formatCurrencyVND(subtotal)}</span>
               </div>
+              {itemDiscountTotal > 0 ? (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-[#404754]">Chiết khấu sản phẩm</span>
+                  <span className="text-sm font-medium text-[#ba1a1a]">-{formatCurrencyVND(itemDiscountTotal)}</span>
+                </div>
+              ) : null}
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-1 group cursor-pointer">
-                  <span className="text-sm text-[#005baf]">Chiết khấu</span>
+                  <span className="text-sm text-[#005baf]">Chiết khấu đơn</span>
                   <Pencil className="w-3 h-3 text-[#005baf] opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
-                <input
-                  type="number"
-                  value={discount}
-                  onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
-                  className="w-24 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm"
-                />
+                <div className="inline-flex items-center gap-1 justify-end">
+                  <input
+                    type="text"
+                    value={formatNumberInput(discount)}
+                    onChange={(e) => setDiscount(parseNum(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    className="w-24 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType((t) => (t === "percent" ? "amount" : "percent"))}
+                    title="Đổi đơn vị chiết khấu (số tiền / phần trăm)"
+                    className="w-7 shrink-0 px-1.5 py-1 rounded text-[10px] font-semibold bg-[#ebf5ff] text-[#005baf] hover:bg-[#d9eafa] transition-colors"
+                  >
+                    {discountType === "percent" ? "%" : "đ"}
+                  </button>
+                </div>
               </div>
+              {discountAmount > 0 ? (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-[#404754]">Giảm giá đơn</span>
+                  <span className="text-sm font-medium text-[#ba1a1a]">-{formatCurrencyVND(discountAmount)}</span>
+                </div>
+              ) : null}
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-1 group cursor-pointer">
                   <span className="text-sm text-[#005baf]">Phí giao hàng</span>
                   <Pencil className="w-3 h-3 text-[#005baf] opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
                 <input
-                  type="number"
-                  value={shippingFee}
-                  onChange={(e) => setShippingFee(Math.max(0, Number(e.target.value) || 0))}
+                  type="text"
+                  value={formatNumberInput(shippingFee)}
+                  onChange={(e) => setShippingFee(parseNum(e.target.value))}
+                  onFocus={(e) => e.target.select()}
                   className="w-24 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm"
                 />
               </div>
@@ -711,6 +840,10 @@ export default function NewOrderPage() {
           <span>v1.0.0</span>
         </div>
       </footer>
+
+      {stockModalProductId ? (
+        <ProductStockModal productId={stockModalProductId} onClose={() => setStockModalProductId(null)} />
+      ) : null}
     </div>
   );
 }
@@ -728,6 +861,110 @@ function PayMethodButton({ active, onClick, icon, children }: { active: boolean;
       {icon}
       {children}
     </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProductStockModal — popup "xem nhanh tồn kho" khi bấm icon ghi chú cạnh tên
+// sản phẩm trong giỏ hàng. Tồn kho không quản lý theo nhiều chi nhánh thật
+// (xem CLAUDE.md: products.stock là nguồn duy nhất) nên chỉ hiển thị 1 số
+// tồn duy nhất, không bịa thêm cột "đang giao dịch"/"hàng đang về" như Sapo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ProductStockDetail {
+  id: string;
+  name: string;
+  sku: string;
+  image_url: string;
+  price: number;
+  wholesale_price: number;
+  total_inventory: number;
+  available_quantity: number;
+}
+
+function ProductStockModal({ productId, onClose }: { productId: string; onClose: () => void }) {
+  const [detail, setDetail] = useState<ProductStockDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/products/${productId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setDetail(d);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Không tải được thông tin tồn kho.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [productId]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white rounded shadow-xl w-full max-w-md mx-4">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#c0c6d6]">
+          <h3 className="font-semibold text-[#0d1d29]">Tồn kho sản phẩm</h3>
+          <button onClick={onClose} className="text-[#404754] hover:text-[#0d1d29]">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 text-sm space-y-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-[#404754]">
+              <Loader2 className="w-4 h-4 animate-spin" /> Đang tải...
+            </div>
+          ) : error || !detail ? (
+            <div className="text-red-600">{error || "Không tìm thấy sản phẩm."}</div>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded border border-[#c0c6d6] flex-shrink-0 bg-white overflow-hidden">
+                  {detail.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={detail.image_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full bg-[#ebf5ff] flex items-center justify-center text-[#c0c6d6]">
+                      <ReceiptText className="w-5 h-5" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-[#0d1d29] truncate">{detail.name}</p>
+                  <p className="text-xs text-[#404754]">SKU: {detail.sku || "—"}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-dashed border-[#c0c6d6]">
+                <InfoStat label="Giá bán lẻ" value={formatCurrencyVND(detail.price)} />
+                <InfoStat label="Giá bán sỉ" value={formatCurrencyVND(detail.wholesale_price)} />
+              </div>
+              <div className="pt-3 border-t border-dashed border-[#c0c6d6]">
+                <p className="mb-2 text-xs font-semibold uppercase text-[#404754]">Tồn kho</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <InfoStat label="Tồn kho" value={String(detail.total_inventory)} />
+                  <InfoStat label="Có thể bán" value={String(detail.available_quantity)} />
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-[#404754]">{label}</p>
+      <p className="text-base font-semibold text-[#0d1d29]">{value}</p>
+    </div>
   );
 }
 
@@ -975,6 +1212,8 @@ interface ProductSearchProps {
   productResults: Product[];
   productHighlight: number;
   productInputRef: React.RefObject<HTMLInputElement | null>;
+  priceTier: PriceTier;
+  onPriceTierChange: (t: PriceTier) => void;
   onSearchChange: (v: string) => void;
   onPick: (p: Product) => void;
   onHighlight: (n: number) => void;
@@ -989,6 +1228,8 @@ function ProductSearch({
   productResults,
   productHighlight,
   productInputRef,
+  priceTier,
+  onPriceTierChange,
   onSearchChange,
   onPick,
   onHighlight,
@@ -1003,8 +1244,8 @@ function ProductSearch({
   useEscape(showDropdown, dismiss);
 
   return (
-    <div ref={wrapperRef} className="p-4 border-b border-[#c0c6d6]">
-      <div className="relative">
+    <div className="p-4 border-b border-[#c0c6d6] flex items-center gap-2">
+      <div ref={wrapperRef} className="relative flex-1">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#404754]" />
         <input
           ref={productInputRef}
@@ -1080,6 +1321,52 @@ function ProductSearch({
           </div>
         ) : null}
       </div>
+      <PriceTierDropdown value={priceTier} onChange={onPriceTierChange} />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PriceTierDropdown — chọn bảng giá áp dụng cho đơn (vốn/sĩ/lẻ), đặt cạnh ô
+// tìm sản phẩm. Đổi bảng giá sẽ re-price các dòng CHƯA sửa giá tay (xem
+// handlePriceTierChange) và làm giá mặc định cho sản phẩm thêm mới sau đó.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PriceTierDropdown({ value, onChange }: { value: PriceTier; onChange: (t: PriceTier) => void }) {
+  const [open, setOpen] = useState(false);
+  const dismiss = useCallback(() => setOpen(false), []);
+  const ref = useDismiss(open, dismiss);
+  useEscape(open, dismiss);
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 px-3 py-2 border border-[#717785] rounded text-sm text-[#0d1d29] hover:bg-[#ebf5ff] transition-colors whitespace-nowrap"
+      >
+        {TIER_LABELS[value]}
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <div className="absolute z-30 right-0 top-full mt-1 bg-white border border-[#c0c6d6] rounded shadow-xl w-44">
+          {(["retail", "wholesale", "cost"] as PriceTier[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
+                onChange(t);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-[#ebf5ff] ${
+                value === t ? "text-[#005baf] font-semibold bg-[#f6f9ff]" : "text-[#0d1d29]"
+              }`}
+            >
+              {TIER_LABELS[t]}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

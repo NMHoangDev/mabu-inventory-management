@@ -68,6 +68,8 @@ interface PosCartItem {
   quantity: number;
 }
 
+type DiscountType = "amount" | "percent";
+
 interface PosTab {
   id: string;
   label: string;
@@ -76,9 +78,16 @@ interface PosTab {
   isShipping: boolean;
   shippingFee: number;
   discount: number;
+  discountType?: DiscountType;
   note: string;
   paymentMethod: PaymentMethod;
   amountReceived: number;
+}
+
+// Chiết khấu TỔNG ĐƠN — value hoặc %, clamp về [0, base] để không ra số âm.
+function orderDiscountAmount(base: number, discountType: DiscountType, discountValue: number): number {
+  const raw = discountType === "percent" ? (base * discountValue) / 100 : discountValue;
+  return Math.min(base, Math.max(0, raw));
 }
 
 const STORAGE_KEY = "pos_tabs_v1";
@@ -120,6 +129,7 @@ function newTab(label: string): PosTab {
     isShipping: false,
     shippingFee: 0,
     discount: 0,
+    discountType: "amount",
     note: "",
     paymentMethod: "cash",
     amountReceived: 0
@@ -394,7 +404,9 @@ export default function PosPage() {
     [activeTab.cart]
   );
   const shippingFee = activeTab.isShipping ? activeTab.shippingFee : 0;
-  const total = Math.max(0, subtotal - activeTab.discount + shippingFee);
+  const discountType: DiscountType = activeTab.discountType ?? "amount";
+  const discountAmount = orderDiscountAmount(subtotal, discountType, activeTab.discount);
+  const total = Math.max(0, subtotal - discountAmount + shippingFee);
   const changeDue = Math.max(0, activeTab.amountReceived - total);
 
   // ── Quick picker (F10) — top sản phẩm hay bán, dùng lại ranking
@@ -443,6 +455,7 @@ export default function PosPage() {
           staff: staffName,
           note: activeTab.note,
           discount: activeTab.discount,
+          discount_type: discountType,
           shipping_fee: shippingFee,
           paid: paidNow,
           items: activeTab.cart.map((c) => ({
@@ -1091,15 +1104,31 @@ export default function PosPage() {
             </div>
             <div className="flex justify-between items-center text-gray-600">
               <span>Chiết khấu (F6)</span>
-              <input
-                ref={discountInputRef}
-                type="text"
-                value={activeTab.discount || ""}
-                onChange={(e) => updateActiveTab({ discount: parseNum(e.target.value) })}
-                onFocus={(e) => e.target.select()}
-                className="w-24 border-b border-gray-200 text-right focus:outline-none focus:border-blue-500"
-              />
+              <div className="inline-flex items-center gap-1 justify-end">
+                <input
+                  ref={discountInputRef}
+                  type="text"
+                  value={activeTab.discount || ""}
+                  onChange={(e) => updateActiveTab({ discount: parseNum(e.target.value) })}
+                  onFocus={(e) => e.target.select()}
+                  className="w-20 border-b border-gray-200 text-right focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => updateActiveTab({ discountType: discountType === "percent" ? "amount" : "percent" })}
+                  title="Đổi đơn vị chiết khấu (số tiền / phần trăm)"
+                  className="w-7 shrink-0 px-1.5 py-1 rounded text-[10px] font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                >
+                  {discountType === "percent" ? "%" : "đ"}
+                </button>
+              </div>
             </div>
+            {discountAmount > 0 ? (
+              <div className="flex justify-between items-center text-gray-600">
+                <span>Giảm giá</span>
+                <span className="font-medium text-red-600">-{formatCurrencyVND(discountAmount)}</span>
+              </div>
+            ) : null}
             <div className="flex justify-between items-center font-bold text-lg pt-4 border-t border-gray-100">
               <span className="text-blue-700 uppercase">Khách phải trả</span>
               <span className="text-blue-700">{formatCurrencyVND(total)}</span>

@@ -204,6 +204,10 @@ export function CustomerFormModal({ open, onClose, onSuccess, initialData, group
       setError("Tên khách hàng là bắt buộc.");
       return;
     }
+    if (!form.group_id) {
+      setError("Vui lòng chọn nhóm khách hàng.");
+      return;
+    }
     setSaving(true);
     setError("");
 
@@ -312,7 +316,9 @@ export function CustomerFormModal({ open, onClose, onSuccess, initialData, group
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Nhóm khách hàng</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Nhóm khách hàng <span className="text-red-500">*</span>
+                    </label>
                     <select
                       value={form.group_id}
                       onChange={(e) => setForm((f) => ({ ...f, group_id: e.target.value }))}

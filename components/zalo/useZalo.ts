@@ -853,18 +853,14 @@ export function useZalo() {
 
   // ── Broadcast ───────────────────────────────────────────────────────────
   const sendBroadcast = useCallback(
-    async (messagesOrContent: string | string[], targets: ZaloBroadcastTarget[]) => {
-      // Chuẩn hoá input: chấp nhận cả string[] (mới) và string (backward-compat
-      // nếu callback cũ truyền 1 content đơn). Loại bỏ message rỗng.
-      const messages = (Array.isArray(messagesOrContent)
-        ? messagesOrContent
-        : [messagesOrContent]
-      )
-        .map((m) => String(m || "").trim())
-        .filter((m) => m.length > 0);
+    async (rawMessages: Array<{ text: string; files?: File[] }>, targets: ZaloBroadcastTarget[]) => {
+      // Loại bỏ message rỗng (không có text VÀ không có file đính kèm).
+      const messages = rawMessages
+        .map((m) => ({ text: String(m.text || "").trim(), files: m.files ?? [] }))
+        .filter((m) => m.text.length > 0 || m.files.length > 0);
 
       if (messages.length === 0) {
-        showToast("Vui lòng nhập nội dung", false);
+        showToast("Vui lòng nhập nội dung hoặc đính kèm ảnh/file", false);
         return null;
       }
       if (targets.length === 0) {
@@ -873,11 +869,8 @@ export function useZalo() {
       }
       setBroadcasting(true);
       try {
-        // Gửi kèm `messages` để backend loop qua từng message. Vẫn giữ
-        // `content` = message đầu tiên cho backend legacy chỉ đọc content.
         const res = await zaloApi.sendBroadcast({
           messages,
-          content: messages[0],
           targets,
         }, accountIdRef.current);
         setBroadcastCampaignId(res.campaign_id);

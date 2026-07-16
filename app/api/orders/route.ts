@@ -55,6 +55,8 @@ const itemSchema = z.object({
   image_url: z.string().optional(),
   quantity: z.number().int().min(1),
   unit_price: z.number().min(0),
+  discount_type: z.enum(["amount", "percent"]).optional(),
+  discount_value: z.number().min(0).optional(),
 });
 
 const createSchema = z.object({
@@ -70,6 +72,7 @@ const createSchema = z.object({
   staff: z.string().optional(),
   note: z.string().optional(),
   discount: z.number().min(0).optional(),
+  discount_type: z.enum(["amount", "percent"]).optional(),
   shipping_fee: z.number().min(0).optional(),
   paid: z.number().min(0).optional(),
   items: z.array(itemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm."),

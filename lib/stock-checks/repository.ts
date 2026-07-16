@@ -1,6 +1,7 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { applyInventoryLevelDelta } from "../inventory/receipts";
+import { recordStockMovement } from "../inventory/stock-movements";
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -312,6 +313,12 @@ async function applyStockCheckVariance(
   stockCheckCode: string
 ): Promise<{ stockApplied: boolean }> {
   let stockApplied = false;
+  const headerRes = await client.query(
+    `select staff, branch from stock_checks where id = $1::uuid`,
+    [stockCheckId]
+  );
+  const checkStaff = headerRes.rows[0]?.staff ?? "";
+  const checkBranch = headerRes.rows[0]?.branch ?? "";
   const itemsRes = await client.query(
     `select id, product_id, variance, stock_applied_at
        from stock_check_items
@@ -332,12 +339,13 @@ async function applyStockCheckVariance(
       continue;
     }
 
-    await client.query(
+    const stockRes = await client.query(
       `update products
           set stock = greatest(0, coalesce(stock, 0) + $2),
               stock_updated_at = now(),
               updated_at = now()
-        where id = $1`,
+        where id = $1
+        returning stock`,
       [productId, delta]
     );
     await applyInventoryLevelDelta(
@@ -346,6 +354,17 @@ async function applyStockCheckVariance(
       delta,
       `(Kiểm kê ${stockCheckCode} · item ${String(item.id).slice(0, 8)})`
     );
+    await recordStockMovement(client, {
+      productId,
+      movementType: "stock_check",
+      quantityChange: delta,
+      resultingStock: Number(stockRes.rows[0]?.stock ?? 0),
+      referenceTable: "stock_checks",
+      referenceId: stockCheckId,
+      referenceCode: stockCheckCode,
+      staff: checkStaff,
+      branch: checkBranch,
+    });
     await client.query(
       `update stock_check_items set stock_applied_at = now() where id = $1`,
       [String(item.id)]

@@ -54,7 +54,7 @@ const createSchema = z.object({
   website: z.string().optional(),
   description: z.string().optional(),
   tags: z.array(z.string()).default([]),
-  group_id: z.string().optional(),
+  group_id: z.string().min(1, "Vui lòng chọn nhóm khách hàng."),
   assigner_id: z.string().optional(),
   addresses: z
     .array(

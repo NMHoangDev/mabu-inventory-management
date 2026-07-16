@@ -1,6 +1,7 @@
 import { ensureDatabase } from "../db/migration";
 import { getPool, isDatabaseConfigured, logActivity } from "../db/connection";
 import { applyInventoryLevelDelta } from "../inventory/receipts";
+import { recordStockMovement } from "../inventory/stock-movements";
 import { runTrigger, type RuleTrigger } from "../automations/engine";
 
 function fireAutomation(trigger: RuleTrigger, payload: Record<string, any>) {
@@ -18,6 +19,8 @@ export type OrderSource = "store" | "facebook" | "website" | "zalo" | "other" | 
 // có thể "paid" ngay cả khi fulfillment_status còn "unshipped" (chưa giao).
 export type PaymentMethod = "cod" | "bank_transfer" | "card" | "cash";
 
+export type DiscountType = "amount" | "percent";
+
 export interface OrderItem {
   id: string;
   product_id: string | null;
@@ -27,6 +30,8 @@ export interface OrderItem {
   image_url: string;
   quantity: number;
   unit_price: number;
+  discount_type: DiscountType;
+  discount_value: number;
   line_total: number;
 }
 
@@ -46,6 +51,7 @@ export interface Order {
   note: string;
   subtotal: number;
   discount: number;
+  discount_type: DiscountType;
   shipping_fee: number;
   total: number;
   paid: number;
@@ -62,6 +68,29 @@ export interface OrderItemInput {
   image_url?: string;
   quantity: number;
   unit_price: number;
+  discount_type?: DiscountType;
+  discount_value?: number;
+}
+
+// Chiết khấu từng dòng sản phẩm — discount_value là số người dùng nhập
+// (đ hoặc %, tuỳ discount_type), clamp về [0, thành tiền gốc] để không cho
+// ra line_total âm.
+export function lineItemDiscountAmount(quantity: number, unitPrice: number, discountType: DiscountType, discountValue: number): number {
+  const base = quantity * unitPrice;
+  const raw = discountType === "percent" ? (base * discountValue) / 100 : discountValue;
+  return Math.min(base, Math.max(0, raw));
+}
+
+export function lineItemTotal(quantity: number, unitPrice: number, discountType: DiscountType, discountValue: number): number {
+  return Math.max(0, quantity * unitPrice - lineItemDiscountAmount(quantity, unitPrice, discountType, discountValue));
+}
+
+// Chiết khấu tổng đơn (order-level, khác chiết khấu từng dòng ở trên) —
+// discountValue là số người dùng nhập (đ hoặc %, tuỳ discountType), tính
+// trên `base` = subtotal đã trừ chiết khấu từng dòng, clamp về [0, base].
+export function orderDiscountAmount(base: number, discountType: DiscountType, discountValue: number): number {
+  const raw = discountType === "percent" ? (base * discountValue) / 100 : discountValue;
+  return Math.min(base, Math.max(0, raw));
 }
 
 export interface OrderInput {
@@ -77,6 +106,7 @@ export interface OrderInput {
   staff?: string;
   note?: string;
   discount?: number;
+  discount_type?: DiscountType;
   shipping_fee?: number;
   paid?: number;
   items?: OrderItemInput[];
@@ -107,6 +137,7 @@ function rowToOrder(row: any, items: OrderItem[] = []): Order {
     note: row.note,
     subtotal: Number(row.subtotal ?? 0),
     discount: Number(row.discount ?? 0),
+    discount_type: row.discount_type === "percent" ? "percent" : "amount",
     shipping_fee: Number(row.shipping_fee ?? 0),
     total: Number(row.total ?? 0),
     paid: Number(row.paid ?? 0),
@@ -126,28 +157,65 @@ function rowToItem(row: any): OrderItem {
     image_url: row.image_url,
     quantity: Number(row.quantity ?? 0),
     unit_price: Number(row.unit_price ?? 0),
+    discount_type: row.discount_type === "percent" ? "percent" : "amount",
+    discount_value: Number(row.discount_value ?? 0),
     line_total: Number(row.line_total ?? 0),
   };
+}
+
+// Context của đơn hàng đang gây ra thay đổi tồn kho — dùng để ghi lại
+// "bán cho ai / đơn nào" vào stock_movements (tab "Lịch sử kho").
+interface OrderStockContext {
+  orderId: string;
+  code: string;
+  customerName?: string;
+  staff?: string;
+  branch?: string;
 }
 
 // ── Trừ/hoàn tồn kho khi đơn hàng chuyển sang/ra khỏi "completed" ───────────
 // Mirror transitionGoodsReceiptStatus (lib/inventory/receipts.ts): cập nhật
 // cả products.stock (denormalized, dùng cho dashboard/báo cáo) lẫn
-// inventory_levels (nguồn UI "Khả dụng" ở /products) qua applyInventoryLevelDelta.
-async function deductStockForItem(client: any, productId: string, qty: number, logTag: string) {
-  await client.query(
-    `update products set stock = greatest(0, coalesce(stock, 0) - $2), stock_updated_at = now(), updated_at = now() where id = $1`,
+// inventory_levels (nguồn UI "Khả dụng" ở /products) qua applyInventoryLevelDelta,
+// đồng thời ghi 1 dòng stock_movements để tab "Lịch sử kho" hiển thị được.
+async function deductStockForItem(client: any, productId: string, qty: number, logTag: string, ctx: OrderStockContext) {
+  const res = await client.query(
+    `update products set stock = greatest(0, coalesce(stock, 0) - $2), stock_updated_at = now(), updated_at = now() where id = $1 returning stock`,
     [productId, qty]
   );
   await applyInventoryLevelDelta(client, productId, -qty, logTag);
+  await recordStockMovement(client, {
+    productId,
+    movementType: "order_sale",
+    quantityChange: -qty,
+    resultingStock: Number(res.rows[0]?.stock ?? 0),
+    referenceTable: "orders",
+    referenceId: ctx.orderId,
+    referenceCode: ctx.code,
+    customerName: ctx.customerName,
+    staff: ctx.staff,
+    branch: ctx.branch,
+  });
 }
 
-async function restoreStockForItem(client: any, productId: string, qty: number, logTag: string) {
-  await client.query(
-    `update products set stock = coalesce(stock, 0) + $2, stock_updated_at = now(), updated_at = now() where id = $1`,
+async function restoreStockForItem(client: any, productId: string, qty: number, logTag: string, ctx: OrderStockContext) {
+  const res = await client.query(
+    `update products set stock = coalesce(stock, 0) + $2, stock_updated_at = now(), updated_at = now() where id = $1 returning stock`,
     [productId, qty]
   );
   await applyInventoryLevelDelta(client, productId, qty, logTag);
+  await recordStockMovement(client, {
+    productId,
+    movementType: "order_restore",
+    quantityChange: qty,
+    resultingStock: Number(res.rows[0]?.stock ?? 0),
+    referenceTable: "orders",
+    referenceId: ctx.orderId,
+    referenceCode: ctx.code,
+    customerName: ctx.customerName,
+    staff: ctx.staff,
+    branch: ctx.branch,
+  });
 }
 
 async function generateOrderCode(): Promise<string> {
@@ -316,9 +384,16 @@ export async function createOrder(input: OrderInput): Promise<Order> {
 
     const code = await generateOrderCode();
     const subtotal = (input.items ?? []).reduce((s, it) => s + it.quantity * it.unit_price, 0);
+    const itemDiscountTotal = (input.items ?? []).reduce(
+      (s, it) => s + lineItemDiscountAmount(it.quantity, it.unit_price, it.discount_type ?? "amount", it.discount_value ?? 0),
+      0
+    );
+    const discountType: DiscountType = input.discount_type ?? "amount";
     const discount = input.discount ?? 0;
     const shippingFee = input.shipping_fee ?? 0;
-    const total = Math.max(0, subtotal - discount + shippingFee);
+    const discountBase = Math.max(0, subtotal - itemDiscountTotal);
+    const discountAmount = orderDiscountAmount(discountBase, discountType, discount);
+    const total = Math.max(0, discountBase - discountAmount + shippingFee);
     const paid = input.paid ?? 0;
 
     const paymentStatus: PaymentStatus =
@@ -329,9 +404,9 @@ export async function createOrder(input: OrderInput): Promise<Order> {
         code, customer_id, customer_name, customer_phone,
         status, payment_status, fulfillment_status, payment_method,
         source, branch, staff, note,
-        subtotal, discount, shipping_fee, total, paid,
+        subtotal, discount, discount_type, shipping_fee, total, paid,
         created_at, updated_at
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),now())
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now(),now())
       returning *`,
       [
         code,
@@ -348,6 +423,7 @@ export async function createOrder(input: OrderInput): Promise<Order> {
         input.note ?? "",
         subtotal,
         discount,
+        discountType,
         shippingFee,
         total,
         paid,
@@ -358,12 +434,14 @@ export async function createOrder(input: OrderInput): Promise<Order> {
     const items: OrderItem[] = [];
     let pos = 1;
     for (const it of input.items ?? []) {
-      const lineTotal = it.quantity * it.unit_price;
+      const discountType = it.discount_type ?? "amount";
+      const discountValue = it.discount_value ?? 0;
+      const lineTotal = lineItemTotal(it.quantity, it.unit_price, discountType, discountValue);
       const itemRes = await client.query(
         `insert into order_items (
           order_id, product_id, product_name, product_sku, unit, image_url,
-          quantity, unit_price, line_total, position, created_at
-        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+          quantity, unit_price, discount_type, discount_value, line_total, position, created_at
+        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
         returning *`,
         [
           order.id,
@@ -374,6 +452,8 @@ export async function createOrder(input: OrderInput): Promise<Order> {
           it.image_url ?? "",
           it.quantity,
           it.unit_price,
+          discountType,
+          discountValue,
           lineTotal,
           pos++,
         ]
@@ -384,9 +464,16 @@ export async function createOrder(input: OrderInput): Promise<Order> {
     // Trừ tồn kho ngay nếu đơn được tạo với status "completed" (nút "Thanh
     // toán (F10)" ở trang tạo đơn) — mirror transitionGoodsReceiptStatus.
     if (order.status === "completed") {
+      const ctx: OrderStockContext = {
+        orderId: order.id,
+        code,
+        customerName: order.customer_name,
+        staff: order.staff,
+        branch: order.branch,
+      };
       for (const it of items) {
         if (!it.product_id || it.quantity <= 0) continue;
-        await deductStockForItem(client, it.product_id, it.quantity, `(Đơn ${code})`);
+        await deductStockForItem(client, it.product_id, it.quantity, `(Đơn ${code})`, ctx);
         await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
       }
     }
@@ -463,18 +550,27 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
     // đó vẫn "completed", sẽ trừ lại đúng số lượng mới ở cuối hàm — tránh
     // cộng dồn/lệch khi user chỉnh số lượng của 1 đơn đã hoàn tất.
     const existingItemsRes = await client.query(
-      `select id, product_id, quantity from order_items where order_id = $1`,
+      `select id, product_id, quantity, unit_price, line_total from order_items where order_id = $1`,
       [id]
     );
     const existingItems = existingItemsRes.rows as Array<{
       id: string;
       product_id: string | null;
       quantity: number;
+      unit_price: number;
+      line_total: number;
     }>;
+    const stockCtx: OrderStockContext = {
+      orderId: id,
+      code: existing.code,
+      customerName: input.customer_name ?? existing.customer_name,
+      staff: input.staff ?? existing.staff,
+      branch: input.branch ?? existing.branch,
+    };
     if (wasCompleted) {
       for (const it of existingItems) {
         if (!it.product_id || Number(it.quantity) <= 0) continue;
-        await restoreStockForItem(client, it.product_id, Number(it.quantity), `(sửa đơn ${existing.code})`);
+        await restoreStockForItem(client, it.product_id, Number(it.quantity), `(sửa đơn ${existing.code})`, stockCtx);
       }
     }
 
@@ -485,9 +581,18 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
     const subtotal = input.items
       ? input.items.reduce((s, it) => s + it.quantity * it.unit_price, 0)
       : Number(existing.subtotal);
+    const itemDiscountTotal = input.items
+      ? input.items.reduce(
+          (s, it) => s + lineItemDiscountAmount(it.quantity, it.unit_price, it.discount_type ?? "amount", it.discount_value ?? 0),
+          0
+        )
+      : existingItems.reduce((s, it) => s + (Number(it.quantity) * Number(it.unit_price) - Number(it.line_total)), 0);
+    const discountType: DiscountType = input.discount_type ?? (existing.discount_type === "percent" ? "percent" : "amount");
     const discount = input.discount ?? Number(existing.discount);
     const shippingFee = input.shipping_fee ?? Number(existing.shipping_fee);
-    const total = Math.max(0, subtotal - discount + shippingFee);
+    const discountBase = Math.max(0, subtotal - itemDiscountTotal);
+    const discountAmount = orderDiscountAmount(discountBase, discountType, discount);
+    const total = Math.max(0, discountBase - discountAmount + shippingFee);
     const paid = input.paid ?? Number(existing.paid);
     const paymentStatus: PaymentStatus =
       input.payment_status ?? (paid >= total && total > 0 ? "paid" : paid > 0 ? "partial" : "unpaid");
@@ -507,9 +612,10 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
         note = $12,
         subtotal = $13,
         discount = $14,
-        shipping_fee = $15,
-        total = $16,
-        paid = $17,
+        discount_type = $15,
+        shipping_fee = $16,
+        total = $17,
+        paid = $18,
         updated_at = now()
        where id = $1`,
       [
@@ -527,6 +633,7 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
         input.note ?? existing.note,
         subtotal,
         discount,
+        discountType,
         shippingFee,
         total,
         paid,
@@ -539,12 +646,14 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
       const inserted: Array<{ id: string; product_id: string | null; quantity: number }> = [];
       let pos = 1;
       for (const it of input.items) {
-        const lineTotal = it.quantity * it.unit_price;
+        const discountType = it.discount_type ?? "amount";
+        const discountValue = it.discount_value ?? 0;
+        const lineTotal = lineItemTotal(it.quantity, it.unit_price, discountType, discountValue);
         const itemRes = await client.query(
           `insert into order_items (
             order_id, product_id, product_name, product_sku, unit, image_url,
-            quantity, unit_price, line_total, position, created_at
-          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+            quantity, unit_price, discount_type, discount_value, line_total, position, created_at
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
           returning id, product_id, quantity`,
           [
             id,
@@ -555,6 +664,8 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
             it.image_url ?? "",
             it.quantity,
             it.unit_price,
+            discountType,
+            discountValue,
             lineTotal,
             pos++,
           ]
@@ -567,7 +678,7 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
     if (resultStatus === "completed") {
       for (const it of finalItems) {
         if (!it.product_id || Number(it.quantity) <= 0) continue;
-        await deductStockForItem(client, it.product_id, Number(it.quantity), `(sửa đơn ${existing.code})`);
+        await deductStockForItem(client, it.product_id, Number(it.quantity), `(sửa đơn ${existing.code})`, stockCtx);
         await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
       }
     } else if (wasCompleted && !input.items) {
@@ -618,7 +729,10 @@ export async function transitionOrderStatus(input: {
   try {
     await client.query("begin");
 
-    const orderRes = await client.query(`select id, code, status from orders where id = $1`, [input.orderId]);
+    const orderRes = await client.query(
+      `select id, code, status, customer_name, staff, branch from orders where id = $1`,
+      [input.orderId]
+    );
     if (orderRes.rows.length === 0) {
       await client.query("rollback");
       return { success: false, message: "Không tìm thấy đơn hàng." };
@@ -626,6 +740,13 @@ export async function transitionOrderStatus(input: {
     const order = orderRes.rows[0];
     const cur: OrderStatus = order.status;
     const next = input.nextStatus;
+    const ctx: OrderStockContext = {
+      orderId: order.id,
+      code: order.code,
+      customerName: order.customer_name,
+      staff: order.staff,
+      branch: order.branch,
+    };
 
     if (cur !== next) {
       if (next === "completed") {
@@ -636,7 +757,7 @@ export async function transitionOrderStatus(input: {
         for (const it of itemsRes.rows) {
           if (it.stock_deducted_at) continue;
           if (!it.product_id || Number(it.quantity) <= 0) continue;
-          await deductStockForItem(client, it.product_id, Number(it.quantity), `(Đơn ${order.code})`);
+          await deductStockForItem(client, it.product_id, Number(it.quantity), `(Đơn ${order.code})`, ctx);
           await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
         }
       } else if (cur === "completed") {
@@ -647,7 +768,7 @@ export async function transitionOrderStatus(input: {
         );
         for (const it of itemsRes.rows) {
           if (!it.product_id || Number(it.quantity) <= 0) continue;
-          await restoreStockForItem(client, it.product_id, Number(it.quantity), `(rollback đơn ${order.code})`);
+          await restoreStockForItem(client, it.product_id, Number(it.quantity), `(rollback đơn ${order.code})`, ctx);
           await client.query(`update order_items set stock_deducted_at = NULL where id = $1`, [it.id]);
         }
       }
@@ -785,7 +906,7 @@ export async function confirmOrder(orderId: string): Promise<{ success: boolean;
     await client.query("begin");
 
     const orderRes = await client.query(
-      `select id, code, status, fulfillment_status from orders where id = $1`,
+      `select id, code, status, fulfillment_status, customer_name, staff, branch from orders where id = $1`,
       [orderId]
     );
     if (orderRes.rows.length === 0) {
@@ -802,6 +923,13 @@ export async function confirmOrder(orderId: string): Promise<{ success: boolean;
       return { success: false, message: `Đơn đã qua bước xử lý (đang ở "${order.fulfillment_status}").` };
     }
 
+    const ctx: OrderStockContext = {
+      orderId: order.id,
+      code: order.code,
+      customerName: order.customer_name,
+      staff: order.staff,
+      branch: order.branch,
+    };
     const itemsRes = await client.query(
       `select id, product_id, quantity, stock_deducted_at from order_items where order_id = $1`,
       [orderId]
@@ -809,7 +937,7 @@ export async function confirmOrder(orderId: string): Promise<{ success: boolean;
     for (const it of itemsRes.rows) {
       if (it.stock_deducted_at) continue;
       if (!it.product_id || Number(it.quantity) <= 0) continue;
-      await deductStockForItem(client, it.product_id, Number(it.quantity), `(Đơn ${order.code})`);
+      await deductStockForItem(client, it.product_id, Number(it.quantity), `(Đơn ${order.code})`, ctx);
       await client.query(`update order_items set stock_deducted_at = now() where id = $1`, [it.id]);
     }
 
@@ -838,23 +966,24 @@ export async function deleteOrder(id: string): Promise<boolean> {
     await client.query("begin");
     // Lấy customer_id + total + status TRƯỚC khi xóa để hoàn lại stats/tồn kho.
     const before = await client.query(
-      `select customer_id, total, status from orders where id = $1::uuid limit 1`,
+      `select customer_id, total, status, code, customer_name, staff, branch from orders where id = $1::uuid limit 1`,
       [id]
     );
     if (before.rows.length === 0) {
       await client.query("rollback");
       return false;
     }
-    const { customer_id, total, status } = before.rows[0];
+    const { customer_id, total, status, code, customer_name, staff, branch } = before.rows[0];
 
     if (status === "completed") {
       const itemsRes = await client.query(
         `select product_id, quantity from order_items where order_id = $1 and stock_deducted_at is not null`,
         [id]
       );
+      const ctx: OrderStockContext = { orderId: id, code, customerName: customer_name, staff, branch };
       for (const it of itemsRes.rows) {
         if (!it.product_id || Number(it.quantity) <= 0) continue;
-        await restoreStockForItem(client, it.product_id, Number(it.quantity), `(xoá đơn ${id})`);
+        await restoreStockForItem(client, it.product_id, Number(it.quantity), `(xoá đơn ${id})`, ctx);
       }
     }
 

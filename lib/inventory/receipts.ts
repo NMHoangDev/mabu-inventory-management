@@ -1,6 +1,7 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { cleanInvoiceProductName, parseNumeric } from "../shared/format";
+import { recordStockMovement } from "./stock-movements";
 
 // ──────────────────────────────────────────────────────────────────────
 // SKU auto-generation helpers
@@ -229,15 +230,27 @@ export async function autoCreateReceiptFromInvoiceRows(
 
       // Update products.stock + last_restocked_at + preferred_supplier
       if (item.product_id) {
-        await client.query(
+        const stockRes = await client.query(
           `update products
               set stock = coalesce(stock, 0) + $2,
                   last_restocked_at = now(),
                   stock_updated_at = now(),
                   preferred_supplier = coalesce(nullif(preferred_supplier, ''), $3)
-            where id = $1`,
+            where id = $1
+            returning stock`,
           [item.product_id, item.quantity, supplierName]
         );
+        await recordStockMovement(client, {
+          productId: item.product_id,
+          movementType: "stock_receipt",
+          quantityChange: item.quantity,
+          resultingStock: Number(stockRes.rows[0]?.stock ?? 0),
+          referenceTable: "stock_receipts",
+          referenceId: header.id,
+          referenceCode: code,
+          staff: header.staff,
+          branch: header.branch,
+        });
       }
     }
 
@@ -331,14 +344,26 @@ export async function createStockReceipt(input: StockReceiptInput): Promise<{ re
       itemRows.push(rowToItem(r.rows[0]));
 
       if (productId) {
-        await client.query(
+        const stockRes = await client.query(
           `update products
               set stock = coalesce(stock, 0) + $2,
                   last_restocked_at = now(),
                   stock_updated_at = now()
-            where id = $1`,
+            where id = $1
+            returning stock`,
           [productId, Number(it.quantity || 0)]
         );
+        await recordStockMovement(client, {
+          productId,
+          movementType: "stock_receipt",
+          quantityChange: Number(it.quantity || 0),
+          resultingStock: Number(stockRes.rows[0]?.stock ?? 0),
+          referenceTable: "stock_receipts",
+          referenceId: header.id,
+          referenceCode: code,
+          staff: header.staff,
+          branch: header.branch,
+        });
       }
     }
 
@@ -1045,6 +1070,12 @@ export async function addStockForGoodsReceiptItems(
   goodsReceiptCode: string
 ): Promise<{ stockAdded: boolean }> {
   let stockAdded = false;
+  const grHeaderRes = await client.query(
+    `select staff, branch from goods_receipts where id = $1::uuid`,
+    [goodsReceiptId]
+  );
+  const grStaff = grHeaderRes.rows[0]?.staff ?? "";
+  const grBranch = grHeaderRes.rows[0]?.branch ?? "";
   const itemsRes = await client.query(
     `select gri.id, gri.product_id, gri.received_qty, gri.sku, gri.product_name,
             gri.purchase_order_item_id, gri.unit_cost, gri.stock_added_at
@@ -1102,13 +1133,14 @@ export async function addStockForGoodsReceiptItems(
     const qty = Number(item.received_qty ?? 0);
     if (qty <= 0) continue;
 
-    await client.query(
+    const stockRes = await client.query(
       `update products
           set stock = coalesce(stock, 0) + $2,
               last_restocked_at = now(),
               stock_updated_at = now(),
               updated_at = now()
-        where id = $1`,
+        where id = $1
+        returning stock`,
       [productId, qty]
     );
     // Đồng bộ sang inventory_levels để UI "Khả dụng" thấy tồn kho.
@@ -1118,6 +1150,17 @@ export async function addStockForGoodsReceiptItems(
       qty,
       `(GR ${goodsReceiptCode} · item ${String(item.id).slice(0, 8)})`
     );
+    await recordStockMovement(client, {
+      productId,
+      movementType: "goods_receipt",
+      quantityChange: qty,
+      resultingStock: Number(stockRes.rows[0]?.stock ?? 0),
+      referenceTable: "goods_receipts",
+      referenceId: goodsReceiptId,
+      referenceCode: goodsReceiptCode,
+      staff: grStaff,
+      branch: grBranch,
+    });
     await client.query(
       `update goods_receipt_items set stock_added_at = now() where id = $1`,
       [String(item.id)]
@@ -1146,7 +1189,7 @@ export async function transitionGoodsReceiptStatus(input: {
     await client.query("begin");
 
     const grRes = await client.query(
-      `select id, receipt_status, purchase_order_id, code
+      `select id, receipt_status, purchase_order_id, code, staff, branch
          from goods_receipts where id = $1::uuid`,
       [input.goodsReceiptId]
     );
@@ -1230,6 +1273,17 @@ export async function transitionGoodsReceiptStatus(input: {
           -qty,
           `(rollback GR ${String(gr.code)} · item ${String(item.id).slice(0, 8)})`
         );
+        await recordStockMovement(client, {
+          productId,
+          movementType: "goods_receipt_reverse",
+          quantityChange: -qty,
+          resultingStock: remaining,
+          referenceTable: "goods_receipts",
+          referenceId: input.goodsReceiptId,
+          referenceCode: String(gr.code),
+          staff: gr.staff,
+          branch: gr.branch,
+        });
 
         await client.query(
           `update goods_receipt_items set stock_added_at = NULL where id = $1`,

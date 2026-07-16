@@ -27,6 +27,14 @@ import {
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
 
+type DiscountType = "amount" | "percent";
+
+// Chiết khấu TỔNG ĐƠN — value hoặc %, clamp về [0, base] để không ra số âm.
+function orderDiscountAmount(base: number, discountType: DiscountType, discountValue: number): number {
+  const raw = discountType === "percent" ? (base * discountValue) / 100 : discountValue;
+  return Math.min(base, Math.max(0, raw));
+}
+
 interface Product {
   id: string;
   name: string;
@@ -91,6 +99,7 @@ export default function EditOrderPage() {
   const [note, setNote] = useState("");
 
   const [discount, setDiscount] = useState(0);
+  const [discountType, setDiscountType] = useState<DiscountType>("amount");
   const [shippingFee, setShippingFee] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "card">("cash");
 
@@ -113,6 +122,7 @@ export default function EditOrderPage() {
         setStaff(order.staff || "");
         setNote(order.note || "");
         setDiscount(order.discount || 0);
+        setDiscountType(order.discount_type === "percent" ? "percent" : "amount");
         setShippingFee(order.shipping_fee || 0);
         if (order.created_at) {
           const d = new Date(order.created_at);
@@ -216,7 +226,11 @@ export default function EditOrderPage() {
   };
 
   const subtotal = useMemo(() => cart.reduce((s, c) => s + c.quantity * c.unit_price, 0), [cart]);
-  const total = useMemo(() => Math.max(0, subtotal - discount + shippingFee), [subtotal, discount, shippingFee]);
+  const discountAmount = useMemo(
+    () => orderDiscountAmount(subtotal, discountType, discount),
+    [subtotal, discountType, discount]
+  );
+  const total = useMemo(() => Math.max(0, subtotal - discountAmount + shippingFee), [subtotal, discountAmount, shippingFee]);
 
   const submit = async (status: "new" | "completed") => {
     if (cart.length === 0) {
@@ -236,6 +250,7 @@ export default function EditOrderPage() {
         staff,
         note,
         discount,
+        discount_type: discountType,
         shipping_fee: shippingFee,
         paid,
         payment_status: paid >= total && total > 0 ? "paid" : "unpaid",
@@ -586,10 +601,7 @@ export default function EditOrderPage() {
           </section>
 
           {/* Promotion ticker */}
-          <div className="bg-[#0074db] text-white px-4 py-2 rounded flex items-center gap-2">
-            <Megaphone className="w-4 h-4" />
-            <span className="text-xs truncate">Đang có chương trình: Giảm 10% cho đơn hàng trên 500k</span>
-          </div>
+          
 
           {/* Payment summary */}
           <section className="bg-white border border-[#c0c6d6] rounded p-4 flex-1 flex flex-col">
@@ -603,13 +615,29 @@ export default function EditOrderPage() {
                   <span className="text-sm text-[#005baf]">Chiết khấu</span>
                   <Pencil className="w-3 h-3 text-[#005baf] opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
-                <input
-                  type="number"
-                  value={discount}
-                  onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
-                  className="w-24 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm"
-                />
+                <div className="inline-flex items-center gap-1 justify-end">
+                  <input
+                    type="number"
+                    value={discount}
+                    onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-24 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType((t) => (t === "percent" ? "amount" : "percent"))}
+                    title="Đổi đơn vị chiết khấu (số tiền / phần trăm)"
+                    className="w-7 shrink-0 px-1.5 py-1 rounded text-[10px] font-semibold bg-[#ebf5ff] text-[#005baf] hover:bg-[#d9eafa] transition-colors"
+                  >
+                    {discountType === "percent" ? "%" : "đ"}
+                  </button>
+                </div>
               </div>
+              {discountAmount > 0 ? (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-[#404754]">Giảm giá</span>
+                  <span className="text-sm font-medium text-[#ba1a1a]">-{formatCurrencyVND(discountAmount)}</span>
+                </div>
+              ) : null}
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-1 group cursor-pointer">
                   <span className="text-sm text-[#005baf]">Phí giao hàng</span>

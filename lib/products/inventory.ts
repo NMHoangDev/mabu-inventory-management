@@ -284,4 +284,74 @@ export async function getInventoryProductDetail(id: string): Promise<InventoryPr
   };
 }
 
+export type StockMovementEntry = {
+  id: string;
+  created_at: string;
+  movement_type: string;
+  action_label: string;
+  quantity_change: number;
+  resulting_stock: number;
+  reference_table: string;
+  reference_id: string;
+  reference_code: string;
+  customer_name: string;
+  staff: string;
+  branch: string;
+  note: string;
+};
+
+const MOVEMENT_LABELS: Record<string, string> = {
+  initial: "Khởi tạo",
+  order_sale: "Bán hàng",
+  order_restore: "Hoàn kho (huỷ đơn)",
+  goods_receipt: "Nhập kho",
+  goods_receipt_reverse: "Hoàn nhập kho",
+  stock_check: "Kiểm kho",
+  stock_receipt: "Nhập kho (khác)",
+};
+
+// Nguồn: cột reference_table trên stock_movements — dùng để dựng link "Xem
+// đơn hàng"/"Xem phiếu nhập" ở UI (xem tab "Lịch sử kho").
+const REFERENCE_LINK_PREFIX: Record<string, string> = {
+  orders: "/orders/",
+  goods_receipts: "/products/goods-receipts/",
+  stock_checks: "/products/stock-checks/",
+};
+
+export function referenceLinkFor(referenceTable: string, referenceId: string): string {
+  if (!referenceId) return "";
+  const prefix = REFERENCE_LINK_PREFIX[referenceTable];
+  return prefix ? `${prefix}${referenceId}` : "";
+}
+
+export async function getProductStockHistory(id: string, limit = 200): Promise<StockMovementEntry[]> {
+  if (!isDatabaseConfigured || !isUuid(id)) return [];
+  await ensureDatabase();
+  const pool = getPool();
+  const result = await pool.query(
+    `select id, created_at, movement_type, quantity_change, resulting_stock,
+            reference_table, reference_id, reference_code, customer_name, staff, branch, note
+       from stock_movements
+      where product_id = $1::uuid
+      order by created_at desc, id desc
+      limit $2`,
+    [id, limit]
+  );
+  return result.rows.map((row: any) => ({
+    id: row.id,
+    created_at: textValue(row.created_at),
+    movement_type: textValue(row.movement_type),
+    action_label: MOVEMENT_LABELS[row.movement_type] ?? textValue(row.movement_type),
+    quantity_change: numberValue(row.quantity_change),
+    resulting_stock: numberValue(row.resulting_stock),
+    reference_table: textValue(row.reference_table),
+    reference_id: textValue(row.reference_id),
+    reference_code: textValue(row.reference_code),
+    customer_name: textValue(row.customer_name),
+    staff: textValue(row.staff),
+    branch: textValue(row.branch),
+    note: textValue(row.note),
+  }));
+}
+
 
