@@ -42,6 +42,7 @@
   ],
   "exclude": [
     "node_modules",
-    "FlowScan Pro"
+    "FlowScan Pro",
+    "storefront"
   ]
 }
