@@ -368,7 +368,11 @@ export default function NewOrderPage() {
     setError("");
     setSubmitting(true);
     try {
-      const paid = status === "completed" ? total : 0;
+      // Đơn tạo từ /orders/new luôn ở trạng thái "chờ thanh toán" — thanh
+      // toán được xác nhận sau, riêng, tại trang chi tiết đơn (nút "Thanh
+      // toán ngay", xem markPaidNow() ở app/(dashboard)/orders/[id]/page.tsx).
+      // "status" completed/new chỉ quyết định có trừ kho ngay hay không,
+      // không liên quan tới đã thanh toán hay chưa.
       const payload = {
         customer_id: customer?.id ?? null,
         customer_name: customer?.name ?? "Khách lẻ",
@@ -380,8 +384,8 @@ export default function NewOrderPage() {
         discount,
         discount_type: discountType,
         shipping_fee: shippingFee,
-        paid,
-        payment_status: paid >= total && total > 0 ? "paid" : "unpaid",
+        paid: 0,
+        payment_status: "unpaid",
         fulfillment_status: "unshipped",
         payment_method: paymentMethod === "transfer" ? "bank_transfer" : paymentMethod,
         status,
