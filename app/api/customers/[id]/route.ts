@@ -31,7 +31,7 @@ const updateSchema = z.object({
   code: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().optional(),
-  gender: z.enum(["male", "female", "other"]).optional(),
+  gender: z.enum(["male", "female", "other", ""]).optional(),
   birthday: z.string().optional(),
   company: z.string().optional(),
   tax_code: z.string().optional(),
@@ -77,7 +77,10 @@ export async function PATCH(
       );
     }
 
-    const updated = await updateCustomer(id, parsed.data as CustomerInput);
+    const updated = await updateCustomer(id, {
+      ...parsed.data,
+      gender: parsed.data.gender || undefined,
+    } as CustomerInput);
     if (!updated) {
       return NextResponse.json({ error: "Customer not found." }, { status: 404 });
     }

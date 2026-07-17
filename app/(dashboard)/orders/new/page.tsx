@@ -37,6 +37,9 @@ interface Product {
   cost_price: number; // giá vốn
   wholesale_price: number; // giá sĩ
   image_url: string;
+  stock: number;
+  track_inventory: boolean;
+  allow_negative_stock: boolean;
 }
 
 interface Customer {
@@ -70,6 +73,16 @@ interface CartItem {
   discount_type: DiscountType;
   discount_value: number;
   quantity: number;
+  note: string;
+  stock: number;
+  track_inventory: boolean;
+  allow_negative_stock: boolean;
+}
+
+// Sản phẩm bị chọn số lượng vượt tồn kho — chỉ cảnh báo với SP có theo dõi tồn
+// kho (track_inventory) và KHÔNG cho phép bán âm kho (allow_negative_stock).
+function isOverStock(item: CartItem): boolean {
+  return item.track_inventory && !item.allow_negative_stock && item.quantity > item.stock;
 }
 
 // Đơn giá theo bảng giá (vốn/sĩ/lẻ) đang chọn — dùng làm mặc định trước khi
@@ -205,14 +218,24 @@ export default function NewOrderPage() {
   // của dòng vừa thêm (xem addProduct + updateQty onKeyDown).
   const qtyInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  // Ghi chú đơn hàng dùng CHUNG cho cả đơn (không phải ghi chú riêng từng sản
-  // phẩm) — icon ghi chú trên mỗi dòng chỉ để tiện cuộn/focus nhanh tới đây
-  // thay vì phải kéo xuống cuối danh sách sản phẩm.
+  // Ghi chú đơn hàng (chung cho cả đơn) — nhập ở textarea cuối danh sách SP.
   const orderNoteRef = useRef<HTMLTextAreaElement | null>(null);
-  const focusOrderNote = useCallback(() => {
-    orderNoteRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    orderNoteRef.current?.focus();
+  // Ghi chú RIÊNG từng sản phẩm (order-item) — bấm icon ghi chú cạnh tên SP
+  // để bật/tắt 1 ô input nhỏ ngay dưới tên SP đó, khác với ghi chú đơn ở trên.
+  const [noteExpandedIds, setNoteExpandedIds] = useState<Set<string>>(new Set());
+  const itemNoteInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const toggleItemNote = useCallback((productId: string) => {
+    setNoteExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+    setTimeout(() => itemNoteInputRefs.current[productId]?.focus(), 0);
   }, []);
+  const setItemNote = (productId: string, note: string) => {
+    setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, note } : c)));
+  };
 
   // ── Customer actions ───────────────────────────────────────────────────
   const pickCustomer = useCallback((c: Customer) => {
@@ -251,6 +274,10 @@ export default function NewOrderPage() {
           discount_type: "amount" as DiscountType,
           discount_value: 0,
           quantity: 1,
+          note: "",
+          stock: p.stock,
+          track_inventory: p.track_inventory,
+          allow_negative_stock: p.allow_negative_stock,
         },
       ];
     });
@@ -311,6 +338,8 @@ export default function NewOrderPage() {
     setCart((prev) => prev.filter((c) => c.product_id !== productId));
   };
 
+  const overStockItems = useMemo(() => cart.filter(isOverStock), [cart]);
+
   const subtotal = useMemo(() => cart.reduce((s, c) => s + lineBase(c), 0), [cart]);
   const itemDiscountTotal = useMemo(() => cart.reduce((s, c) => s + lineDiscountAmount(c), 0), [cart]);
   const discountBase = useMemo(() => Math.max(0, subtotal - itemDiscountTotal), [subtotal, itemDiscountTotal]);
@@ -326,6 +355,14 @@ export default function NewOrderPage() {
   const submit = async (status: "new" | "completed") => {
     if (cart.length === 0) {
       setError("Đơn hàng phải có ít nhất 1 sản phẩm.");
+      return;
+    }
+    // "Tạo đơn hàng" (completed) trừ kho ngay — chặn nếu có SP vượt tồn kho
+    // (xem isOverStock). "Lưu nháp" (new) không đụng tới kho nên không chặn.
+    if (status === "completed" && overStockItems.length > 0) {
+      setError(
+        `Vượt tồn kho: ${overStockItems.map((c) => `${c.product_name} (đặt ${c.quantity}, còn ${c.stock})`).join(", ")}.`
+      );
       return;
     }
     setError("");
@@ -358,6 +395,7 @@ export default function NewOrderPage() {
           unit_price: unitPrice(c),
           discount_type: c.discount_type,
           discount_value: c.discount_value,
+          note: c.note,
         })),
       };
       const res = await fetch("/api/orders", {
@@ -551,18 +589,38 @@ export default function NewOrderPage() {
                                 <p className="text-xs text-[#404754]">SKU: {c.product_sku || "—"}</p>
                                 <button
                                   type="button"
-                                  onClick={focusOrderNote}
-                                  title="Ghi chú đơn hàng"
-                                  className="text-[#404754] hover:text-[#005baf] transition-colors"
+                                  onClick={() => toggleItemNote(c.product_id)}
+                                  title="Ghi chú cho sản phẩm này"
+                                  className={`transition-colors ${
+                                    c.note ? "text-[#005baf]" : "text-[#404754] hover:text-[#005baf]"
+                                  }`}
                                 >
                                   <StickyNote className="w-3.5 h-3.5" />
                                 </button>
                               </div>
+                              {noteExpandedIds.has(c.product_id) ? (
+                                <input
+                                  ref={(el) => {
+                                    itemNoteInputRefs.current[c.product_id] = el;
+                                  }}
+                                  type="text"
+                                  value={c.note}
+                                  onChange={(e) => setItemNote(c.product_id, e.target.value)}
+                                  placeholder="Ghi chú cho sản phẩm này..."
+                                  className="mt-1 w-48 p-1 border border-[#c0c6d6] rounded text-xs focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] outline-none"
+                                />
+                              ) : c.note ? (
+                                <p className="mt-1 text-xs text-[#404754] italic truncate max-w-[12rem]">{c.note}</p>
+                              ) : null}
                             </div>
                           </div>
                         </td>
                         <td className="p-5 text-right">
-                          <div className="inline-flex border border-[#717785] rounded overflow-hidden">
+                          <div
+                            className={`inline-flex border rounded overflow-hidden ${
+                              isOverStock(c) ? "border-[#ba1a1a]" : "border-[#717785]"
+                            }`}
+                          >
                             <button
                               onClick={() => updateQty(c.product_id, c.quantity - 1)}
                               className="px-2 py-1 bg-[#e0f0ff] hover:bg-[#d9eafa] transition-colors text-[#0d1d29]"
@@ -596,6 +654,11 @@ export default function NewOrderPage() {
                               <Plus className="w-3 h-3" />
                             </button>
                           </div>
+                          {isOverStock(c) ? (
+                            <p className="mt-1 text-[11px] text-[#ba1a1a] font-medium whitespace-nowrap">
+                              Vượt tồn kho (còn {c.stock})
+                            </p>
+                          ) : null}
                         </td>
                         <td className="p-5 text-right">
                           <input
@@ -1160,6 +1223,7 @@ function CustomerSearch({
             const active = idx === customerHighlight;
             return (
               <button
+                key={c.id}
                 // mousedown (không phải click) + preventDefault để button nhận
                 // event trước khi input blur → tránh race condition dropdown đóng
                 // mất item. Đồng thời useDismiss ở trên cũng bỏ qua click trong

@@ -15,6 +15,7 @@ const itemSchema = z.object({
   unit_price: z.number().min(0),
   discount_type: z.enum(["amount", "percent"]).optional(),
   discount_value: z.number().min(0).optional(),
+  note: z.string().optional(),
 });
 
 const updateSchema = z.object({

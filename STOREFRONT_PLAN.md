@@ -109,6 +109,13 @@ Cần thêm để vận hành được storefront, tất cả nằm trong `(dash
 | **P3 — Theo dõi đơn hàng** | API + trang lịch sử đơn/chi tiết đơn cho khách (có kiểm tra quyền xem), trang tài khoản cá nhân | P1, P2 |
 | **P4 — Quản lý admin** | UI quản lý hiển thị sản phẩm/ảnh/SEO, quản lý tài khoản khách hàng + reset mật khẩu, lọc đơn theo nguồn, trang cấu hình website | Có thể làm song song P1–P3 |
 
+## 10. Ngoài phạm vi (chủ động không làm ở các phase trên, để tránh hiểu nhầm)
+
+- Tích hợp cổng thanh toán online thật (VNPay/Momo/ZaloPay) — v1 chỉ COD/chuyển khoản thủ công.
+- Guest checkout (đặt hàng không cần đăng nhập) — yêu cầu ban đầu là "đăng nhập để lưu vào khách hàng" nên v1 bắt buộc đăng nhập.
+- Giỏ hàng đồng bộ đa thiết bị / nhắc bỏ giỏ hàng (abandoned cart).
+- Đánh giá/review sản phẩm, chat hỗ trợ khách trên storefront.
+- Gửi email xác nhận đơn hàng (cần cấu hình SMTP/email service riêng, chưa có trong hệ thống hiện tại).
 
 ## 11. Rủi ro cần lưu ý khi triển khai
 

@@ -47,7 +47,7 @@ const createSchema = z.object({
   code: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().optional(),
-  gender: z.enum(["male", "female", "other"]).optional(),
+  gender: z.enum(["male", "female", "other", ""]).optional(),
   birthday: z.string().optional(),
   company: z.string().optional(),
   tax_code: z.string().optional(),
@@ -89,7 +89,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const customer = await createCustomer(parsed.data);
+    const customer = await createCustomer({
+      ...parsed.data,
+      gender: parsed.data.gender || undefined,
+    });
     return NextResponse.json(customer, { status: 201 });
   } catch (error) {
     console.error("POST /api/customers failed:", error);

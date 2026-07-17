@@ -1240,9 +1240,9 @@ function SummaryProductLinkModal({
   async function applyPick(product: ProductSummary) {
     setSubmitting(true);
     try {
-      // Đảm bảo SKU có chữ "SKU" ở đầu — nếu SP không có SKU thì tự tạo.
-      const rawSku = cleanInvoice(product.sku) || autoSku();
-      const sku = /^SKU/i.test(rawSku) ? rawSku : `SKU-${rawSku.replace(/^[^A-Z0-9]+/i, "")}`;
+      // Giữ nguyên mã SKU của sản phẩm đã có — không tự ý thêm tiền tố "SKU".
+      // Chỉ tự sinh mã khi sản phẩm chưa có SKU nào.
+      const sku = cleanInvoice(product.sku) || autoSku();
       // /api/products/search chỉ trả về `product.name` (từ bảng products).
       // Ưu tiên `name` trước; nếu API cũ chỉ trả legacy fields thì fallback
       // từng bước (inputProductName → retailName → adjustedInvoiceName).
@@ -1283,9 +1283,9 @@ function SummaryProductLinkModal({
     setManualError("");
     try {
       const name = cleanInvoice(manualForm.name) || cleanInvoice(row.inputProductName);
+      // Giữ nguyên mã người dùng đã nhập — không tự ý thêm tiền tố "SKU".
       let sku = cleanInvoice(manualForm.sku);
       if (!sku) sku = autoSku();
-      else if (!/^SKU/i.test(sku)) sku = `SKU-${sku}`;
       const unit = cleanInvoice(manualForm.unit);
       const price = Number(manualForm.price) || 0;
       const costPrice = Number(manualForm.costPrice) || 0;
@@ -1589,16 +1589,12 @@ function SummaryProductLinkModal({
                     type="text"
                     value={manualForm.sku}
                     onChange={(e) => setManualForm((f) => ({ ...f, sku: e.target.value }))}
-                    placeholder="SKU tự động — ví dụ: SKU-AB12CD"
+                    placeholder="Để trống sẽ tự tạo — hoặc nhập mã của bạn"
                     className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   {!cleanInvoice(manualForm.sku) ? (
                     <div className="mt-1 text-[11px] text-slate-500">
                       Sẽ tạo tự động: <span className="font-mono">{autoSku()}</span>
-                    </div>
-                  ) : !/^SKU/i.test(cleanInvoice(manualForm.sku)) ? (
-                    <div className="mt-1 text-[11px] text-amber-700">
-                      Sẽ lưu thành: <span className="font-mono">SKU-{cleanInvoice(manualForm.sku)}</span>
                     </div>
                   ) : null}
                 </div>

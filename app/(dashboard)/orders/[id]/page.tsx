@@ -35,8 +35,20 @@ interface OrderItem {
   unit: string;
   quantity: number;
   unit_price: number;
+  discount_type: "amount" | "percent";
+  discount_value: number;
   line_total: number;
   image_url?: string;
+  note?: string;
+}
+
+// Chiết khấu TỪNG SẢN PHẨM (khác chiết khấu tổng đơn order.discount) — mirror
+// lineItemDiscountAmount ở lib/orders/repository.ts (không import trực tiếp
+// vì repository.ts dùng `pg`, không bundle được cho client component).
+function itemDiscountAmount(item: OrderItem): number {
+  const base = item.quantity * item.unit_price;
+  const raw = item.discount_type === "percent" ? (base * item.discount_value) / 100 : item.discount_value;
+  return Math.min(base, Math.max(0, raw));
 }
 
 interface Order {
@@ -334,6 +346,7 @@ export default function OrderDetailPage() {
   }
 
   const remaining = Math.max(0, order.total - order.paid);
+  const itemDiscountTotal = order.items.reduce((s, item) => s + itemDiscountAmount(item), 0);
 
   return (
     <div className="flex flex-col min-h-screen bg-[#f4f6f8]">
@@ -427,10 +440,18 @@ export default function OrderDetailPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[#0d1d29]">{item.product_name}</p>
                       <p className="text-xs text-[#404754]">SKU: {item.product_sku || "—"} · {item.unit}</p>
+                      {item.note ? (
+                        <p className="text-xs text-[#404754] italic mt-0.5">Ghi chú: {item.note}</p>
+                      ) : null}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-medium text-[#0d1d29]">{formatCurrencyVND(item.unit_price)}</p>
                       <p className="text-xs text-[#404754]">× {item.quantity}</p>
+                      {itemDiscountAmount(item) > 0 && (
+                        <p className="text-xs text-green-600">
+                          -{item.discount_type === "percent" ? `${item.discount_value}%` : formatCurrencyVND(item.discount_value)}
+                        </p>
+                      )}
                     </div>
                     <div className="text-right w-28 shrink-0">
                       <p className="text-sm font-bold text-[#005baf]">{formatCurrencyVND(item.line_total)}</p>
@@ -444,9 +465,15 @@ export default function OrderDetailPage() {
                   <span>Tổng tiền sản phẩm</span>
                   <span>{formatCurrencyVND(order.subtotal)}</span>
                 </div>
+                {itemDiscountTotal > 0 && (
+                  <div className="flex justify-between text-sm text-[#404754]">
+                    <span>Chiết khấu sản phẩm</span>
+                    <span className="text-green-600">-{formatCurrencyVND(itemDiscountTotal)}</span>
+                  </div>
+                )}
                 {order.discount > 0 && (
                   <div className="flex justify-between text-sm text-[#404754]">
-                    <span>Chiết khấu</span>
+                    <span>Chiết khấu đơn</span>
                     <span className="text-green-600">-{formatCurrencyVND(order.discount)}</span>
                   </div>
                 )}

@@ -35,6 +35,9 @@ export async function GET(request: Request) {
       `select p.id, p.name, p.sku, p.unit, p.price, p.cost_price,
               coalesce(p.compare_at_price, 0) as wholesale_price,
               coalesce(pi.url, '') as image_url,
+              coalesce(p.stock, 0) as stock,
+              coalesce(p.track_inventory, true) as track_inventory,
+              coalesce(p.allow_negative_stock, false) as allow_negative_stock,
               coalesce(psu.use_count, 0) as use_count
          from products p
          left join lateral (
@@ -86,6 +89,9 @@ export async function GET(request: Request) {
       cost_price: Number(r.cost_price ?? 0),
       wholesale_price: Number(r.wholesale_price ?? 0),
       image_url: r.image_url ?? "",
+      stock: Number(r.stock ?? 0),
+      track_inventory: Boolean(r.track_inventory),
+      allow_negative_stock: Boolean(r.allow_negative_stock),
     }));
     return NextResponse.json({ products });
   } catch (error) {

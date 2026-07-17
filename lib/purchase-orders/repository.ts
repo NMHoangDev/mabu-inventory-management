@@ -392,6 +392,144 @@ export async function createPurchaseOrder(input: CreatePurchaseOrderInput): Prom
   }
 }
 
+export interface UpdatePurchaseOrderInput {
+  supplier_id?: string | null;
+  supplier_name?: string;
+  supplier_phone?: string;
+  branch?: string;
+  staff?: string;
+  expected_date?: string | null;
+  note?: string;
+  tags?: string[];
+  discount?: number;
+  tax?: number;
+  items?: PurchaseOrderItem[];
+}
+
+// Sửa tay đơn đặt hàng nhập đã tạo (nhập nhầm sản phẩm/số lượng/giá). KHÔNG
+// cho sửa items nếu đã có phiếu nhập hàng (goods_receipts) liên kết — phiếu
+// nhập đã chốt số liệu riêng lúc tạo (createGoodsReceiptFromPurchaseOrder,
+// lib/inventory/receipts.ts) và không tự đồng bộ ngược khi PO gốc đổi, sửa
+// sau đó sẽ làm lệch dữ liệu giữa PO và phiếu nhập đã tạo. Muốn sửa PO phải
+// huỷ/xoá phiếu nhập liên kết trước (ngoài phạm vi hàm này).
+export async function updatePurchaseOrder(id: string, input: UpdatePurchaseOrderInput): Promise<PurchaseOrder | null> {
+  if (!isDatabaseConfigured) return null;
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+
+    const existingRes = await client.query(`select * from purchase_orders where id = $1::uuid`, [id]);
+    if (existingRes.rows.length === 0) {
+      await client.query("rollback");
+      return null;
+    }
+    const existing = existingRes.rows[0];
+
+    if (input.items) {
+      const grRes = await client.query(
+        `select id from goods_receipts where purchase_order_id = $1::uuid limit 1`,
+        [id]
+      );
+      if (grRes.rows.length > 0) {
+        await client.query("rollback");
+        throw new Error("Đơn đặt hàng đã có phiếu nhập hàng liên kết — không thể sửa sản phẩm. Huỷ phiếu nhập trước nếu cần sửa.");
+      }
+
+      await client.query(`delete from purchase_order_items where purchase_order_id = $1::uuid`, [id]);
+
+      const items = input.items.map((it, index) => {
+        const orderedQty = num(it.ordered_qty);
+        const unitCost = num(it.unit_cost);
+        const discount = num(it.discount);
+        const lineTotal = Math.max(orderedQty * unitCost - discount, 0);
+        return {
+          ...emptyItem(),
+          ...it,
+          ordered_qty: orderedQty,
+          unit_cost: unitCost,
+          discount,
+          line_total: lineTotal,
+          position: index + 1
+        };
+      });
+
+      for (const item of items) {
+        if (!item.product_name && !item.sku) continue;
+        await client.query(
+          `insert into purchase_order_items (
+            purchase_order_id, product_id, sku, product_name, unit, image_url,
+            ordered_qty, received_qty, unit_cost, discount, line_total, position, note
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [
+            id,
+            item.product_id,
+            item.sku,
+            item.product_name,
+            item.unit,
+            item.image_url,
+            item.ordered_qty,
+            item.received_qty,
+            item.unit_cost,
+            item.discount,
+            item.line_total,
+            item.position,
+            item.note
+          ]
+        );
+      }
+
+      const subtotal = items.reduce((sum, it) => sum + num(it.ordered_qty) * num(it.unit_cost), 0);
+      const discount = input.discount != null ? num(input.discount) : num(existing.discount);
+      const tax = input.tax != null ? num(input.tax) : num(existing.tax);
+      const total = Math.max(subtotal - discount + tax, 0);
+      const totalQty = items.reduce((sum, it) => sum + num(it.ordered_qty), 0);
+
+      await client.query(
+        `update purchase_orders set subtotal = $2, discount = $3, tax = $4, total = $5, received_qty = $6, updated_at = now()
+         where id = $1`,
+        [id, subtotal, discount, tax, total, totalQty]
+      );
+    } else if (input.discount != null || input.tax != null) {
+      const discount = input.discount != null ? num(input.discount) : num(existing.discount);
+      const tax = input.tax != null ? num(input.tax) : num(existing.tax);
+      const total = Math.max(num(existing.subtotal) - discount + tax, 0);
+      await client.query(
+        `update purchase_orders set discount = $2, tax = $3, total = $4, updated_at = now() where id = $1`,
+        [id, discount, tax, total]
+      );
+    }
+
+    await client.query(
+      `update purchase_orders set
+        supplier_id = $2, supplier_name = $3, supplier_phone = $4,
+        branch = $5, staff = $6, expected_date = $7, note = $8, tags = $9,
+        updated_at = now()
+       where id = $1`,
+      [
+        id,
+        input.supplier_id !== undefined ? input.supplier_id : existing.supplier_id,
+        input.supplier_name !== undefined ? str(input.supplier_name) : existing.supplier_name,
+        input.supplier_phone !== undefined ? str(input.supplier_phone) : existing.supplier_phone,
+        input.branch !== undefined ? str(input.branch, "Chi nhánh mặc định") : existing.branch,
+        input.staff !== undefined ? str(input.staff) : existing.staff,
+        input.expected_date !== undefined ? input.expected_date : existing.expected_date,
+        input.note !== undefined ? str(input.note) : existing.note,
+        input.tags ?? existing.tags
+      ]
+    );
+
+    await client.query("commit");
+    return await getPurchaseOrder(id);
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function searchSuppliers(query: string): Promise<Supplier[]> {
   if (!isDatabaseConfigured) return [];
   await ensureDatabase();

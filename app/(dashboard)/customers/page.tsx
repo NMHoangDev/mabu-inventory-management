@@ -73,7 +73,7 @@ export default function CustomersPage() {
   const [deleting, setDeleting] = useState(false);
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 20;
+  const [pageSize, setPageSize] = useState(20);
 
   const fetchCustomers = useCallback(async (overrideSearch?: string, overrideGroup?: string) => {
     setLoading(true);
@@ -140,8 +140,8 @@ export default function CustomersPage() {
   });
 
   const total = sorted.length;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const pageSlice = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const pageSlice = sorted.slice((page - 1) * pageSize, page * pageSize);
 
   function toggleSort(field: SortState["field"]) {
     setSort((s) => ({ field, asc: s.field === field ? !s.asc : field === "name" }));
@@ -201,7 +201,7 @@ export default function CustomersPage() {
     setEditCustomer({
       ...customer,
       gender: customer.gender as CustomerFormData["gender"],
-      tags: Array.isArray(customer.tags) ? (customer.tags as string[]).join(",") : "",
+      tags: Array.isArray(customer.tags) ? customer.tags : [],
       addresses: customer.default_address
         ? [{ ...customer.default_address, address_type: "shipping" as const }]
         : [],
@@ -441,7 +441,11 @@ export default function CustomersPage() {
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <span>Hiển thị</span>
             <select
-              value={PAGE_SIZE}
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
               className="border border-gray-300 rounded px-2 py-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
             >
               <option value="20">20</option>
@@ -451,7 +455,7 @@ export default function CustomersPage() {
             <span>kết quả</span>
             {total > 0 && (
               <span className="pl-4">
-                Từ {(page - 1) * PAGE_SIZE + 1} đến {Math.min(page * PAGE_SIZE, total)} trên tổng {total}
+                Từ {(page - 1) * pageSize + 1} đến {Math.min(page * pageSize, total)} trên tổng {total}
               </span>
             )}
           </div>

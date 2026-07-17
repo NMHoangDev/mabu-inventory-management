@@ -26,7 +26,7 @@ export interface CustomerFormData {
   tax_code: string;
   website: string;
   description: string;
-  tags: string;
+  tags: string[];
   group_id: string;
   assigner_id: string;
   addresses: CustomerAddress[];
@@ -57,7 +57,7 @@ function emptyForm(): CustomerFormData {
     tax_code: "",
     website: "",
     description: "",
-    tags: "",
+    tags: [],
     group_id: "",
     assigner_id: "",
     addresses: [
@@ -83,7 +83,7 @@ export function CustomerFormModal({ open, onClose, onSuccess, initialData, group
     Boolean(initialData?.addresses?.length)
   );
   const [tagInput, setTagInput] = useState("");
-  const [tags, setTags] = useState<string[]>(initialData?.tags ? [initialData.tags] : []);
+  const [tags, setTags] = useState<string[]>(initialData?.tags ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -104,7 +104,7 @@ export function CustomerFormModal({ open, onClose, onSuccess, initialData, group
           tax_code: initialData.tax_code ?? "",
           website: initialData.website ?? "",
           description: initialData.description ?? "",
-          tags: initialData.tags ?? "",
+          tags: initialData.tags ?? [],
           group_id: initialData.group_id ?? "",
           assigner_id: initialData.assigner_id ?? "",
           addresses:
@@ -126,10 +126,7 @@ export function CustomerFormModal({ open, onClose, onSuccess, initialData, group
                 ],
         });
         setAddressEnabled(Boolean(initialData.addresses?.length));
-        const tagStr = Array.isArray(initialData.tags)
-          ? (initialData.tags as unknown as string[])
-          : [];
-        setTags(Array.isArray(tagStr) ? tagStr : []);
+        setTags(initialData.tags ?? []);
       } else {
         setForm(emptyForm());
         setTags([]);

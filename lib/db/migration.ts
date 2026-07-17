@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 25; // Bumped: stock_movements (lịch sử kho) + orders.discount_type (chiết khấu đơn theo % hoặc số tiền)
+const SCHEMA_VERSION = 26; // Bumped: order_items.note (ghi chú riêng từng sản phẩm trong đơn)
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -1260,6 +1260,12 @@ async function migrate() {
   await client.query(`
     alter table orders add column if not exists discount_type text not null default 'amount'
       check (discount_type in ('amount', 'percent'));
+  `);
+
+  // 24. Ghi chú riêng từng sản phẩm trong đơn (order-item note) — trước đây
+  // chỉ có ghi chú chung cho cả đơn (orders.note). Xem app/(dashboard)/orders/new/page.tsx.
+  await client.query(`
+    alter table order_items add column if not exists note text default '';
   `);
 } finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);

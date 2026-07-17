@@ -33,6 +33,7 @@ export interface OrderItem {
   discount_type: DiscountType;
   discount_value: number;
   line_total: number;
+  note: string;
 }
 
 export interface Order {
@@ -70,6 +71,7 @@ export interface OrderItemInput {
   unit_price: number;
   discount_type?: DiscountType;
   discount_value?: number;
+  note?: string;
 }
 
 // Chiết khấu từng dòng sản phẩm — discount_value là số người dùng nhập
@@ -160,6 +162,7 @@ function rowToItem(row: any): OrderItem {
     discount_type: row.discount_type === "percent" ? "percent" : "amount",
     discount_value: Number(row.discount_value ?? 0),
     line_total: Number(row.line_total ?? 0),
+    note: row.note ?? "",
   };
 }
 
@@ -440,8 +443,8 @@ export async function createOrder(input: OrderInput): Promise<Order> {
       const itemRes = await client.query(
         `insert into order_items (
           order_id, product_id, product_name, product_sku, unit, image_url,
-          quantity, unit_price, discount_type, discount_value, line_total, position, created_at
-        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+          quantity, unit_price, discount_type, discount_value, line_total, position, note, created_at
+        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
         returning *`,
         [
           order.id,
@@ -456,6 +459,7 @@ export async function createOrder(input: OrderInput): Promise<Order> {
           discountValue,
           lineTotal,
           pos++,
+          it.note ?? "",
         ]
       );
       items.push(rowToItem(itemRes.rows[0]));
@@ -652,8 +656,8 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
         const itemRes = await client.query(
           `insert into order_items (
             order_id, product_id, product_name, product_sku, unit, image_url,
-            quantity, unit_price, discount_type, discount_value, line_total, position, created_at
-          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+            quantity, unit_price, discount_type, discount_value, line_total, position, note, created_at
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
           returning id, product_id, quantity`,
           [
             id,
@@ -668,6 +672,7 @@ export async function updateOrder(id: string, input: OrderInput): Promise<Order 
             discountValue,
             lineTotal,
             pos++,
+            it.note ?? "",
           ]
         );
         inserted.push(itemRes.rows[0]);
