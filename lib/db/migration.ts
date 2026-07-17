@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 26; // Bumped: order_items.note (ghi chú riêng từng sản phẩm trong đơn)
+const SCHEMA_VERSION = 27; // Bumped: cho phép sửa nhanh tồn kho tại trang Quản lý kho (movement_type 'manual_adjustment')
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -1266,6 +1266,19 @@ async function migrate() {
   // chỉ có ghi chú chung cho cả đơn (orders.note). Xem app/(dashboard)/orders/new/page.tsx.
   await client.query(`
     alter table order_items add column if not exists note text default '';
+  `);
+
+  // 25. Sửa nhanh tồn kho ngay tại trang Quản lý kho (click vào số tồn) —
+  // thêm movement_type 'manual_adjustment' vào stock_movements để phân biệt
+  // với các luồng cộng/trừ kho tự động khác. Xem lib/products/inventory.ts.
+  await client.query(`
+    alter table stock_movements drop constraint if exists stock_movements_movement_type_check;
+    alter table stock_movements add constraint stock_movements_movement_type_check
+      check (movement_type in (
+        'initial', 'order_sale', 'order_restore',
+        'goods_receipt', 'goods_receipt_reverse',
+        'stock_check', 'stock_receipt', 'manual_adjustment'
+      ));
   `);
 } finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);

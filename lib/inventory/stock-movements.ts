@@ -12,7 +12,8 @@ export type StockMovementType =
   | "goods_receipt"
   | "goods_receipt_reverse"
   | "stock_check"
-  | "stock_receipt";
+  | "stock_receipt"
+  | "manual_adjustment";
 
 export interface RecordStockMovementInput {
   productId: string;

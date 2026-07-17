@@ -1,9 +1,10 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, ImageIcon, Loader2, Package, Printer, Search, Settings, SlidersHorizontal } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { zaloAuthApi } from "@/lib/zalo-api";
 
 type InventoryProduct = {
   id: string;
@@ -45,6 +46,11 @@ export default function ProductInventoryPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [editError, setEditError] = useState("");
+  const staffNameRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -63,10 +69,59 @@ export default function ProductInventoryPage() {
       }
     }
     load();
+    zaloAuthApi
+      .me()
+      .then((res) => {
+        staffNameRef.current = res.staff?.full_name || "";
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
+
+  function startEditStock(product: InventoryProduct) {
+    setEditingId(product.id);
+    setEditingValue(String(Math.round(product.total_inventory)));
+  }
+
+  function cancelEditStock() {
+    setEditingId(null);
+    setEditingValue("");
+  }
+
+  async function commitEditStock(product: InventoryProduct) {
+    const nextStock = Number(editingValue);
+    if (!Number.isFinite(nextStock) || nextStock < 0) {
+      setEditError("Số lượng tồn kho không hợp lệ.");
+      return;
+    }
+    if (Math.round(nextStock) === Math.round(product.total_inventory)) {
+      cancelEditStock();
+      return;
+    }
+    setSavingId(product.id);
+    setEditError("");
+    try {
+      const response = await fetch(`/api/inventory/products/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stock: Math.round(nextStock), staff: staffNameRef.current }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Không cập nhật được tồn kho.");
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === product.id ? { ...p, total_inventory: nextStock, available_quantity: nextStock } : p
+        )
+      );
+      cancelEditStock();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Không cập nhật được tồn kho.");
+    } finally {
+      setSavingId(null);
+    }
+  }
 
   const productTypes = useMemo(() => Array.from(new Set(products.map((p) => p.type_name).filter(Boolean))), [products]);
   const brands = useMemo(() => Array.from(new Set(products.map((p) => p.brand_name).filter(Boolean))), [products]);
@@ -111,6 +166,10 @@ export default function ProductInventoryPage() {
           Xem danh sách sản phẩm
         </Link>
       </div>
+
+      {editError && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{editError}</div>
+      )}
 
       <div className="overflow-hidden rounded-lg border bg-white shadow-soft">
         <div className="border-b">
@@ -183,7 +242,40 @@ export default function ProductInventoryPage() {
                     <div className="text-xs text-slate-500">{product.sku || "---"}</div>
                   </td>
                   <td className={`px-4 py-3 text-center ${product.available_quantity < 0 ? "text-red-500" : product.available_quantity > 0 ? "text-emerald-600" : ""}`}>{fmtNumber(product.available_quantity)}</td>
-                  <td className="px-4 py-3 text-center font-medium">{fmtNumber(product.total_inventory)}</td>
+                  <td className="px-4 py-3 text-center font-medium">
+                    {editingId === product.id ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        min={0}
+                        className="h-8 w-24 rounded-md border border-primary px-2 text-center text-sm outline-none focus:ring-2 focus:ring-primary/15"
+                        value={editingValue}
+                        disabled={savingId === product.id}
+                        onChange={(event) => setEditingValue(event.target.value)}
+                        onBlur={() => commitEditStock(product)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.currentTarget.blur();
+                          } else if (event.key === "Escape") {
+                            cancelEditStock();
+                          }
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        title="Bấm để sửa tồn kho"
+                        className="inline-flex min-w-[3rem] items-center justify-center rounded-md border border-transparent px-2 py-1 hover:border-slate-300 hover:bg-slate-50"
+                        onClick={() => startEditStock(product)}
+                      >
+                        {savingId === product.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                        ) : (
+                          fmtNumber(product.total_inventory)
+                        )}
+                      </button>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-center text-slate-500">{fmtDate(product.created_at)}</td>
                   <td className="px-4 py-3 text-right font-medium">{formatCurrencyVND(product.price)}</td>
                   <td className="px-4 py-3 text-right">{formatCurrencyVND(product.cost_price)}</td>

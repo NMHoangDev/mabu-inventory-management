@@ -1,6 +1,8 @@
 import { getPool, isDatabaseConfigured } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { getProducts } from "./repository";
+import { applyInventoryLevelDelta } from "../inventory/receipts";
+import { recordStockMovement } from "../inventory/stock-movements";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: string): boolean {
@@ -308,6 +310,7 @@ const MOVEMENT_LABELS: Record<string, string> = {
   goods_receipt_reverse: "Hoàn nhập kho",
   stock_check: "Kiểm kho",
   stock_receipt: "Nhập kho (khác)",
+  manual_adjustment: "Sửa nhanh tồn kho",
 };
 
 // Nguồn: cột reference_table trên stock_movements — dùng để dựng link "Xem
@@ -352,6 +355,69 @@ export async function getProductStockHistory(id: string, limit = 200): Promise<S
     branch: textValue(row.branch),
     note: textValue(row.note),
   }));
+}
+
+// Sửa nhanh tồn kho từ trang Quản lý kho (click vào số "Tồn kho" → nhập số
+// mới). Ghi thẳng products.stock (nguồn tồn kho thật, xem ghi chú đầu file
+// repository.ts) + log 1 dòng stock_movements (movement_type
+// 'manual_adjustment') để không mất dấu vết như các luồng trừ/cộng kho khác.
+export async function setInventoryProductStock(
+  id: string,
+  nextStock: number,
+  opts?: { staff?: string }
+): Promise<{ id: string; total_inventory: number; available_quantity: number }> {
+  if (!isDatabaseConfigured) {
+    throw new Error("Database chưa được cấu hình (thiếu DATABASE_URL).");
+  }
+  if (!isUuid(id)) {
+    throw new Error("Mã sản phẩm không hợp lệ.");
+  }
+  if (!Number.isFinite(nextStock) || nextStock < 0) {
+    throw new Error("Số lượng tồn kho không hợp lệ.");
+  }
+  await ensureDatabase();
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const current = await client.query(
+      `select coalesce(stock, 0)::numeric as stock from products where id = $1::uuid for update`,
+      [id]
+    );
+    if (current.rows.length === 0) {
+      await client.query("rollback");
+      throw new Error("Không tìm thấy sản phẩm.");
+    }
+    const before = numberValue(current.rows[0].stock);
+    const target = Math.round(nextStock);
+    const delta = target - before;
+
+    if (delta !== 0) {
+      const updated = await client.query(
+        `update products set stock = $2, stock_updated_at = now(), updated_at = now()
+          where id = $1::uuid
+          returning stock`,
+        [id, target]
+      );
+      await applyInventoryLevelDelta(client, id, delta, "(Sửa nhanh tồn kho)");
+      await recordStockMovement(client, {
+        productId: id,
+        movementType: "manual_adjustment",
+        quantityChange: delta,
+        resultingStock: numberValue(updated.rows[0]?.stock ?? target),
+        staff: opts?.staff ?? "",
+        note: "Sửa nhanh tồn kho tại trang Quản lý kho",
+      });
+    }
+
+    await client.query("commit");
+    return { id, total_inventory: target, available_quantity: target };
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 
