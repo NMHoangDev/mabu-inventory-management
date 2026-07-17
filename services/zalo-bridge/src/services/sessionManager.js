@@ -709,7 +709,19 @@ async function attachListener(accountId, api, inboxId) {
     });
   });
 
-  // Problem B fix: Auto-reconnect khi bị kick (3003/3000)
+  // Problem B fix: Auto-reconnect khi bị kick (3003/3000). Mở rộng: 'closed'
+  // chỉ bắn ra khi retryOnClose nội bộ của zca-js đã KHÔNG tự nối lại được
+  // (hết lượt retry, hoặc code không nằm trong close_and_retry_codes phía
+  // server Zalo trả về) — nghĩa là BẤT KỲ code nào tới được đây đều cần
+  // reconnect ngay, không riêng gì 3000/3003. Trước đây code 1000
+  // (CloseReason.ManualClosure trong zca-js — Zalo tự đóng WS "bình thường",
+  // không phải bị kick) không match điều kiện này nên chỉ log warn rồi bỏ đó,
+  // phải chờ watchdog (5 phút, xem interval bên dưới) mới phát hiện và
+  // reconnect lại — gây rớt kết nối "âm thầm" hàng phút mỗi lần Zalo đóng WS
+  // kiểu này. isActiveListener() ở trên đã lọc bỏ các lần tự gọi .stop() khi
+  // teardown session có chủ đích (destroySession/restartListener/destroyAll
+  // đều sessions.delete() trước khi 'closed' kịp bắn ra), nên broaden ở đây
+  // an toàn, không ảnh hưởng các luồng logout/switch-account chủ động.
   api.listener.on('closed', (code, reason) => {
     if (!isActiveListener()) return;
     logger.warn(`[${accountId}] WS closed code=${code}, reason=${reason}`);
@@ -717,21 +729,22 @@ async function attachListener(accountId, api, inboxId) {
     if (activeState) {
       activeState.isWsConnected = false;
     }
-    if (code === 3003 || code === 3000) { // KickConnection or DuplicateConnection
-      logger.error(`[${accountId}] Session lost or kicked! Attempting auto-reconnect...`);
-      if (activeState) {
-        activeState.status = 'error';
-        reflectStatus(accountId, 'error', { lastError: `session_kicked_${code}` });
-        if (activeState.syncIntervalId) {
-          clearInterval(activeState.syncIntervalId);
-        }
+    const isKicked = code === 3003 || code === 3000; // KickConnection hoặc DuplicateConnection
+    logger.error(
+      `[${accountId}] ${isKicked ? "Session lost or kicked" : "WS closed unexpectedly"} (code=${code})! Attempting auto-reconnect...`
+    );
+    if (activeState) {
+      activeState.status = 'error';
+      reflectStatus(accountId, 'error', { lastError: isKicked ? `session_kicked_${code}` : `ws_closed_${code}` });
+      if (activeState.syncIntervalId) {
+        clearInterval(activeState.syncIntervalId);
       }
-      try { api.listener.stop(); } catch {}
-      chatwootService.updateAllConversationsStatus(currentChatwootAccountId(), '🔴 Ngoại tuyến').catch(() => {});
-
-      // Auto-reconnect sau 30s với cookie từ disk
-      autoReconnect(accountId);
     }
+    try { api.listener.stop(); } catch {}
+    chatwootService.updateAllConversationsStatus(currentChatwootAccountId(), '🔴 Ngoại tuyến').catch(() => {});
+
+    // Auto-reconnect sau 30s với cookie từ disk
+    autoReconnect(accountId);
   });
 
   api.listener.on('error', (err) => {

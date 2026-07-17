@@ -278,8 +278,16 @@ async function downloadToTemp(url) {
 // ── Text: 1 lệnh forwardMessage() native fan-out tới tất cả target của rule ──
 // Delay FORWARD_DELAY_MS giữa các rule (nếu 1 master có nhiều rule) — trong
 // cùng 1 rule vẫn gửi 1 lệnh fan-out tới mọi target (không cần delay nội bộ).
-async function forwardText({ accountId, api, rules, threadId, sourceMsgId, msg, text }) {
+// Có tag-all (@All, xem mentions) thì KHÔNG dùng forwardMessage() được nữa —
+// ForwardMessagePayload của zca-js (forwardMessage.d.ts) không có field
+// mentions, endpoint "mforward" phía Zalo chỉ nhận msgInfo+toIds/grids, không
+// có chỗ cho mentionInfo. Phải chuyển sang sendMessage() (hỗ trợ mentions qua
+// endpoint "mention" riêng — xem handleMentions() trong
+// zca-js/dist/apis/sendMessage.js) gửi tuần tự từng target, đánh đổi mất tag
+// "đã chuyển tiếp" trên tin đích — không có cách nào giữ cả 2.
+async function forwardText({ accountId, api, rules, threadId, sourceMsgId, msg, text, mentions }) {
   const ts = Number(msg.data?.ts) || Date.now();
+  const hasTagAll = Array.isArray(mentions) && mentions.length > 0;
   let isFirstRule = true;
   for (const rule of rules) {
     const targetIds = rule.targets.map((t) => t.target_thread_id);
@@ -288,20 +296,40 @@ async function forwardText({ accountId, api, rules, threadId, sourceMsgId, msg, 
     isFirstRule = false;
     const targetSummary = targetIds.join(',');
     try {
-      const resp = await withRetry(
-        () =>
-          api.forwardMessage(
-            {
-              message: text,
-              reference: sourceMsgId
-                ? { id: String(sourceMsgId), ts, logSrcType: 1, fwLvl: 1 }
-                : undefined,
-            },
-            targetIds,
-            ThreadType.Group
-          ),
-        { label: `forwardText rule=${rule.rule_id}` }
-      );
+      const resp = hasTagAll
+        ? await (async () => {
+            const success = [];
+            const fail = [];
+            let isFirstTarget = true;
+            for (const targetId of targetIds) {
+              if (!isFirstTarget) await sleep(FORWARD_DELAY_MS);
+              isFirstTarget = false;
+              try {
+                const sent = await withRetry(
+                  () => api.sendMessage({ msg: text, mentions }, targetId, ThreadType.Group),
+                  { label: `forwardText(tagAll) rule=${rule.rule_id} target=${targetId}` }
+                );
+                success.push({ threadId: targetId, msgId: sent?.message?.msgId });
+              } catch (err) {
+                fail.push({ threadId: targetId, error: err.message });
+              }
+            }
+            return { success, fail };
+          })()
+        : await withRetry(
+            () =>
+              api.forwardMessage(
+                {
+                  message: text,
+                  reference: sourceMsgId
+                    ? { id: String(sourceMsgId), ts, logSrcType: 1, fwLvl: 1 }
+                    : undefined,
+                },
+                targetIds,
+                ThreadType.Group
+              ),
+            { label: `forwardText rule=${rule.rule_id}` }
+          );
       const successCount = resp?.success?.length || 0;
       const failCount = resp?.fail?.length || 0;
       markForwarded(
@@ -553,12 +581,29 @@ export async function handleIncomingGroupMessage({ accountId, api, msg, threadId
     }
 
     const rawContent = msg.data?.content;
-    const text = typeof rawContent === 'string' ? rawContent.trim() : '';
+    const hasTextContent = typeof rawContent === 'string';
+
+    // @All / tag-all: msg.data.mentions là mảng {uid, pos, len, type} — "-1" là
+    // sentinel "tag toàn bộ nhóm" của Zalo (xem handleMentions() trong
+    // zca-js/dist/apis/sendMessage.js). Chỉ lấy đúng tag-all, KHÔNG forward
+    // mention từng người cụ thể (uid thường) sang group đích khác vì người đó
+    // có thể không phải thành viên group đích — hành vi lúc đó chưa được xác
+    // minh, nguy cơ lỗi/tag nhầm cao hơn lợi ích.
+    const rawMentions = Array.isArray(msg.data?.mentions) ? msg.data.mentions : [];
+    const tagAllMentions = rawMentions.filter(
+      (m) => m && String(m.uid) === '-1' && Number.isFinite(m.pos) && m.pos >= 0 && Number.isFinite(m.len) && m.len > 0
+    );
+
+    // pos/len của mention là offset trong content GỐC (chưa trim) — nếu có
+    // tag-all thì giữ nguyên content, không .trim(), để offset không bị lệch.
+    const text = hasTextContent ? (tagAllMentions.length > 0 ? rawContent : rawContent.trim()) : '';
 
     if (text) {
       // 1 tin text = 1 "lượt" chuyển tiếp riêng → qua hàng đợi tuần tự để
       // đảm bảo cách lượt trước (album ảnh, sticker...) ít nhất FORWARD_DELAY_MS.
-      await runSerialized(accountId, () => forwardText({ accountId, api, rules, threadId, sourceMsgId, msg, text }));
+      await runSerialized(accountId, () =>
+        forwardText({ accountId, api, rules, threadId, sourceMsgId, msg, text, mentions: tagAllMentions })
+      );
       return;
     }
 
