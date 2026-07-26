@@ -487,3 +487,78 @@ export async function removeProductFromSupplier(supplierId: string, productId: s
     [supplierId, productId]
   );
 }
+
+export interface ProductSupplierRow {
+  supplier_id: string;
+  supplier_code: string;
+  supplier_name: string;
+  phone: string;
+  supplier_sku: string;
+  cost_price: number | null;
+  is_preferred: boolean;
+}
+
+/** Chiều ngược lại của listProductsForSupplier: NCC nào đang cung cấp 1 sản phẩm cụ thể. */
+export async function listSuppliersForProduct(productId: string): Promise<ProductSupplierRow[]> {
+  if (!isDatabaseConfigured || !isUuid(productId)) return [];
+  await ensureDatabase();
+  const pool = getPool();
+  const res = await pool.query(
+    `select
+       s.id as supplier_id,
+       s.code as supplier_code,
+       s.name as supplier_name,
+       coalesce(s.phone, '') as phone,
+       ps.supplier_sku,
+       ps.cost_price,
+       ps.is_preferred
+     from product_suppliers ps
+     join suppliers s on s.id = ps.supplier_id
+     where ps.product_id = $1::uuid
+     order by ps.is_preferred desc, s.name asc`,
+    [productId]
+  );
+  return res.rows.map((row) => ({
+    supplier_id: row.supplier_id,
+    supplier_code: str(row.supplier_code),
+    supplier_name: str(row.supplier_name),
+    phone: str(row.phone),
+    supplier_sku: str(row.supplier_sku),
+    cost_price: row.cost_price === null || row.cost_price === undefined ? null : num(row.cost_price),
+    is_preferred: !!row.is_preferred
+  }));
+}
+
+export interface SupplierDebtSummary {
+  total_receipts: number;
+  total_amount: number;
+  total_paid: number;
+  outstanding: number;
+}
+
+/** Công nợ 1 NCC cụ thể — cùng công thức với báo cáo /reports/finance/supplier-debt, scope theo supplier_id. */
+export async function getSupplierDebtSummary(supplierId: string): Promise<SupplierDebtSummary> {
+  const empty: SupplierDebtSummary = { total_receipts: 0, total_amount: 0, total_paid: 0, outstanding: 0 };
+  if (!isDatabaseConfigured || !isUuid(supplierId)) return empty;
+  await ensureDatabase();
+  const pool = getPool();
+  const res = await pool.query(
+    `select
+       count(*)::int as total_receipts,
+       coalesce(sum(gr.total_cost), 0) as total_amount,
+       coalesce(sum(gr.paid), 0) as total_paid,
+       coalesce(sum(gr.total_cost - gr.paid), 0) as outstanding
+     from goods_receipts gr
+     where gr.supplier_id = $1::uuid
+       and gr.receipt_status <> 'cancelled'`,
+    [supplierId]
+  );
+  const row = res.rows[0];
+  if (!row) return empty;
+  return {
+    total_receipts: num(row.total_receipts),
+    total_amount: num(row.total_amount),
+    total_paid: num(row.total_paid),
+    outstanding: num(row.outstanding)
+  };
+}

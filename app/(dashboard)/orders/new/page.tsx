@@ -24,9 +24,12 @@ import {
   StickyNote,
   X,
   ChevronDown,
-  Loader2
+  Loader2,
+  Gift
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { ApplyPromotionModal } from "@/components/orders/ApplyPromotionModal";
+import type { PromotionCandidate } from "@/lib/promotions/types";
 
 interface Product {
   id: string;
@@ -179,6 +182,23 @@ export default function NewOrderPage() {
   // Popup xem nhanh tồn kho — bấm icon ghi chú cạnh tên sản phẩm trong giỏ.
   const [stockModalProductId, setStockModalProductId] = useState<string | null>(null);
 
+  // ── Khuyến mại (CTKM) ────────────────────────────────────────────────────
+  // Server (lib/promotions/engine.ts) giữ toàn bộ phép tính khớp CTKM; ở đây
+  // chỉ gửi giỏ hàng, hiện gợi ý, ghi số trả về vào state, và nhớ dòng nào do
+  // CTKM ghi để còn gỡ được ("Ngừng áp dụng" / sửa tay tự tách dòng).
+  const [promoCandidates, setPromoCandidates] = useState<PromotionCandidate[]>([]);
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoModalOpen, setPromoModalOpen] = useState(false);
+  const [appliedPromotions, setAppliedPromotions] = useState<{ id: string; name: string }[]>([]);
+  const [promoNotice, setPromoNotice] = useState("");
+  // product_id -> per_unit CTKM đã ghi vào discount_value của dòng đó (giỏ ở
+  // trang này khoá theo product_id — addProduct merge số lượng nếu đã có,
+  // không tạo dòng trùng sản phẩm — nên product_id dùng được thẳng làm line_id).
+  const [promoLines, setPromoLines] = useState<Record<string, { promotion_id: string; per_unit: number }>>({});
+  // Backup chiết khấu tay TRƯỚC khi bị CTKM ghi đè — để "Ngừng áp dụng" khôi phục đúng.
+  const [manualBackup, setManualBackup] = useState<Record<string, { discount_type: DiscountType; discount_value: number }>>({});
+  const [orderPromoBackup, setOrderPromoBackup] = useState<{ discount: number; discountType: DiscountType } | null>(null);
+
   // ── Customer search (debounced + bỏ dấu hỗ trợ) ───────────────────────
   // Backend /api/orders/search-customers đã có unaccent + scoring.
   // Reset highlight khi danh sách đổi.
@@ -302,12 +322,41 @@ export default function NewOrderPage() {
     }).catch(() => undefined);
   }, [priceTier]);
 
+  // Bỏ 1 dòng khỏi diện quản lý của CTKM (gọi khi user tự sửa tay hoặc xoá dòng).
+  const detachPromoLine = (productId: string) => {
+    setPromoLines((prev) => {
+      if (!(productId in prev)) return prev;
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+    setManualBackup((prev) => {
+      if (!(productId in prev)) return prev;
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+  };
+
   const updateQty = (productId: string, qty: number) => {
     if (qty <= 0) {
       setCart((prev) => prev.filter((c) => c.product_id !== productId));
+      detachPromoLine(productId);
       return;
     }
-    setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, quantity: qty } : c)));
+    setCart((prev) =>
+      prev.map((c) => {
+        if (c.product_id !== productId) return c;
+        // Nếu dòng này đang do CTKM ghi (per_unit), cập nhật ngay lập tức theo
+        // tỉ lệ mới để ô hiện đúng số — hiệu lực chính xác sẽ được xác nhận
+        // lại bởi effect debounce gọi /api/promotions/apply bên dưới.
+        const promo = promoLines[productId];
+        if (promo) {
+          return { ...c, quantity: qty, discount_type: "amount", discount_value: promo.per_unit * qty };
+        }
+        return { ...c, quantity: qty };
+      })
+    );
   };
 
   // Sửa tay Đơn giá của 1 dòng — cho phép chỉnh giá bán khác giá niêm yết.
@@ -316,10 +365,13 @@ export default function NewOrderPage() {
   };
 
   // Chiết khấu TỪNG SẢN PHẨM — value nhập tay, đơn vị theo discount_type.
+  // Sửa tay = TỰ TÁCH dòng đó khỏi CTKM (không bị effect debounce đè lại).
   const setItemDiscountValue = (productId: string, value: number) => {
+    detachPromoLine(productId);
     setCart((prev) => prev.map((c) => (c.product_id === productId ? { ...c, discount_value: value } : c)));
   };
   const toggleItemDiscountType = (productId: string) => {
+    detachPromoLine(productId);
     setCart((prev) =>
       prev.map((c) =>
         c.product_id === productId ? { ...c, discount_type: c.discount_type === "percent" ? "amount" : "percent" } : c
@@ -336,6 +388,10 @@ export default function NewOrderPage() {
 
   const removeItem = (productId: string) => {
     setCart((prev) => prev.filter((c) => c.product_id !== productId));
+    // Không tự suy đoán CTKM nào còn hợp lệ ở đây — effect debounce theo
+    // cartSignature bên dưới sẽ gọi lại /api/promotions/apply với đúng
+    // appliedPromotions hiện có và tự gỡ CTKM không còn thoả (kèm thông báo).
+    detachPromoLine(productId);
   };
 
   const overStockItems = useMemo(() => cart.filter(isOverStock), [cart]);
@@ -351,6 +407,183 @@ export default function NewOrderPage() {
     () => Math.max(0, discountBase - discountAmount + shippingFee),
     [discountBase, discountAmount, shippingFee]
   );
+
+  // ── Khuyến mại: gọi server tìm CTKM khớp giỏ hàng (debounce) ────────────
+  // Tín hiệu đổi giỏ hàng đủ để re-check: sản phẩm/SL/đơn giá đổi thì phải
+  // đánh giá lại (nhảy bậc số lượng, hết điều kiện...).
+  const cartSignature = useMemo(
+    () => cart.map((c) => `${c.product_id}:${c.quantity}:${unitPrice(c)}`).join("|"),
+    [cart]
+  );
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      setPromoCandidates([]);
+      return;
+    }
+    let cancelled = false;
+    setPromoLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const items = cart.map((c) => ({
+          line_id: c.product_id,
+          product_id: c.product_id,
+          product_name: c.product_name,
+          quantity: c.quantity,
+          unit_price: unitPrice(c),
+          discount_type: c.discount_type,
+          discount_value: c.discount_value,
+        }));
+        const appliedIds = appliedPromotions.map((p) => p.id);
+        const res = await fetch("/api/promotions/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items,
+            promotion_ids: appliedIds.length > 0 ? appliedIds : undefined,
+          }),
+        });
+        if (cancelled) return;
+        const data = await res.json();
+        if (!res.ok) return;
+        setPromoCandidates(data.candidates ?? []);
+
+        // Nếu đang có CTKM áp dụng, đánh giá lại đúng các CTKM đó — CTKM nào
+        // không còn thoả (nhảy bậc SL, sửa tay tách dòng, xoá SP...) sẽ tự gỡ.
+        if (appliedIds.length > 0) {
+          const stillEligible: { id: string; name: string }[] = [];
+          const nextPromoLines: Record<string, { promotion_id: string; per_unit: number }> = {};
+          const droppedNames: string[] = [];
+          for (const id of appliedIds) {
+            const candidate = (data.candidates ?? []).find((c: PromotionCandidate) => c.promotion_id === id);
+            if (candidate && candidate.eligible) {
+              stillEligible.push({ id, name: candidate.name });
+              for (const eff of candidate.line_effects) {
+                nextPromoLines[eff.product_id ?? ""] = { promotion_id: id, per_unit: eff.per_unit };
+              }
+            } else {
+              const name = appliedPromotions.find((p) => p.id === id)?.name ?? id;
+              droppedNames.push(name);
+            }
+          }
+          if (droppedNames.length > 0) {
+            setPromoNotice(
+              `Chương trình "${droppedNames.join(", ")}" không còn phù hợp và đã được gỡ khỏi đơn.`
+            );
+            // Khôi phục chiết khấu tay cho các dòng thuộc CTKM bị gỡ.
+            setCart((prev) =>
+              prev.map((c) => {
+                const stillPromo = nextPromoLines[c.product_id];
+                if (stillPromo) return c;
+                const backup = manualBackup[c.product_id];
+                if (backup && promoLines[c.product_id]) {
+                  return { ...c, discount_type: backup.discount_type, discount_value: backup.discount_value };
+                }
+                return c;
+              })
+            );
+          }
+          setAppliedPromotions(stillEligible);
+          setPromoLines(nextPromoLines);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (!cancelled) setPromoLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartSignature]);
+
+  // Ghi hiệu lực CTKM đã chọn vào giỏ hàng — 1 mutator gộp, KHÔNG gọi lặp
+  // setItemDiscountValue/toggleItemDiscountType (hàm toggle LẬT chứ không SET,
+  // không diễn tả được "ép về amount").
+  const applyPromotionEffects = (candidates: PromotionCandidate[], selectedIds: string[]) => {
+    const chosen = candidates.filter((c) => selectedIds.includes(c.promotion_id) && c.eligible);
+    if (chosen.length === 0) return;
+
+    // Gộp: 1 dòng chỉ chịu 1 CTKM (xung đột lấy mức giảm cao hơn).
+    const bestByLine = new Map<string, { per_unit: number; discount_value: number; promotion_id: string }>();
+    for (const c of chosen) {
+      for (const eff of c.line_effects) {
+        if (!eff.product_id) continue;
+        const current = bestByLine.get(eff.product_id);
+        if (!current || eff.discount_value > current.discount_value) {
+          bestByLine.set(eff.product_id, { per_unit: eff.per_unit, discount_value: eff.discount_value, promotion_id: c.promotion_id });
+        }
+      }
+    }
+    // Chỉ 1 CTKM cấp đơn — chọn cái giảm nhiều nhất (orders.discount là 1 ô duy nhất).
+    let bestOrder: { discount_type: DiscountType; discount_value: number; discount_amount: number } | null = null;
+    for (const c of chosen) {
+      if (c.order_discount && (!bestOrder || c.order_discount.discount_amount > bestOrder.discount_amount)) {
+        bestOrder = {
+          discount_type: c.order_discount.discount_type,
+          discount_value: c.order_discount.discount_value,
+          discount_amount: c.order_discount.discount_amount,
+        };
+      }
+    }
+
+    // Backup chiết khấu tay CHỈ cho dòng chưa từng bị CTKM ghi trước đó.
+    setManualBackup((prev) => {
+      const next = { ...prev };
+      for (const [productId] of bestByLine) {
+        if (!(productId in promoLines) && !(productId in next)) {
+          const item = cart.find((c) => c.product_id === productId);
+          if (item) next[productId] = { discount_type: item.discount_type, discount_value: item.discount_value };
+        }
+      }
+      return next;
+    });
+
+    setCart((prev) =>
+      prev.map((c) => {
+        const eff = bestByLine.get(c.product_id);
+        return eff ? { ...c, discount_type: "amount" as DiscountType, discount_value: eff.discount_value } : c;
+      })
+    );
+    setPromoLines(
+      Object.fromEntries(Array.from(bestByLine.entries()).map(([pid, v]) => [pid, { promotion_id: v.promotion_id, per_unit: v.per_unit }]))
+    );
+
+    if (bestOrder) {
+      setOrderPromoBackup({ discount, discountType });
+      setDiscount(bestOrder.discount_value);
+      setDiscountType(bestOrder.discount_type);
+    }
+
+    setAppliedPromotions(chosen.map((c) => ({ id: c.promotion_id, name: c.name })));
+    setPromoNotice("");
+  };
+
+  const clearPromotions = () => {
+    setCart((prev) =>
+      prev.map((c) => {
+        const backup = manualBackup[c.product_id];
+        if (promoLines[c.product_id] && backup) {
+          return { ...c, discount_type: backup.discount_type, discount_value: backup.discount_value };
+        }
+        if (promoLines[c.product_id] && !backup) {
+          return { ...c, discount_type: "amount", discount_value: 0 };
+        }
+        return c;
+      })
+    );
+    if (orderPromoBackup) {
+      setDiscount(orderPromoBackup.discount);
+      setDiscountType(orderPromoBackup.discountType);
+      setOrderPromoBackup(null);
+    }
+    setPromoLines({});
+    setManualBackup({});
+    setAppliedPromotions([]);
+    setPromoNotice("");
+  };
 
   const submit = async (status: "new" | "completed") => {
     if (cart.length === 0) {
@@ -389,6 +622,16 @@ export default function NewOrderPage() {
         fulfillment_status: "unshipped",
         payment_method: paymentMethod === "transfer" ? "bank_transfer" : paymentMethod,
         status,
+        applied_promotions: appliedPromotions.map((p) => {
+          const candidate = promoCandidates.find((c) => c.promotion_id === p.id);
+          return {
+            promotion_id: p.id,
+            code: candidate?.code ?? "",
+            name: p.name,
+            method: candidate?.method ?? "",
+            discount_amount: candidate?.total_discount ?? 0,
+          };
+        }),
         items: cart.map((c) => ({
           product_id: c.product_id,
           product_name: c.product_name,
@@ -684,6 +927,7 @@ export default function NewOrderPage() {
                               onChange={(e) => setItemDiscountValue(c.product_id, parseNum(e.target.value))}
                               onFocus={(e) => e.target.select()}
                               placeholder="0"
+                              title={promoLines[c.product_id] ? "Chiết khấu do chương trình khuyến mại — sửa tay sẽ tách dòng khỏi CTKM" : undefined}
                               className="w-16 text-right p-1 border border-transparent hover:border-[#717785] focus:border-[#005baf] focus:ring-1 focus:ring-[#005baf] rounded text-sm outline-none"
                             />
                             <button
@@ -695,6 +939,11 @@ export default function NewOrderPage() {
                               {c.discount_type === "percent" ? "%" : "đ"}
                             </button>
                           </div>
+                          {promoLines[c.product_id] ? (
+                            <p className="mt-0.5 text-[11px] text-[#005baf] whitespace-nowrap">
+                              KM · {lineBase(c) > 0 ? Math.round((lineDiscountAmount(c) / lineBase(c)) * 100) : 0}%
+                            </p>
+                          ) : null}
                         </td>
                         <td className="p-5 text-right text-sm font-semibold">{formatCurrencyVND(lineTotal(c))}</td>
                         <td className="p-5 text-right">
@@ -783,7 +1032,47 @@ export default function NewOrderPage() {
           </section>
 
           {/* Promotion ticker */}
-         
+          <section className="bg-white border border-[#c0c6d6] rounded p-3">
+            {promoNotice && (
+              <div className="mb-2 rounded bg-orange-50 border border-orange-200 px-2 py-1.5 text-[11px] text-orange-700">
+                {promoNotice}
+              </div>
+            )}
+            {promoCandidates.filter((c) => c.eligible).length > 0 && appliedPromotions.length === 0 && (
+              <div className="mb-2 rounded bg-[#ebf5ff] px-2 py-1 text-[11px] text-[#005baf]">
+                <Megaphone className="w-3 h-3 inline-block mr-1 -mt-0.5" />
+                Có {promoCandidates.filter((c) => c.eligible).length} chương trình khuyến mại phù hợp
+              </div>
+            )}
+            {appliedPromotions.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => setPromoModalOpen(true)}
+                disabled={cart.length === 0}
+                className="w-full flex items-center gap-2 text-sm font-medium text-[#005baf] hover:bg-[#ebf5ff] rounded px-2 py-1.5 transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                <Gift className="w-4 h-4" />
+                <span>Áp dụng chương trình khuyến mại</span>
+                {promoCandidates.filter((c) => c.eligible).length > 0 && (
+                  <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#ebf5ff] text-[#005baf]">
+                    {promoCandidates.filter((c) => c.eligible).length}
+                  </span>
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPromoModalOpen(true)}
+                className="w-full flex items-center gap-2 text-left rounded px-2 py-1.5 hover:bg-[#ebf5ff] transition-colors"
+              >
+                <Gift className="w-4 h-4 text-[#005baf] shrink-0" />
+                <span className="text-xs text-[#0d1d29]">
+                  Đã áp dụng {appliedPromotions.length} CTKM
+                  <span className="text-[#404754]"> - {appliedPromotions.map((p) => p.name).join(", ")}</span>
+                </span>
+              </button>
+            )}
+          </section>
 
           {/* Payment summary */}
           <section className="bg-white border border-[#c0c6d6] rounded p-4 flex-1 flex flex-col">
@@ -911,6 +1200,23 @@ export default function NewOrderPage() {
       {stockModalProductId ? (
         <ProductStockModal productId={stockModalProductId} onClose={() => setStockModalProductId(null)} />
       ) : null}
+
+      {promoModalOpen && (
+        <ApplyPromotionModal
+          candidates={promoCandidates}
+          appliedIds={appliedPromotions.map((p) => p.id)}
+          loading={promoLoading}
+          onClose={() => setPromoModalOpen(false)}
+          onApply={(ids) => {
+            applyPromotionEffects(promoCandidates, ids);
+            setPromoModalOpen(false);
+          }}
+          onClear={() => {
+            clearPromotions();
+            setPromoModalOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

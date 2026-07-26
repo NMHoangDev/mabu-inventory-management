@@ -54,9 +54,17 @@ function formatDate(iso: string): string {
 
 type ActiveTab = "all" | "payment" | "receipt";
 
+interface PaymentMethodBalance {
+  method: string;
+  total_receipts: number;
+  total_payments: number;
+  balance: number;
+}
+
 export default function CashLedgerPage() {
   const [rows, setRows] = useState<LedgerRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [methodBalances, setMethodBalances] = useState<PaymentMethodBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -94,6 +102,13 @@ export default function CashLedgerPage() {
 
   useEffect(() => { fetchList(); }, [fetchList]);
   useEffect(() => { setPage(1); }, [debouncedSearch, activeTab]);
+
+  useEffect(() => {
+    fetch("/api/cash-book/balance-by-method")
+      .then((res) => res.json())
+      .then((data) => setMethodBalances(data?.balances ?? []))
+      .catch(() => setMethodBalances([]));
+  }, []);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -214,6 +229,21 @@ export default function CashLedgerPage() {
             </div>
           </div>
         </div>
+        {methodBalances.length > 0 && (
+          <div className="max-w-6xl mx-auto mt-4 pt-4 border-t border-gray-200">
+            <div className="text-xs text-gray-500 mb-2 text-center">Số dư theo hình thức thanh toán</div>
+            <div className="flex items-center justify-center gap-4">
+              {methodBalances.map((mb) => (
+                <div key={mb.method} className="flex-1 max-w-[220px] text-center bg-white rounded-lg border border-gray-200 py-3 px-2">
+                  <div className="text-xs text-gray-500 mb-1">{mb.method}</div>
+                  <div className={`text-lg font-bold ${mb.balance < 0 ? "text-red-500" : "text-gray-800"}`}>
+                    {formatCurrencyVND(mb.balance)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main content area */}

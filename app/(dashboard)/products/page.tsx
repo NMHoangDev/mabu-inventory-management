@@ -26,8 +26,13 @@ import {
   Calendar,
   Layers,
   Settings,
-  HelpCircle as HelpIcon
+  HelpCircle as HelpIcon,
+  Download,
+  Upload
 } from "lucide-react";
+import { ExcelExportDialog, type ExportScope } from "@/components/shared/ExcelExportDialog";
+import { PRODUCT_EXPORT_GROUPS } from "@/lib/products/export-fields";
+import { ImportExcelModal } from "@/components/imports/ImportExcelModal";
 
 type ProductCandidate = {
   id: string;
@@ -72,6 +77,10 @@ export default function ProductsPage() {
   const PAGE_SIZE = 20;
   const [categories, setCategories] = useState<any[]>([]);
   const [copiedSku, setCopiedSku] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<ExportScope>("all");
+  const [exporting, setExporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   function copySku(sku: string) {
     navigator.clipboard.writeText(sku).then(() => {
@@ -252,6 +261,32 @@ export default function ProductsPage() {
     () => filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [filteredProducts, currentPage]
   );
+
+  const handleExportSubmit = async (selection: { fields: string[]; scope: ExportScope }) => {
+    setExporting(true);
+    try {
+      const rows = selection.scope === "all" ? filteredProducts : pagedProducts;
+      const res = await fetch("/api/products/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows, fields: selection.fields })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `san-pham-${Date.now()}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : "Không xuất được file.");
+    } finally {
+      setExporting(false);
+    }
+  };
   const pageStart = filteredProducts.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredProducts.length);
 
@@ -1163,7 +1198,21 @@ export default function ProductsPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <button 
+            <button
+              onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Upload className="h-4 w-4" />
+              Nhập file
+            </button>
+            <button
+              onClick={() => setExportOpen(true)}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-4 w-4" />
+              Xuất file
+            </button>
+            <button
               onClick={() => openForm()}
               className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 shadow-soft"
             >
@@ -1173,6 +1222,37 @@ export default function ProductsPage() {
           </div>
         </div>
       </div>
+
+      <ExcelExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        title="Xuất file danh sách sản phẩm"
+        fieldPickerTitle="Tùy chọn trường hiển thị xuất file sản phẩm"
+        groups={PRODUCT_EXPORT_GROUPS}
+        scope={{
+          value: exportScope,
+          onChange: setExportScope,
+          currentPageCount: pagedProducts.length,
+          totalCount: filteredProducts.length
+        }}
+        onSubmit={handleExportSubmit}
+        submitting={exporting}
+      />
+
+      {importOpen && (
+        <ImportExcelModal
+          title="Nhập file danh sách sản phẩm"
+          templateUrl="/api/products/import/template"
+          parseUrl="/api/products/import"
+          commitUrl="/api/products/import"
+          kind="products"
+          onClose={() => setImportOpen(false)}
+          onDone={() => {
+            setImportOpen(false);
+            loadData();
+          }}
+        />
+      )}
 
       {/* Tabs list switch */}
       <div className="panel overflow-hidden">

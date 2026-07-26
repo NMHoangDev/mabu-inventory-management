@@ -7,7 +7,7 @@ declare global {
   var invoiceflowMigrationVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 27; // Bumped: cho phép sửa nhanh tồn kho tại trang Quản lý kho (movement_type 'manual_adjustment')
+const SCHEMA_VERSION = 29; // Bumped: module Đơn trả hàng (order_returns, order_return_items)
 const MIGRATION_LOCK_KEY = 2026061104;
 
 export async function ensureDatabase() {
@@ -1279,6 +1279,162 @@ async function migrate() {
         'goods_receipt', 'goods_receipt_reverse',
         'stock_check', 'stock_receipt', 'manual_adjustment'
       ));
+  `);
+
+  // 26. Module Khuyến mại (CTKM) — trước đây app chỉ có chiết khấu NHẬP TAY:
+  // từng dòng (order_items.discount_type/value, mục 21) và tổng đơn
+  // (orders.discount/discount_type, mục 23). Không có chương trình khuyến mại
+  // cấu hình sẵn để gợi ý khi bán hàng.
+  //
+  // `rules` là jsonb vì 4 phương thức chiết khấu có 4 hình dạng cấu hình khác
+  // hẳn nhau (xem lib/promotions/types.ts) — tách bảng con sẽ thành bảng thưa,
+  // mỗi phương thức chỉ dùng 3-5 cột. Cùng convention với automation_rules
+  // .conditions/.actions và shipping_settings.fee_rules.
+  //
+  // Chỉ lưu 4 status; trạng thái hiển thị (running/scheduled/used_up/...) LUÔN
+  // được suy ra từ status + now() + starts_at/ends_at + usage_limit/usage_count
+  // (xem derivePromotionStatus() trong types.ts và RUNNING_SQL trong repository.ts).
+  //
+  // ⚠️ DROP TRƯỚC KHI TẠO — có chủ đích, đã xác nhận với người dùng 2026-07-26:
+  // DB production đã tồn tại sẵn 1 bảng `promotions` MỒ CÔI do một session cũ
+  // KHÔNG BAO GIỜ ĐƯỢC COMMIT tạo ra (chính là thứ mục 9 của INTERNAL_HANDBOOK.md
+  // mô tả sai là "đã có"). Bảng đó dùng tên cột hoàn toàn khác
+  // (discount_method / quantity_limit / unlimited_quantity / used_count /
+  // no_end_date / customer_scope...), nên `create table if not exists` sẽ âm
+  // thầm bỏ qua và mọi query của lib/promotions/repository.ts đều lỗi
+  // "column does not exist".
+  //
+  // An toàn để drop vì đã kiểm tra trực tiếp trên DB thật: bảng có 0 dòng,
+  // không có khoá ngoại nào trỏ tới, không bảng companion nào, và không dòng
+  // code nào trong repo tham chiếu tới các cột cũ.
+  //
+  // `drop ... cascade` + `create` là idempotent (migrate() chạy lại toàn bộ mỗi
+  // lần bump SCHEMA_VERSION), NHƯNG nó cũng xoá sạch dữ liệu promotions mỗi lần
+  // chạy lại. Vì vậy guard: chỉ drop khi bảng đang SAI schema (thiếu cột
+  // `method`). Khi schema đã đúng thì không đụng gì tới dữ liệu thật.
+  await client.query(`
+    do $$
+    begin
+      if exists (select 1 from information_schema.tables
+                  where table_schema = 'public' and table_name = 'promotions')
+         and not exists (select 1 from information_schema.columns
+                          where table_schema = 'public' and table_name = 'promotions'
+                            and column_name = 'method')
+      then
+        drop table if exists order_promotions cascade;
+        drop table if exists promotions cascade;
+      end if;
+    end $$;
+  `);
+
+  await client.query(`
+    create table if not exists promotions (
+      id            uuid primary key default gen_random_uuid(),
+      code          text not null,
+      name          text not null,
+      description   text not null default '',
+      promo_type    text not null default 'discount'
+                    check (promo_type in ('discount', 'gift')),
+      method        text not null
+                    check (method in ('order_total', 'per_product', 'by_quantity', 'addon_by_order_total')),
+      status        text not null default 'active'
+                    check (status in ('draft', 'active', 'paused', 'ended')),
+      rules         jsonb not null default '{}'::jsonb,
+      usage_limit   integer check (usage_limit is null or usage_limit >= 0),
+      usage_count   integer not null default 0,
+      starts_at     timestamptz not null default now(),
+      ends_at       timestamptz,
+      priority      integer not null default 0,
+      created_by    text not null default '',
+      created_at    timestamptz not null default now(),
+      updated_at    timestamptz not null default now()
+    );
+
+    alter table promotions drop constraint if exists promotions_window_check;
+    alter table promotions add constraint promotions_window_check
+      check (ends_at is null or ends_at >= starts_at);
+
+    create unique index if not exists idx_promotions_code_unique on promotions(lower(code));
+    create index if not exists idx_promotions_window  on promotions(status, starts_at, ends_at);
+    create index if not exists idx_promotions_method  on promotions(method);
+    create index if not exists idx_promotions_created on promotions(created_at desc);
+
+    -- Ghi nhận CTKM đã áp lên từng đơn: vừa là audit trail, vừa là nguồn cộng
+    -- promotions.usage_count (cột "Số phiếu còn lại" ở trang danh sách).
+    -- Giữ promotion_code/name denormalized để đơn cũ vẫn đọc được sau khi CTKM bị xoá.
+    create table if not exists order_promotions (
+      id               uuid primary key default gen_random_uuid(),
+      order_id         uuid not null references orders(id) on delete cascade,
+      promotion_id     uuid references promotions(id) on delete set null,
+      promotion_code   text not null default '',
+      promotion_name   text not null default '',
+      method           text not null default '',
+      discount_amount  numeric(18,2) not null default 0,
+      snapshot         jsonb not null default '{}'::jsonb,
+      created_at       timestamptz not null default now()
+    );
+    create index if not exists idx_order_promotions_order     on order_promotions(order_id);
+    create index if not exists idx_order_promotions_promotion on order_promotions(promotion_id, created_at desc);
+  `);
+
+  // 27. Đơn trả hàng (Order Returns) — trước đây "trả hàng" chỉ là 1 cú click
+  // đổi orders.fulfillment_status sang 'returned' (transitionFulfillmentStatus,
+  // lib/orders/repository.ts), KHÔNG hoàn kho, KHÔNG hoàn tiền, KHÔNG ghi nhận
+  // trả bao nhiêu sản phẩm — chỉ đổi cờ trạng thái. Module này thêm phiếu trả
+  // hàng THẬT: trả từng dòng sản phẩm + số lượng riêng (có thể < SL đã mua),
+  // tự động hoàn kho (dùng lại applyInventoryLevelDelta/recordStockMovement đã
+  // có sẵn, movementType 'order_restore' — không thêm type mới) và tự động tạo
+  // phiếu chi ở Sổ quỹ (cash_book, payment_type mới 'refund').
+  //
+  // SL đã trả KHÔNG denormalize lên order_items — luôn tính lại bằng
+  // sum(order_return_items.quantity_returned) group by order_item_id mỗi lần
+  // đọc, tránh 2 nguồn sự thật lệch nhau khi có nhiều phiếu trả cho cùng 1 đơn.
+  await client.query(`
+    create table if not exists order_returns (
+      id              uuid primary key default gen_random_uuid(),
+      code            text unique not null,
+      order_id        uuid not null references orders(id) on delete restrict,
+      order_code      text not null default '',
+      customer_id     uuid,
+      customer_name   text not null default '',
+      customer_phone  text not null default '',
+      reason          text not null default '',
+      refund_amount   numeric(18,2) not null default 0,
+      status          text not null default 'completed'
+                      check (status in ('completed', 'cancelled')),
+      cash_book_id    uuid references cash_book(id) on delete set null,
+      branch          text default 'Chi nhánh mặc định',
+      created_by      text default '',
+      created_at      timestamptz not null default now(),
+      updated_at      timestamptz not null default now()
+    );
+
+    create table if not exists order_return_items (
+      id                  uuid primary key default gen_random_uuid(),
+      order_return_id     uuid not null references order_returns(id) on delete cascade,
+      order_item_id       uuid not null references order_items(id) on delete restrict,
+      product_id          uuid references products(id) on delete set null,
+      product_name        text not null default '',
+      product_sku         text default '',
+      quantity_returned   integer not null default 0 check (quantity_returned > 0),
+      unit_price          numeric(18,2) not null default 0,
+      line_refund_amount  numeric(18,2) not null default 0,
+      -- Luôn true ở v1 (quyết định: tự động hoàn kho mọi lần trả). Cột có sẵn
+      -- để sau này thêm checkbox "hàng lỗi, không nhập lại kho" mà không phải
+      -- migrate thêm.
+      restocked           boolean not null default true,
+      created_at          timestamptz not null default now()
+    );
+
+    create index if not exists idx_order_returns_order       on order_returns(order_id);
+    create index if not exists idx_order_returns_code        on order_returns(code);
+    create index if not exists idx_order_returns_created_at  on order_returns(created_at desc);
+    create index if not exists idx_order_return_items_return on order_return_items(order_return_id);
+    create index if not exists idx_order_return_items_item   on order_return_items(order_item_id);
+
+    alter table cash_book drop constraint if exists cash_book_payment_type_check;
+    alter table cash_book add constraint cash_book_payment_type_check
+      check (payment_type in ('', 'order_payment', 'supplier_payment', 'other', 'refund'));
   `);
 } finally {
     await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => undefined);

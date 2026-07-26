@@ -4,6 +4,7 @@ import { ReactNode, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BadgePercent,
   BarChart3,
   Bell,
   Building2,
@@ -27,7 +28,8 @@ import {
   Wallet,
   Sparkles,
   Zap,
-  Store
+  Store,
+  Undo2
 } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
 import StaffBadge from "@/components/layouts/StaffBadge";
@@ -78,7 +80,21 @@ const navItems = [
       { key: "orders-parse", path: "/orders/parse", label: "Tạo từ AI parse" }
     ]
   },
+  {
+    key: "order-returns", path: "/orders/returns", label: "Đơn trả hàng", group: "Vận hành", icon: Undo2,
+    subItems: [
+      { key: "order-returns-list", path: "/orders/returns", label: "Tất cả đơn trả hàng" },
+      { key: "order-returns-new", path: "/orders/returns/new", label: "Tạo đơn trả hàng" }
+    ]
+  },
   { key: "pos", path: "/pos", label: "Bán hàng (POS)", group: "Vận hành", icon: Receipt },
+  {
+    key: "promotions", path: "/promotions", label: "Khuyến mại", group: "Vận hành", icon: BadgePercent,
+    subItems: [
+      { key: "promotions-list", path: "/promotions", label: "Tất cả khuyến mại" },
+      { key: "promotions-new", path: "/promotions/new", label: "Tạo khuyến mại" }
+    ]
+  },
   {
     key: "shipping", path: "/shipping", label: "Vận chuyển", group: "Vận hành", icon: Truck,
     subItems: [

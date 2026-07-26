@@ -14,6 +14,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInventoryDetail } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
 
 const STATE_STYLE: Record<string, string> = {
   active: "text-green-600 bg-green-50",
@@ -54,12 +55,14 @@ export default function InventoryDetailPage() {
   useEffect(() => { load(); }, [load]);
 
   const d = data;
+  const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
     <ReportShell
       title="Báo cáo tồn kho chi tiết"
       backHref="/reports/inventory"
       loading={loading}
+      actions={<InventoryExportButton groupBy="detail" title="Xuất file báo cáo tồn kho chi tiết" dateFrom={range.from} dateTo={range.to} />}
     >
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex flex-col gap-2">

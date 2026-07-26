@@ -3,6 +3,8 @@ import { getPool, isDatabaseConfigured, logActivity } from "../db/connection";
 import { applyInventoryLevelDelta } from "../inventory/receipts";
 import { recordStockMovement } from "../inventory/stock-movements";
 import { runTrigger, type RuleTrigger } from "../automations/engine";
+import { recordPromotionUsage } from "../promotions/repository";
+import type { AppliedPromotionInput } from "../promotions/types";
 
 function fireAutomation(trigger: RuleTrigger, payload: Record<string, any>) {
   runTrigger(trigger, payload).catch((e) => console.warn(`[automations] ${trigger} failed:`, e));
@@ -112,6 +114,8 @@ export interface OrderInput {
   shipping_fee?: number;
   paid?: number;
   items?: OrderItemInput[];
+  /** CTKM đã áp lên đơn — ghi vào order_promotions + cộng promotions.usage_count. */
+  applied_promotions?: AppliedPromotionInput[];
 }
 
 export interface OrderStats {
@@ -281,11 +285,7 @@ export interface OrderListResult {
   page_size: number;
 }
 
-export async function listOrders(filters: OrderListFilters = {}): Promise<OrderListResult> {
-  const empty: OrderListResult = { orders: [], total: 0, page: 1, page_size: filters.page_size ?? 20 };
-  if (!isDatabaseConfigured) return empty;
-  await ensureDatabase();
-  const pool = getPool();
+function buildOrderWhere(filters: OrderListFilters): { whereSql: string; params: any[] } {
   const where: string[] = [];
   const params: any[] = [];
   let i = 1;
@@ -324,7 +324,45 @@ export async function listOrders(filters: OrderListFilters = {}): Promise<OrderL
     params.push(filters.date_to);
   }
 
-  const whereSql = where.length > 0 ? `where ${where.join(" and ")}` : "";
+  return { whereSql: where.length > 0 ? `where ${where.join(" and ")}` : "", params };
+}
+
+async function attachItems(pool: ReturnType<typeof getPool>, orders: Order[]): Promise<void> {
+  if (orders.length === 0) return;
+  const ids = orders.map((o) => o.id);
+  const itemsRes = await pool.query(
+    `select * from order_items where order_id = any($1) order by position asc, created_at asc`,
+    [ids]
+  );
+  const itemsByOrder = new Map<string, OrderItem[]>();
+  for (const it of itemsRes.rows) {
+    const arr = itemsByOrder.get(it.order_id) ?? [];
+    arr.push(rowToItem(it));
+    itemsByOrder.set(it.order_id, arr);
+  }
+  for (const o of orders) {
+    o.items = itemsByOrder.get(o.id) ?? [];
+  }
+}
+
+/** Xuất Excel "Tất cả" — không LIMIT/OFFSET, trả toàn bộ đơn khớp filter. */
+export async function listOrdersForExport(filters: Omit<OrderListFilters, "page" | "page_size"> = {}): Promise<Order[]> {
+  if (!isDatabaseConfigured) return [];
+  await ensureDatabase();
+  const pool = getPool();
+  const { whereSql, params } = buildOrderWhere(filters);
+  const dataRes = await pool.query(`select o.* from orders o ${whereSql} order by o.created_at desc`, params);
+  const orders: Order[] = dataRes.rows.map((r) => rowToOrder(r));
+  await attachItems(pool, orders);
+  return orders;
+}
+
+export async function listOrders(filters: OrderListFilters = {}): Promise<OrderListResult> {
+  const empty: OrderListResult = { orders: [], total: 0, page: 1, page_size: filters.page_size ?? 20 };
+  if (!isDatabaseConfigured) return empty;
+  await ensureDatabase();
+  const pool = getPool();
+  const { whereSql, params } = buildOrderWhere(filters);
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.max(1, Math.min(100, filters.page_size ?? 20));
   const offset = (page - 1) * pageSize;
@@ -338,22 +376,7 @@ export async function listOrders(filters: OrderListFilters = {}): Promise<OrderL
   ]);
 
   const orders: Order[] = dataRes.rows.map((r) => rowToOrder(r));
-  if (orders.length > 0) {
-    const ids = orders.map((o) => o.id);
-    const itemsRes = await pool.query(
-      `select * from order_items where order_id = any($1) order by position asc, created_at asc`,
-      [ids]
-    );
-    const itemsByOrder = new Map<string, OrderItem[]>();
-    for (const it of itemsRes.rows) {
-      const arr = itemsByOrder.get(it.order_id) ?? [];
-      arr.push(rowToItem(it));
-      itemsByOrder.set(it.order_id, arr);
-    }
-    for (const o of orders) {
-      o.items = itemsByOrder.get(o.id) ?? [];
-    }
-  }
+  await attachItems(pool, orders);
 
   return {
     orders,
@@ -503,6 +526,12 @@ export async function createOrder(input: OrderInput): Promise<Order> {
       } else {
         console.warn(`[createOrder] customer_id=${order.customer_id} không tồn tại, bỏ qua cập nhật stats`);
       }
+    }
+
+    // Ghi nhận CTKM đã áp lên đơn (audit + cộng promotions.usage_count cho cột
+    // "Số phiếu còn lại"). Nằm trong CÙNG transaction để không lệch với đơn.
+    if (input.applied_promotions?.length) {
+      await recordPromotionUsage(client, order.id, input.applied_promotions);
     }
 
     await client.query("commit");

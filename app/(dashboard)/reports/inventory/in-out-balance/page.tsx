@@ -17,6 +17,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInOutBalance } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
 
 // Không có bảng ledger lịch sử nên không thể vẽ "tồn kho tuyệt đối theo
 // ngày" một cách trung thực — thay bằng biến động luỹ kế (nhập - xuất cộng
@@ -69,12 +70,14 @@ export default function InOutBalancePage() {
   useEffect(() => { load(); }, [load]);
 
   const d = data;
+  const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
     <ReportShell
       title="Báo cáo xuất nhập tồn sản phẩm"
       backHref="/reports/inventory"
       loading={loading}
+      actions={<InventoryExportButton groupBy="in_out" title="Xuất file báo cáo xuất nhập tồn" dateFrom={range.from} dateTo={range.to} />}
     >
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex flex-col gap-2">

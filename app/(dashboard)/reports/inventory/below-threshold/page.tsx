@@ -14,6 +14,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchBelowThreshold } from "@/services/reportService";
+import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
 
 const URGENT_STYLE: Record<string, string> = {
   "Khẩn cấp": "text-red-500 bg-red-50",
@@ -56,6 +57,7 @@ export default function BelowThresholdPage() {
       title="Báo cáo tồn kho dưới định mức"
       backHref="/reports/inventory"
       loading={loading}
+      actions={<InventoryExportButton groupBy="below_threshold" title="Xuất file báo cáo dưới định mức" />}
     >
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex flex-col gap-2">

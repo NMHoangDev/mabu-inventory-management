@@ -24,8 +24,10 @@ import {
   Wallet,
   ChevronRight,
   RefreshCw,
+  Undo2,
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PrintableInvoice } from "@/components/orders/PrintableInvoice";
 
 interface OrderItem {
   id: string;
@@ -145,15 +147,18 @@ const PAYMENT_METHOD_LABEL: Record<string, string> = {
 // FULFILLMENT_TRANSITIONS ở lib/orders/repository.ts. "unshipped" chỉ hiện
 // nút này khi order.status đã "completed" (đơn tạo trực tiếp ở trạng thái
 // hoàn tất, không qua bước "Xác nhận đơn hàng" riêng — xem confirmOrderNow).
+//
+// "returned" đã bị BỎ khỏi map này (trước đây advanceFulfillment("returned")
+// chỉ đổi cờ, KHÔNG hoàn kho/hoàn tiền/ghi nhận SL trả — xem module
+// lib/order-returns/repository.ts). Nút "Đổi trả hàng" giờ điều hướng sang
+// /orders/returns/new/<id> (form trả hàng thật), fulfillment_status chỉ được
+// createOrderReturn() tự đổi sang 'returned' khi mọi dòng đã trả hết.
 const NEXT_FULFILLMENT: Record<string, { key: string; label: string; danger?: boolean }[]> = {
   unshipped: [{ key: "confirmed", label: "Xác nhận xử lý" }],
   confirmed: [{ key: "packing", label: "Đóng gói" }],
   packing: [{ key: "shipping", label: "Bắt đầu giao hàng" }],
-  shipping: [
-    { key: "shipped", label: "Đã giao thành công" },
-    { key: "returned", label: "Hoàn hàng", danger: true },
-  ],
-  shipped: [{ key: "returned", label: "Hoàn hàng", danger: true }],
+  shipping: [{ key: "shipped", label: "Đã giao thành công" }],
+  shipped: [],
   returned: [],
 };
 
@@ -196,6 +201,19 @@ export default function OrderDetailPage() {
   const [activeTab, setActiveTab] = useState<"info" | "timeline">("info");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  // Thông tin shop để in ở header hoá đơn — tái dùng cấu hình storefront sẵn
+  // có (store_name/contact_phone/contact_address), không tạo cấu hình riêng.
+  const [store, setStore] = useState({ name: "Cửa hàng", phone: "", address: "" });
+
+  useEffect(() => {
+    fetch("/api/settings/storefront")
+      .then((res) => res.json())
+      .then((data) => {
+        const s = data?.settings;
+        if (s) setStore({ name: s.store_name || "Cửa hàng", phone: s.contact_phone || "", address: s.contact_address || "" });
+      })
+      .catch(() => undefined);
+  }, []);
 
   const fetchOrder = useCallback(async () => {
     try {
@@ -704,6 +722,15 @@ export default function OrderDetailPage() {
               )}
 
               <h3 className="text-sm font-bold text-[#0d1d29] mb-3 mt-4">Thao tác nhanh</h3>
+              {order.status === "completed" && (
+                <button
+                  onClick={() => router.push(`/orders/returns/new/${orderId}`)}
+                  className="w-full flex items-center gap-2 px-3 py-2 border border-[#c0c6d6] rounded-lg hover:bg-[#ebf5ff] text-sm text-[#404754] transition-colors"
+                >
+                  <Undo2 className="w-4 h-4" />
+                  Đổi trả hàng
+                </button>
+              )}
               <button
                 onClick={() => router.push(`/shipping/orders/new?order_id=${orderId}`)}
                 disabled={order.status === "cancelled"}
@@ -731,6 +758,8 @@ export default function OrderDetailPage() {
           </div>
         </div>
       </main>
+
+      <PrintableInvoice order={order} store={store} />
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchAboveThreshold } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
 
 export default function AboveThresholdPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -52,6 +53,7 @@ export default function AboveThresholdPage() {
       title="Báo cáo tồn kho vượt định mức"
       backHref="/reports/inventory"
       loading={loading}
+      actions={<InventoryExportButton groupBy="above_threshold" title="Xuất file báo cáo vượt định mức" />}
     >
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex flex-col gap-2">

@@ -44,6 +44,9 @@ FlowScan Pro/
 LOVABLE_PROMPT.md
 6KP
 
+# Contains real production secrets (DB password, SSH password, Supabase keys) — never commit
+INTERNAL_HANDBOOK.md
+
 # Standalone apps directories (not part of the monorepo)
 apps/
 apps.old/

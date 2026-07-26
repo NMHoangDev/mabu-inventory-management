@@ -8,7 +8,7 @@ function isUuid(value: string): boolean {
 export type VoucherType = "receipt" | "payment";
 export type VoucherStatus = "draft" | "completed" | "cancelled";
 
-export type PaymentType = "" | "order_payment" | "supplier_payment" | "other";
+export type PaymentType = "" | "order_payment" | "supplier_payment" | "other" | "refund";
 
 export interface CashBookEntry {
   id: string;
@@ -294,4 +294,38 @@ export async function deleteCashBookEntry(id: string): Promise<void> {
   await ensureDatabase();
   const pool = getPool();
   await pool.query(`delete from cash_book where id = $1`, [id]);
+}
+
+export interface PaymentMethodBalance {
+  method: string;
+  total_receipts: number;
+  total_payments: number;
+  balance: number;
+}
+
+export async function getCashBalanceByMethod(): Promise<PaymentMethodBalance[]> {
+  if (!isDatabaseConfigured) return [];
+  await ensureDatabase();
+  const pool = getPool();
+  const result = await pool.query(
+    `select
+       case
+         when payment_method = 'Tiền mặt' then 'Tiền mặt'
+         when payment_method = 'Chuyển khoản' then 'Chuyển khoản'
+         else 'Khác'
+       end as method,
+       sum(case when voucher_type = 'receipt' then amount else 0 end) as total_receipts,
+       sum(case when voucher_type = 'payment' then amount else 0 end) as total_payments,
+       sum(case when voucher_type = 'receipt' then amount else -amount end) as balance
+     from cash_book
+     where status = 'completed'
+     group by method
+     order by method`
+  );
+  return result.rows.map((row: any) => ({
+    method: str(row.method, "Khác"),
+    total_receipts: num(row.total_receipts),
+    total_payments: num(row.total_payments),
+    balance: num(row.balance)
+  }));
 }

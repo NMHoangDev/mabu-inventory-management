@@ -27,6 +27,12 @@ interface SupplierDetail {
   last_order_at: string | null;
   status: string;
   created_at: string;
+  debt?: {
+    total_receipts: number;
+    total_amount: number;
+    total_paid: number;
+    outstanding: number;
+  };
 }
 
 interface SupplierProductRow {
@@ -273,6 +279,16 @@ export default function SupplierDetailPage() {
                 <Field label="Tổng tiền đã mua" value={formatCurrencyVND(supplier.total_purchased)} />
                 <Field label="Số đơn nhập" value={String(supplier.total_orders)} />
                 <Field label="Lần nhập gần nhất" value={formatDate(supplier.last_order_at)} />
+                {supplier.debt && (
+                  <>
+                    <Field label="Đã thanh toán" value={formatCurrencyVND(supplier.debt.total_paid)} />
+                    <Field
+                      label="Còn nợ"
+                      value={formatCurrencyVND(supplier.debt.outstanding)}
+                      valueClassName={supplier.debt.outstanding > 0 ? "text-red-600 font-semibold" : "text-gray-800"}
+                    />
+                  </>
+                )}
               </div>
             </section>
           </div>
@@ -497,11 +513,11 @@ export default function SupplierDetailPage() {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
   return (
     <div>
       <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-gray-800">{value || "—"}</div>
+      <div className={valueClassName || "text-gray-800"}>{value || "—"}</div>
     </div>
   );
 }

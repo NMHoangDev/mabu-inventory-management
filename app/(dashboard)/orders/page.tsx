@@ -20,8 +20,13 @@ import {
   Lightbulb,
   ArrowRight,
   Headphones,
+  Download,
+  Upload,
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { ExcelExportDialog, type ExportScope } from "@/components/shared/ExcelExportDialog";
+import { ORDER_EXPORT_GROUPS, ORDER_EXPORT_TYPE_OPTIONS } from "@/lib/orders/export-fields";
+import { ImportExcelModal } from "@/components/imports/ImportExcelModal";
 
 interface OrderItem {
   id: string;
@@ -170,6 +175,57 @@ export default function OrdersPage() {
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [shipmentFilter, setShipmentFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<ExportScope>("all");
+  const [exportType, setExportType] = useState("order_summary");
+  const [exporting, setExporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  const currentFilters = useMemo(
+    () => ({
+      search: search || undefined,
+      status: tab === "draft" ? "new" : undefined,
+      fulfillment_status: tab === "returned" ? "returned" : shipmentFilter !== "all" ? shipmentFilter : undefined,
+      source: tab === "pos" ? "pos" : sourceFilter !== "all" ? sourceFilter : undefined,
+      payment_status: paymentFilter !== "all" ? paymentFilter : undefined,
+      page,
+      page_size: pageSize,
+    }),
+    [search, tab, shipmentFilter, sourceFilter, paymentFilter, page, pageSize]
+  );
+
+  const handleExportSubmit = useCallback(
+    async (selection: { fields: string[]; scope: ExportScope; exportType?: string }) => {
+      setExporting(true);
+      try {
+        const res = await fetch("/api/orders/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scope: selection.scope,
+            filters: currentFilters,
+            exportType: selection.exportType,
+            fields: selection.fields,
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `don-hang-${Date.now()}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setExportOpen(false);
+      } catch (e) {
+        console.error(e);
+        alert(e instanceof Error ? e.message : "Không xuất được file.");
+      } finally {
+        setExporting(false);
+      }
+    },
+    [currentFilters]
+  );
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -297,6 +353,20 @@ export default function OrdersPage() {
               onChange={setSourceFilter}
             />
             <button
+              onClick={() => setImportOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-[#c0c6d6] text-[#404754] font-medium rounded-lg hover:bg-gray-50 transition-all"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Nhập file</span>
+            </button>
+            <button
+              onClick={() => setExportOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-[#c0c6d6] text-[#404754] font-medium rounded-lg hover:bg-gray-50 transition-all"
+            >
+              <Download className="w-4 h-4" />
+              <span>Xuất file</span>
+            </button>
+            <button
               onClick={() => router.push("/orders/new")}
               className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"
             >
@@ -305,6 +375,38 @@ export default function OrdersPage() {
             </button>
           </div>
       </div>
+
+      <ExcelExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        title="Xuất file danh sách đơn hàng"
+        fieldPickerTitle="Tùy chọn trường hiển thị xuất file đơn hàng"
+        groups={ORDER_EXPORT_GROUPS}
+        scope={{
+          value: exportScope,
+          onChange: setExportScope,
+          currentPageCount: orders.length,
+          totalCount: total,
+        }}
+        exportType={{ value: exportType, onChange: setExportType, options: ORDER_EXPORT_TYPE_OPTIONS }}
+        onSubmit={handleExportSubmit}
+        submitting={exporting}
+      />
+
+      {importOpen && (
+        <ImportExcelModal
+          title="Nhập file danh sách đơn hàng"
+          templateUrl="/api/orders/import/template"
+          parseUrl="/api/orders/import"
+          commitUrl="/api/orders/import"
+          kind="orders"
+          onClose={() => setImportOpen(false)}
+          onDone={() => {
+            setImportOpen(false);
+            fetchOrders();
+          }}
+        />
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-[#c0c6d6]">

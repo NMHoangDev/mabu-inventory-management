@@ -14,6 +14,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInventoryLedger } from "@/services/reportService";
+import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
 
 const TYPE_STYLE: Record<string, string> = {
   "Nhập kho": "text-green-600 bg-green-50",
@@ -52,6 +53,7 @@ export default function StockLedgerPage() {
   useEffect(() => { load(); }, [load]);
 
   const d = data;
+  const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
     <ReportShell
@@ -59,6 +61,7 @@ export default function StockLedgerPage() {
       description="Lịch sử giao dịch xuất nhập kho"
       backHref="/reports/inventory"
       loading={loading}
+      actions={<InventoryExportButton groupBy="ledger" title="Xuất file sổ kho" dateFrom={range.from} dateTo={range.to} />}
     >
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex flex-col gap-2">

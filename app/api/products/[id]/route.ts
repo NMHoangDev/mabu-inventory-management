@@ -1,6 +1,7 @@
 ﻿import { NextResponse } from "next/server";
 import { getInventoryProductDetail } from "@/lib/products/inventory";
 import { deleteProduct, updateProduct } from "@/lib/products/repository";
+import { listSuppliersForProduct } from "@/lib/suppliers/repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (!product) {
       return NextResponse.json({ error: "Product not found." }, { status: 404 });
     }
-    return NextResponse.json(product);
+    const suppliers = await listSuppliersForProduct(product.id);
+    return NextResponse.json({ ...product, suppliers });
   } catch (error) {
     console.error("Get product API failed:", error);
     return NextResponse.json(

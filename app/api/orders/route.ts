@@ -77,6 +77,19 @@ const createSchema = z.object({
   shipping_fee: z.number().min(0).optional(),
   paid: z.number().min(0).optional(),
   items: z.array(itemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm."),
+  // Optional & tương thích ngược hoàn toàn: không gửi thì không có gì đổi.
+  applied_promotions: z
+    .array(
+      z.object({
+        promotion_id: z.string(),
+        code: z.string().default(""),
+        name: z.string().default(""),
+        method: z.string().default(""),
+        discount_amount: z.number().min(0).default(0),
+        snapshot: z.record(z.any()).optional(),
+      })
+    )
+    .optional(),
 });
 
 export async function POST(request: Request) {

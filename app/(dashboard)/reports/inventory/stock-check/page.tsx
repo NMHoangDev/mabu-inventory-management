@@ -14,6 +14,7 @@ import {
   SummaryCard,
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchStockCheck } from "@/services/reportService";
+import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
 
 const STATUS_STYLE: Record<string, string> = {
   "Hoàn thành": "text-green-600 bg-green-50",
@@ -54,12 +55,14 @@ export default function StockCheckPage() {
   useEffect(() => { load(); }, [load]);
 
   const d = data;
+  const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
     <ReportShell
       title="Báo cáo kiểm kê hàng hóa"
       backHref="/reports/inventory"
       loading={loading}
+      actions={<InventoryExportButton groupBy="stock_check" title="Xuất file báo cáo kiểm kê" dateFrom={range.from} dateTo={range.to} />}
     >
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex flex-col gap-2">

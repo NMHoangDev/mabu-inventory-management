@@ -44,6 +44,15 @@ type InventoryProductDetail = {
     max_stock: number | null;
     storage_location: string;
   }>;
+  suppliers?: Array<{
+    supplier_id: string;
+    supplier_code: string;
+    supplier_name: string;
+    phone: string;
+    supplier_sku: string;
+    cost_price: number | null;
+    is_preferred: boolean;
+  }>;
 };
 
 type StockMovementEntry = {
@@ -225,6 +234,32 @@ export default function InventoryProductDetailPage() {
           <button className="absolute -right-3 -top-5 grid h-10 w-10 place-items-center rounded-full bg-primary text-white shadow-lg" type="button" aria-label="Trợ giúp"><MessageCircle className="h-5 w-5" /></button>
         </section>
       </div>
+
+      <section className="overflow-hidden rounded-lg border bg-white shadow-soft">
+        <div className="border-b px-4 py-3 font-bold text-slate-800">Nhà cung cấp</div>
+        <div className="p-6">
+          {product.suppliers && product.suppliers.length > 0 ? (
+            <div className="space-y-3 text-sm">
+              {product.suppliers.map((s) => (
+                <div key={s.supplier_id} className="flex items-center justify-between border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                  <div>
+                    <Link href={`/suppliers/${s.supplier_id}`} className="font-medium text-primary hover:underline">
+                      {s.supplier_name}
+                    </Link>
+                    {s.is_preferred && (
+                      <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Ưu tiên</span>
+                    )}
+                    {s.supplier_sku && <div className="text-xs text-slate-500">SKU NCC: {s.supplier_sku}</div>}
+                  </div>
+                  <div className="text-slate-900">{s.cost_price !== null ? formatCurrencyVND(s.cost_price) : "---"}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-500">Chưa có nhà cung cấp nào cung cấp sản phẩm này.</div>
+          )}
+        </div>
+      </section>
 
       <section className="overflow-hidden rounded-lg border bg-white shadow-soft">
         <div className="flex border-b">
