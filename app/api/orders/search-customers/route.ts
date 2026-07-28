@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { ensureDatabase } from "@/lib/db/migration";
 import { getPool, isDatabaseConfigured } from "@/lib/db/connection";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("orders.create");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const q = (url.searchParams.get("q") ?? "").trim();

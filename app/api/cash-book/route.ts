@@ -6,14 +6,23 @@ import {
   type VoucherType,
   type VoucherStatus
 } from "@/lib/cash-book/repository";
+import { requireAnyPermission, requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function voucherPermissionModule(voucherType: VoucherType): "receipt_vouchers" | "payment_vouchers" {
+  return voucherType === "payment" ? "payment_vouchers" : "receipt_vouchers";
+}
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const voucher_type = url.searchParams.get("voucher_type") as VoucherType | null || undefined;
+    const guard = voucher_type
+      ? await requirePermission(`${voucherPermissionModule(voucher_type)}.view`)
+      : await requireAnyPermission(["receipt_vouchers.view", "payment_vouchers.view"]);
+    if (guard) return guard;
     const status = url.searchParams.get("status") as VoucherStatus | null || undefined;
     const search = url.searchParams.get("search") || undefined;
     const page = Number(url.searchParams.get("page")) || 1;
@@ -31,6 +40,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as CreateCashBookEntryInput;
+    const guard = await requirePermission(`${voucherPermissionModule(body.voucher_type ?? "receipt")}.create`);
+    if (guard) return guard;
     if (body.amount !== undefined && body.amount < 0) {
       return NextResponse.json({ error: "Số tiền không được âm." }, { status: 400 });
     }

@@ -4,6 +4,7 @@ import {
   deleteSupplierGroup,
   updateSupplierGroup,
 } from "@/lib/suppliers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("suppliers.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const body = await request.json();
@@ -52,6 +55,8 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("suppliers.delete");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const success = await deleteSupplierGroup(id);

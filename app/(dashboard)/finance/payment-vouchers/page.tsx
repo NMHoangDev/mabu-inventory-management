@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { downloadCsv } from "@/lib/shared/csv-export";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   ChevronLeft,
   ChevronRight,
@@ -54,6 +56,7 @@ function formatDateTime(iso: string): string {
 }
 
 export default function PaymentVouchersPage() {
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -97,6 +100,7 @@ export default function PaymentVouchersPage() {
   const endIdx = Math.min(safePage * pageSize, total);
 
   return (
+    <PageGuard permission="payment_vouchers.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white border-b px-4 flex items-center justify-between flex-shrink-0">
         <h1 className="text-lg font-medium text-slate-800">Phiếu chi</h1>
@@ -132,12 +136,14 @@ export default function PaymentVouchersPage() {
             <Upload className="w-4 h-4" /> Xuất file
           </button>
         </div>
-        <Link
-          href="/finance/payment-vouchers/new"
-          className="bg-[#0088ff] hover:bg-[#0077ee] text-white px-4 py-2 rounded text-sm font-medium flex items-center gap-2 transition-colors"
-        >
-          <Plus className="w-4 h-4" /> Tạo phiếu chi
-        </Link>
+        {hasPermission("payment_vouchers.create") ? (
+          <Link
+            href="/finance/payment-vouchers/new"
+            className="bg-[#0088ff] hover:bg-[#0077ee] text-white px-4 py-2 rounded text-sm font-medium flex items-center gap-2 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Tạo phiếu chi
+          </Link>
+        ) : null}
       </div>
 
       <div className="border-b px-4 pt-2 flex-shrink-0">
@@ -324,5 +330,6 @@ export default function PaymentVouchersPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

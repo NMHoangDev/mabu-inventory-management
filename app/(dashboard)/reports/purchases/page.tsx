@@ -11,6 +11,7 @@ import {
   ShoppingBasket,
   Truck
 } from "lucide-react";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const IMPORT_SECTIONS = [
   {
@@ -108,6 +109,7 @@ function ReportCard({
 
 export default function PurchasesReportPage() {
   return (
+    <PageGuard permission="reports.view_purchases">
     <div className="flex flex-col min-h-screen bg-[#f0f1f3]">
       {/* Sidebar (native) — only main content in this page component */}
 
@@ -218,5 +220,6 @@ export default function PurchasesReportPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }

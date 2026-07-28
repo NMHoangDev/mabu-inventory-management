@@ -25,6 +25,7 @@ import {
   type ProductPurchaseData,
 } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function ByTimePage() {
   const [period, setPeriod] = useState<Period>("7d");
@@ -84,6 +85,7 @@ export default function ByTimePage() {
   };
 
   return (
+    <PageGuard permission="reports.view_purchases">
     <ReportShell
       title="Báo cáo nhập hàng theo thời gian"
       backHref="/reports/purchases"
@@ -197,5 +199,6 @@ export default function ByTimePage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

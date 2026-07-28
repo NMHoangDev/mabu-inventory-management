@@ -20,6 +20,7 @@ import {
   Package
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface PurchaseOrderItem {
   id: string;
@@ -378,6 +379,7 @@ export default function PurchaseOrderDetailPage() {
   const statusMeta = STATUS_META[order.status] ?? STATUS_META.pending;
 
   return (
+    <PageGuard permission="purchase_orders.view">
     <div className="flex flex-col gap-4 px-4 pb-8 lg:px-6">
       {/* Top bar */}
       <div className="flex items-center justify-between">
@@ -778,6 +780,7 @@ export default function PurchaseOrderDetailPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

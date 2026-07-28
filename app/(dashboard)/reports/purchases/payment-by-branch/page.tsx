@@ -14,6 +14,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPaymentByBranch } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function PaymentByBranchPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -46,6 +47,7 @@ export default function PaymentByBranchPage() {
   const d = data;
 
   return (
+    <PageGuard permission="reports.view_purchases">
     <ReportShell
       title="Báo cáo thanh toán nhập hàng theo chi nhánh"
       backHref="/reports/purchases"
@@ -116,5 +118,6 @@ export default function PaymentByBranchPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

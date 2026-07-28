@@ -10,6 +10,7 @@ import {
   X
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface ProductHit {
   product_id: string;
@@ -243,6 +244,7 @@ export default function NewCostAdjustmentPage() {
   );
 
   return (
+    <PageGuard permission="cost_adjustments.create">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6 bg-[#f0f1f1]">
       <header className="h-14 bg-white border-b px-6 flex items-center justify-between flex-shrink-0">
         <button
@@ -589,5 +591,6 @@ export default function NewCostAdjustmentPage() {
         </svg>
       </button>
     </div>
+    </PageGuard>
   );
 }

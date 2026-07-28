@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { STAFF_COOKIE_NAME, STAFF_COOKIE_OPTS, getCurrentStaff } from "@/lib/zalo/auth";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { getCurrentStaffPermissions } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -26,15 +27,24 @@ const KEY =
 export async function GET(req: NextRequest) {
   const { getCurrentStaffStrict } = await import("@/lib/zalo/auth");
   const strict = await getCurrentStaffStrict(req);
+  // Permission set của hệ thống roles/role_permissions mới (module nghiệp vụ) —
+  // hoàn toàn độc lập với staff.role (admin/staff) cũ dùng cho Zalo.
+  const permCtx = await getCurrentStaffPermissions();
+  const roleId = permCtx?.roleId ?? null;
+  const roleName = permCtx?.roleName ?? null;
+  const permissions = permCtx ? Array.from(permCtx.permissions) : [];
   if (strict) {
-    return NextResponse.json({ staff: strict, has_session: true });
+    return NextResponse.json({ staff: strict, has_session: true, role_id: roleId, role_name: roleName, permissions });
   }
   // Không có cookie/header → trả role=system + has_session=false để client
   // phân biệt được "user chưa login" vs "admin fallback" (backward compat).
   const admin = await getCurrentStaff(req);
   return NextResponse.json({
     staff: { ...admin, id: null, role: "system", full_name: "Chưa đăng nhập" },
-    has_session: false
+    has_session: false,
+    role_id: roleId,
+    role_name: roleName,
+    permissions
   });
 }
 

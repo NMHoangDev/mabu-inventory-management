@@ -17,6 +17,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface ParsedItem {
   product_name: string;
@@ -144,6 +145,7 @@ export default function ParseOrderPage() {
   const totalComputed = (draft?.items.reduce((s, it) => s + (it.quantity || 0) * (it.unit_price || 0), 0) ?? 0) - (draft?.discount ?? 0) + (draft?.shipping_fee ?? 0);
 
   return (
+    <PageGuard permission="orders.create">
     <div className="space-y-4 max-w-5xl mx-auto">
       <header className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white">
@@ -352,6 +354,7 @@ export default function ParseOrderPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

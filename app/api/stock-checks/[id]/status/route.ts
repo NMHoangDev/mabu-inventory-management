@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { transitionStockCheckStatus } from "@/lib/stock-checks/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,10 @@ export async function PATCH(
         { status: 400 }
       );
     }
+    const guard = await requirePermission(
+      parsed.data.nextStatus === "balanced" ? "stock_checks.balance" : "stock_checks.create"
+    );
+    if (guard) return guard;
     const result = await transitionStockCheckStatus({
       stockCheckId: id,
       nextStatus: parsed.data.nextStatus

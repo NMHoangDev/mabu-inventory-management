@@ -7,6 +7,7 @@ import { ArrowLeft, FileText, Loader2, Pencil, Package, Trash2, Star, Truck } fr
 import { AddSupplierModal } from "@/components/suppliers/AddSupplierModal";
 import { SupplierProductSearch, type SupplierProductHit } from "@/components/suppliers/SupplierProductSearch";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface SupplierDetail {
   id: string;
@@ -213,6 +214,7 @@ export default function SupplierDetailPage() {
   const excludeIds = products.map((p) => p.product_id);
 
   return (
+    <PageGuard permission="suppliers.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6 bg-slate-100">
       <header className="h-14 bg-white border-b px-6 flex items-center justify-between flex-shrink-0">
         <button
@@ -510,6 +512,7 @@ export default function SupplierDetailPage() {
         />
       ) : null}
     </div>
+    </PageGuard>
   );
 }
 

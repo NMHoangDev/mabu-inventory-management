@@ -9,6 +9,7 @@ import {
   HelpCircle
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface VoucherDetail {
   id: string;
@@ -94,6 +95,7 @@ export default function ReceiptVoucherDetailPage() {
   const meta = STATUS_META[voucher.status] ?? STATUS_META.draft;
 
   return (
+    <PageGuard permission="receipt_vouchers.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white border-b px-4 flex items-center justify-between flex-shrink-0">
         <button onClick={() => router.push("/finance/receipt-vouchers")}
@@ -230,5 +232,6 @@ export default function ReceiptVoucherDetailPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

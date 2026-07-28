@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildWorkbookBuffer, xlsxResponse, timestampedFilename } from "@/lib/shared/excel-export";
 import { PRODUCT_EXPORT_COLUMNS } from "@/lib/products/export-fields";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("products.export");
+  if (guard) return guard;
   try {
     const parsed = bodySchema.safeParse(await request.json());
     if (!parsed.success) {

@@ -18,6 +18,7 @@ import {
 import { fetchInventorySummary, fetchInventoryDetail, fetchInOutBalance } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
 import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 // Không có bảng ledger lịch sử nên không thể vẽ "tồn kho tuyệt đối theo
 // ngày" một cách trung thực — thay bằng biến động luỹ kế (nhập - xuất cộng
@@ -78,6 +79,7 @@ export default function InventorySummaryPage() {
   const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
+    <PageGuard permission="reports.view_inventory">
     <ReportShell
       title="Báo cáo tồn kho"
       backHref="/reports/inventory"
@@ -159,5 +161,6 @@ export default function InventorySummaryPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

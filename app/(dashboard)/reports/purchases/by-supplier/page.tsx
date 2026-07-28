@@ -16,6 +16,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseBySupplier, type SupplierPurchaseData } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function BySupplierPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -52,6 +53,7 @@ export default function BySupplierPage() {
   const totalPaid = d?.suppliers.reduce((s, sup) => s + sup.total_paid, 0) ?? 0;
 
   return (
+    <PageGuard permission="reports.view_purchases">
     <ReportShell
       title="Báo cáo nhập hàng theo nhà cung cấp"
       backHref="/reports/purchases"
@@ -155,5 +157,6 @@ export default function BySupplierPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

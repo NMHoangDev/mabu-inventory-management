@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { deleteOrder, getOrder, updateOrder, updateOrderStatus } from "@/lib/orders/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,8 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("orders.view");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const order = await getOrder(id);
@@ -61,6 +64,8 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("orders.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const body = await request.json();
@@ -100,6 +105,8 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("orders.delete");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const ok = await deleteOrder(id);

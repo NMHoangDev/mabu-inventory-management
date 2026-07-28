@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureDatabase } from "@/lib/db/migration";
 import { getPool, isDatabaseConfigured } from "@/lib/db/connection";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 // Báo cáo khách hàng — trước đây /reports/customers không tồn tại (404) dù
 // có trong menu. Tổng hợp thật từ orders + customers, không dữ liệu giả.
 export async function GET(request: Request) {
+  const guard = await requirePermission("reports.view_customers");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const from = url.searchParams.get("from") || "";

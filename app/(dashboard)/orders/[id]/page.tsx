@@ -28,6 +28,8 @@ import {
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
 import { PrintableInvoice } from "@/components/orders/PrintableInvoice";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface OrderItem {
   id: string;
@@ -194,6 +196,7 @@ export default function OrderDetailPage() {
   const router = useRouter();
   const params = useParams();
   const orderId = params.id as string;
+  const { hasPermission } = usePermissions();
 
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
@@ -367,6 +370,7 @@ export default function OrderDetailPage() {
   const itemDiscountTotal = order.items.reduce((s, item) => s + itemDiscountAmount(item), 0);
 
   return (
+    <PageGuard permission="orders.view">
     <div className="flex flex-col min-h-screen bg-[#f4f6f8]">
       {/* Top bar */}
       <header className="h-14 bg-white border-b border-[#c0c6d6] flex justify-between items-center px-6 shrink-0 sticky top-0 z-20">
@@ -390,13 +394,15 @@ export default function OrderDetailPage() {
           >
             <Printer className="w-5 h-5 text-[#404754]" />
           </button>
-          <button
-            onClick={() => router.push(`/orders/${orderId}/edit`)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-[#005baf] hover:bg-[#005eb3] text-white text-sm font-medium rounded transition-colors"
-          >
-            <Edit2 className="w-4 h-4" />
-            Sửa đơn
-          </button>
+          {hasPermission("orders.edit") ? (
+            <button
+              onClick={() => router.push(`/orders/${orderId}/edit`)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-[#005baf] hover:bg-[#005eb3] text-white text-sm font-medium rounded transition-colors"
+            >
+              <Edit2 className="w-4 h-4" />
+              Sửa đơn
+            </button>
+          ) : null}
           <div className="flex items-center gap-2 pl-3 border-l border-[#c0c6d6]">
             <span className="text-xs text-[#0d1d29] font-medium">{order.staff}</span>
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs ${avatarColor(order.staff)}`}>
@@ -691,7 +697,7 @@ export default function OrderDetailPage() {
             {/* Quick actions */}
             <section className="bg-white border border-[#c0c6d6] rounded-xl p-4 space-y-2">
               <h3 className="text-sm font-bold text-[#0d1d29] mb-3">Xử lý đơn hàng</h3>
-              {order.status === "new" && (
+              {order.status === "new" && hasPermission("orders.approve") ? (
                 <button
                   onClick={confirmOrderNow}
                   disabled={busy}
@@ -700,8 +706,8 @@ export default function OrderDetailPage() {
                   <CheckCircle className="w-4 h-4" />
                   Xác nhận đơn hàng (trừ tồn kho)
                 </button>
-              )}
-              {order.status === "completed" &&
+              ) : null}
+              {order.status === "completed" && hasPermission("orders.fulfill") &&
                 NEXT_FULFILLMENT[order.fulfillment_status]?.map((step) => (
                   <button
                     key={step.key}
@@ -739,13 +745,15 @@ export default function OrderDetailPage() {
                 <Truck className="w-4 h-4" />
                 Giao hàng
               </button>
-              <button
-                onClick={() => router.push(`/orders/${orderId}/edit`)}
-                className="w-full flex items-center gap-2 px-3 py-2 border border-[#c0c6d6] rounded-lg hover:bg-[#ebf5ff] text-sm text-[#404754] transition-colors"
-              >
-                <Edit2 className="w-4 h-4" />
-                Sửa đơn hàng
-              </button>
+              {hasPermission("orders.edit") ? (
+                <button
+                  onClick={() => router.push(`/orders/${orderId}/edit`)}
+                  className="w-full flex items-center gap-2 px-3 py-2 border border-[#c0c6d6] rounded-lg hover:bg-[#ebf5ff] text-sm text-[#404754] transition-colors"
+                >
+                  <Edit2 className="w-4 h-4" />
+                  Sửa đơn hàng
+                </button>
+              ) : null}
               <button
                 onClick={cancelOrder}
                 disabled={busy || order.status === "cancelled"}
@@ -761,6 +769,7 @@ export default function OrderDetailPage() {
 
       <PrintableInvoice order={order} store={store} />
     </div>
+    </PageGuard>
   );
 }
 

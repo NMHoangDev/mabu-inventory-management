@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { deleteRule, updateRule } from "@/lib/automations/engine";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("automations.edit");
+  if (guard) return guard;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -39,6 +42,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("automations.delete");
+  if (guard) return guard;
   try {
     const { id } = await params;
     const ok = await deleteRule(id);

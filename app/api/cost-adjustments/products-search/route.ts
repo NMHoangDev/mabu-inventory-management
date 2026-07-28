@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { searchProductsForCostAdjustment } from "@/lib/cost-adjustments/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("cost_adjustments.view");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const q = url.searchParams.get("q") ?? "";

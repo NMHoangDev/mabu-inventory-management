@@ -4,11 +4,14 @@ import {
   createCustomerGroup,
   getCustomerGroupsWithCount,
 } from "@/lib/customers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requirePermission("customers.view");
+  if (guard) return guard;
   try {
     const groups = await getCustomerGroupsWithCount();
     return NextResponse.json({ groups });
@@ -29,6 +32,8 @@ const createSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("customers.create");
+  if (guard) return guard;
   try {
     const body = await request.json();
     const parsed = createSchema.safeParse(body);

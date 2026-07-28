@@ -7,6 +7,7 @@ import {
   seedDefaultRulesIfEmpty,
   type RuleTrigger,
 } from "@/lib/automations/engine";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +38,8 @@ const triggerSchema = z.object({
 });
 
 export async function GET() {
+  const guard = await requirePermission("automations.view");
+  if (guard) return guard;
   try {
     await seedDefaultRulesIfEmpty();
     const rules = await listRules();
@@ -48,6 +51,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("automations.create");
+  if (guard) return guard;
   try {
     const body = await request.json();
     if (body?.mode === "run_trigger") {

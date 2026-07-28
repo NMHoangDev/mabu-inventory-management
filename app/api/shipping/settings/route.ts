@@ -6,11 +6,14 @@ import {
   DIMENSION_LABELS,
   REQUIREMENT_LABELS,
 } from "@/lib/shipping/settings-repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requirePermission("shipping.view");
+  if (guard) return guard;
   try {
     const settings = await getShippingSettings();
     return NextResponse.json({
@@ -66,6 +69,8 @@ const updateSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("shipping.manage_settings");
+  if (guard) return guard;
   try {
     const body = await request.json();
     const parsed = updateSchema.safeParse(body);

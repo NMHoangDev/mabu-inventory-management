@@ -12,6 +12,7 @@ import {
   TrendingUp,
   Warehouse
 } from "lucide-react";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const REPORTS = [
   {
@@ -60,6 +61,7 @@ const REPORTS = [
 
 export default function InventoryReportsPage() {
   return (
+    <PageGuard permission="reports.view_inventory">
     <div className="flex flex-col min-h-screen bg-[#f0f2f5]">
       {/* Header */}
       <header className="sticky top-0 bg-white z-10 flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -118,5 +120,6 @@ export default function InventoryReportsPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }

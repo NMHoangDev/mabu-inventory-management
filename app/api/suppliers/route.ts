@@ -5,11 +5,14 @@ import {
   getNextSupplierCode,
   type CreateSupplierInput
 } from "@/lib/suppliers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("suppliers.view");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const search = url.searchParams.get("search") ?? undefined;
@@ -28,6 +31,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("suppliers.create");
+  if (guard) return guard;
   try {
     const body = (await request.json()) as CreateSupplierInput;
     if (!body.name?.trim()) {

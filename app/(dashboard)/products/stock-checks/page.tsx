@@ -12,6 +12,8 @@ import {
   ChevronRight,
   FileText
 } from "lucide-react";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type StockCheckStatus = "draft" | "in_progress" | "balanced" | "cancelled";
 
@@ -57,6 +59,7 @@ function formatDateTime(iso: string): string {
 }
 
 export default function StockChecksListPage() {
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<StockCheckRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -138,6 +141,7 @@ export default function StockChecksListPage() {
   };
 
   return (
+    <PageGuard permission="stock_checks.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white border-b flex items-center justify-between px-6 flex-shrink-0">
         <h1 className="text-lg font-semibold text-slate-800">Danh sách phiếu kiểm hàng</h1>
@@ -178,12 +182,14 @@ export default function StockChecksListPage() {
             <Upload className="w-4 h-4" /> Nhập file
           </button>
         </div>
-        <Link
-          href="/products/stock-checks/new"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Tạo phiếu kiểm hàng
-        </Link>
+        {hasPermission("stock_checks.create") ? (
+          <Link
+            href="/products/stock-checks/new"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Tạo phiếu kiểm hàng
+          </Link>
+        ) : null}
       </div>
 
       <div className="bg-white px-4 pt-2 border-b flex-shrink-0">
@@ -343,5 +349,6 @@ export default function StockChecksListPage() {
         </div>
       </footer>
     </div>
+    </PageGuard>
   );
 }

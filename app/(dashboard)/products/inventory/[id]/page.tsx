@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Copy, HelpCircle, ImageIcon, Info, Loader2, MessageCircle, Trash2 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type InventoryProductDetail = {
   id: string;
@@ -167,6 +168,7 @@ export default function InventoryProductDetailPage() {
   const galleryImages = product.images.length ? product.images.slice(0, 4) : [""];
 
   return (
+    <PageGuard permission="inventory.view">
     <section className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-white px-4 py-3 shadow-soft">
         <Link className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-primary" href="/products/inventory">
@@ -367,5 +369,6 @@ export default function InventoryProductDetailPage() {
         )}
       </section>
     </section>
+    </PageGuard>
   );
 }

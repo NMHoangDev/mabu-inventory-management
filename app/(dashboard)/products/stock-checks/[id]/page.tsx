@@ -11,6 +11,8 @@ import {
   AlertCircle,
   Scale
 } from "lucide-react";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type StockCheckStatus = "draft" | "in_progress" | "balanced" | "cancelled";
 
@@ -66,6 +68,7 @@ function formatDateOnly(iso: string | null | undefined): string {
 }
 
 export default function StockCheckDetailPage() {
+  const { hasPermission } = usePermissions();
   const params = useParams<{ id: string }>();
   const id = params?.id ?? "";
 
@@ -161,6 +164,7 @@ export default function StockCheckDetailPage() {
   const isFinal = sc.status === "balanced" || sc.status === "cancelled";
 
   return (
+    <PageGuard permission="stock_checks.view">
     <div className="flex flex-col gap-4 px-4 pb-8 lg:px-6">
       <div className="flex items-center justify-between">
         <Link
@@ -325,7 +329,7 @@ export default function StockCheckDetailPage() {
         </button>
 
         <div className="ml-auto">
-          {!isFinal ? (
+          {!isFinal && hasPermission("stock_checks.balance") ? (
             <button
               type="button"
               onClick={() =>
@@ -340,7 +344,7 @@ export default function StockCheckDetailPage() {
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Scale className="h-4 w-4" />}
               Cân bằng kiểm kê
             </button>
-          ) : (
+          ) : !isFinal ? null : (
             <span className="text-xs text-slate-500">
               {sc.status === "balanced" ? "Đã cân bằng — không thể sửa lại, tạo phiếu mới nếu cần." : "Phiếu đã hủy."}
             </span>
@@ -348,6 +352,7 @@ export default function StockCheckDetailPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

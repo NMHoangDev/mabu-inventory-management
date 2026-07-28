@@ -4,6 +4,7 @@ import { ensureDatabase } from "@/lib/db/migration";
 import { createOrder, type OrderInput } from "@/lib/orders/repository";
 import { loadWorkbookSheet, rowsToObjects } from "@/lib/imports/xlsx-helpers";
 import { ORDER_IMPORT_HEADER_MAP } from "@/lib/orders/import-fields";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -145,6 +146,8 @@ async function resolveProducts(groups: OrderGroup[], skus: string[]) {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("orders.import");
+  if (guard) return guard;
   try {
     const form = await request.formData();
     const mode = String(form.get("mode") ?? "parse");

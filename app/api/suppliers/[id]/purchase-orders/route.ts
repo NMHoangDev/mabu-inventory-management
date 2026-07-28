@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isDatabaseConfigured, getPool } from "@/lib/db/connection";
 import { ensureDatabase } from "@/lib/db/migration";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,8 @@ function isUuid(value: string): boolean {
 // file hóa đơn scan gốc (nếu đơn được tạo từ luồng scan) để trang chi tiết
 // NCC hiển thị + link thẳng tới trang chi tiết từng đơn.
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("suppliers.view");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     if (!isDatabaseConfigured || !isUuid(id)) {

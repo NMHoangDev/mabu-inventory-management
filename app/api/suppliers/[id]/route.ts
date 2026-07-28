@@ -6,11 +6,14 @@ import {
   getSupplierDebtSummary,
   type UpdateSupplierInput
 } from "@/lib/suppliers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("suppliers.view");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const data = await getSupplier(id);
@@ -26,6 +29,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("suppliers.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const body = (await request.json()) as UpdateSupplierInput;
@@ -40,6 +45,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("suppliers.delete");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     await deleteSupplier(id);

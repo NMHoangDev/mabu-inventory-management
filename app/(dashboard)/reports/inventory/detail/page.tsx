@@ -15,6 +15,7 @@ import {
 import { fetchInventoryDetail } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
 import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const STATE_STYLE: Record<string, string> = {
   active: "text-green-600 bg-green-50",
@@ -58,6 +59,7 @@ export default function InventoryDetailPage() {
   const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
+    <PageGuard permission="reports.view_inventory">
     <ReportShell
       title="Báo cáo tồn kho chi tiết"
       backHref="/reports/inventory"
@@ -113,5 +115,6 @@ export default function InventoryDetailPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

@@ -11,6 +11,7 @@ import {
   TrendingUp
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type Period = "7d" | "30d" | "90d" | "this_month" | "last_month" | "this_quarter" | "custom";
 
@@ -253,6 +254,7 @@ export default function ProfitLossPage() {
   const netProfitTrend = d && prevData ? pctChange(d.net_profit, prevData.net_profit) : null;
 
   return (
+    <PageGuard permission="reports.view_finance">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -521,6 +523,7 @@ export default function ProfitLossPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   HelpCircle,
   MessageCircle
 } from "lucide-react";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const REPORTS = [
   {
@@ -67,6 +68,7 @@ const REPORTS = [
 
 export default function FinanceReportsPage() {
   return (
+    <PageGuard permission="reports.view_finance">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
         <h1 className="text-xl font-semibold text-slate-800">Danh sách báo cáo tài chính</h1>
@@ -116,5 +118,6 @@ export default function FinanceReportsPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }

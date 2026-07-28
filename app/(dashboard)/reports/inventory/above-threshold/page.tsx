@@ -16,6 +16,7 @@ import {
 import { fetchAboveThreshold } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
 import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function AboveThresholdPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -49,6 +50,7 @@ export default function AboveThresholdPage() {
   const d = data;
 
   return (
+    <PageGuard permission="reports.view_inventory">
     <ReportShell
       title="Báo cáo tồn kho vượt định mức"
       backHref="/reports/inventory"
@@ -121,5 +123,6 @@ export default function AboveThresholdPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

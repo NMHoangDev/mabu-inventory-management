@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   Info,
   HelpCircle,
@@ -216,6 +217,7 @@ export default function ShippingConfigPage() {
   }
 
   return (
+    <PageGuard permission="shipping.manage_settings">
     <div className="flex-1 overflow-y-auto bg-[#f6f9ff]">
       {/* Top bar */}
       <header className="flex justify-between items-center h-16 px-4 w-full sticky top-0 z-40 bg-white border-b border-slate-200">
@@ -649,6 +651,7 @@ export default function ShippingConfigPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

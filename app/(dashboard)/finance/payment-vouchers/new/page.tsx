@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   ArrowLeft,
   Loader2,
@@ -144,6 +145,7 @@ export default function NewPaymentVoucherPage() {
   }
 
   return (
+    <PageGuard permission="payment_vouchers.create">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6 bg-[#f4f6f8]">
       <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0 z-10">
         <button
@@ -424,5 +426,6 @@ export default function NewPaymentVoucherPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

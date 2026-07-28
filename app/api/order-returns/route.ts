@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { listOrderReturns, createOrderReturn } from "@/lib/order-returns/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("order_returns.view");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const result = await listOrderReturns({
@@ -37,6 +40,8 @@ const createSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("order_returns.create");
+  if (guard) return guard;
   try {
     const parsed = createSchema.safeParse(await request.json());
     if (!parsed.success) {

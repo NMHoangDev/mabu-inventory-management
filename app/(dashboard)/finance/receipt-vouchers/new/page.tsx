@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   ArrowLeft,
   ChevronDown,
@@ -90,6 +91,7 @@ export default function NewReceiptVoucherPage() {
   }
 
   return (
+    <PageGuard permission="receipt_vouchers.create">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6 bg-[#f3f4f6]">
       <header className="h-14 bg-white border-b px-4 flex items-center justify-between flex-shrink-0">
         <button
@@ -216,5 +218,6 @@ export default function NewReceiptVoucherPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

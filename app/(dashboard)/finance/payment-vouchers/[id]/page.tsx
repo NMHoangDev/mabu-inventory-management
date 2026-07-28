@@ -10,6 +10,7 @@ import {
   HelpCircle
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface PaymentDetail {
   id: string;
@@ -102,6 +103,7 @@ export default function PaymentVoucherDetailPage() {
   const meta = STATUS_META[voucher.status] ?? STATUS_META.draft;
 
   return (
+    <PageGuard permission="payment_vouchers.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0 z-10">
         <button onClick={() => router.push("/finance/payment-vouchers")}
@@ -276,5 +278,6 @@ export default function PaymentVoucherDetailPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

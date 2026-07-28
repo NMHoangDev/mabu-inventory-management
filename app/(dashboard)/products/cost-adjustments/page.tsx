@@ -12,6 +12,8 @@ import {
   FileText,
   Settings
 } from "lucide-react";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type AdjStatus = "draft" | "completed" | "cancelled";
 
@@ -41,6 +43,7 @@ function formatDate(iso: string): string {
 }
 
 export default function CostAdjustmentsListPage() {
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<AdjRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -82,6 +85,7 @@ export default function CostAdjustmentsListPage() {
   useEffect(() => { if (page > totalPages) setPage(1); }, [page, totalPages]);
 
   return (
+    <PageGuard permission="cost_adjustments.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white border-b px-6 flex items-center justify-between flex-shrink-0">
         <h1 className="text-lg font-semibold text-slate-800">Điều chỉnh giá vốn</h1>
@@ -115,12 +119,14 @@ export default function CostAdjustmentsListPage() {
             <Download className="w-4 h-4" /> Xuất file
           </button>
         </div>
-        <Link
-          href="/products/cost-adjustments/new"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Tạo phiếu điều chỉnh
-        </Link>
+        {hasPermission("cost_adjustments.create") ? (
+          <Link
+            href="/products/cost-adjustments/new"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Tạo phiếu điều chỉnh
+          </Link>
+        ) : null}
       </div>
 
       <div className="bg-white px-4 pt-2 border-b flex-shrink-0">
@@ -225,5 +231,6 @@ export default function CostAdjustmentsListPage() {
         </div>
       </footer>
     </div>
+    </PageGuard>
   );
 }

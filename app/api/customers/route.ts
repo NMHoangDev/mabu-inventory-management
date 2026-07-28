@@ -8,6 +8,7 @@ import {
   getCustomers,
   updateCustomer,
 } from "@/lib/customers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ const searchParamsSchema = z.object({
 });
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("customers.view");
+  if (guard) return guard;
   try {
     const { searchParams } = new URL(request.url);
     const opts = searchParamsSchema.parse({
@@ -75,6 +78,8 @@ const createSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("customers.create");
+  if (guard) return guard;
   try {
     const body = await request.json();
     const parsed = createSchema.safeParse(body);

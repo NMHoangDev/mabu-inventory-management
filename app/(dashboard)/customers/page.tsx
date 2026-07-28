@@ -15,6 +15,8 @@ import {
 import { downloadCsv } from "@/lib/shared/csv-export";
 import { formatCurrencyVND } from "@/lib/shared/format";
 import { CustomerAddress, CustomerFormData, CustomerFormModal } from "./CustomerFormModal";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface Customer {
   id: string;
@@ -55,6 +57,7 @@ interface SortState {
 }
 
 export default function CustomersPage() {
+  const { hasPermission } = usePermissions();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [groups, setGroups] = useState<CustomerGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -215,6 +218,7 @@ export default function CustomersPage() {
   }
 
   return (
+    <PageGuard permission="customers.view">
     <div className="space-y-4">
       {/* Action toolbar */}
       <div className="flex justify-between items-center">
@@ -240,13 +244,15 @@ export default function CustomersPage() {
             Nhập file
           </button>
         </div>
-        <button
-          onClick={openCreate}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition font-medium text-sm shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Thêm khách hàng
-        </button>
+        {hasPermission("customers.create") ? (
+          <button
+            onClick={openCreate}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition font-medium text-sm shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Thêm khách hàng
+          </button>
+        ) : null}
       </div>
 
       {/* Main card */}
@@ -536,5 +542,6 @@ export default function CustomersPage() {
         </div>
       )}
     </div>
+    </PageGuard>
   );
 }

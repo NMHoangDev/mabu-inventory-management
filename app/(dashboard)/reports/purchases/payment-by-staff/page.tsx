@@ -16,6 +16,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPaymentByStaff } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function PaymentByStaffPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -48,6 +49,7 @@ export default function PaymentByStaffPage() {
   const d = data;
 
   return (
+    <PageGuard permission="reports.view_purchases">
     <ReportShell
       title="Báo cáo thanh toán nhập hàng theo nhân viên"
       backHref="/reports/purchases"
@@ -119,5 +121,6 @@ export default function PaymentByStaffPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

@@ -27,6 +27,8 @@ import { formatCurrencyVND } from "@/lib/shared/format";
 import { ExcelExportDialog, type ExportScope } from "@/components/shared/ExcelExportDialog";
 import { ORDER_EXPORT_GROUPS, ORDER_EXPORT_TYPE_OPTIONS } from "@/lib/orders/export-fields";
 import { ImportExcelModal } from "@/components/imports/ImportExcelModal";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface OrderItem {
   id: string;
@@ -157,6 +159,7 @@ function phoneMask(phone: string) {
 
 export default function OrdersPage() {
   const router = useRouter();
+  const { hasPermission } = usePermissions();
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<OrderStats>({
@@ -266,6 +269,7 @@ export default function OrdersPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
+    <PageGuard permission="orders.view">
     <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#f4f6f8]">
       {/* Quick Stats Bento Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -352,27 +356,33 @@ export default function OrdersPage() {
               value={sourceFilter}
               onChange={setSourceFilter}
             />
-            <button
-              onClick={() => setImportOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-[#c0c6d6] text-[#404754] font-medium rounded-lg hover:bg-gray-50 transition-all"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Nhập file</span>
-            </button>
-            <button
-              onClick={() => setExportOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-[#c0c6d6] text-[#404754] font-medium rounded-lg hover:bg-gray-50 transition-all"
-            >
-              <Download className="w-4 h-4" />
-              <span>Xuất file</span>
-            </button>
-            <button
-              onClick={() => router.push("/orders/new")}
-              className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Tạo đơn hàng</span>
-            </button>
+            {hasPermission("orders.import") ? (
+              <button
+                onClick={() => setImportOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-[#c0c6d6] text-[#404754] font-medium rounded-lg hover:bg-gray-50 transition-all"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Nhập file</span>
+              </button>
+            ) : null}
+            {hasPermission("orders.export") ? (
+              <button
+                onClick={() => setExportOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-[#c0c6d6] text-[#404754] font-medium rounded-lg hover:bg-gray-50 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>Xuất file</span>
+              </button>
+            ) : null}
+            {hasPermission("orders.create") ? (
+              <button
+                onClick={() => router.push("/orders/new")}
+                className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"
+              >
+                <Plus className="w-5 h-5" />
+                <span>Tạo đơn hàng</span>
+              </button>
+            ) : null}
           </div>
       </div>
 
@@ -450,12 +460,14 @@ export default function OrdersPage() {
                     <div className="flex flex-col items-center gap-2">
                       <ReceiptText className="w-10 h-10 text-[#c0c6d6]" />
                       <p>Chưa có đơn hàng nào. Nhấn "Tạo đơn hàng" để bắt đầu.</p>
-                      <button
-                        onClick={() => router.push("/orders/new")}
-                        className="mt-2 px-4 py-2 bg-[#005baf] text-white text-sm rounded-lg"
-                      >
-                        Tạo đơn hàng đầu tiên
-                      </button>
+                      {hasPermission("orders.create") ? (
+                        <button
+                          onClick={() => router.push("/orders/new")}
+                          className="mt-2 px-4 py-2 bg-[#005baf] text-white text-sm rounded-lg"
+                        >
+                          Tạo đơn hàng đầu tiên
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -590,6 +602,7 @@ export default function OrdersPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

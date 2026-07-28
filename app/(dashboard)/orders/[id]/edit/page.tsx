@@ -26,6 +26,7 @@ import {
   Save,
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type DiscountType = "amount" | "percent";
 
@@ -322,6 +323,7 @@ export default function EditOrderPage() {
   }
 
   return (
+    <PageGuard permission="orders.edit">
     <div className="flex flex-col min-h-screen bg-[#f4f6f8]">
       {/* Top app bar */}
       <header className="h-14 bg-white border-b border-[#c0c6d6] flex justify-between items-center px-6 shrink-0 sticky top-0 z-20">
@@ -711,5 +713,6 @@ export default function EditOrderPage() {
         </div>
       </main>
     </div>
+    </PageGuard>
   );
 }

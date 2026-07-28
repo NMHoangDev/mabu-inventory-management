@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   ArrowLeft,
   Printer,
@@ -223,6 +224,7 @@ export default function ShippingDetailPage() {
   }
 
   return (
+    <PageGuard permission="shipping.view">
     <div className="flex-1 overflow-y-auto bg-slate-50">
       {/* Top bar */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between">
@@ -410,6 +412,7 @@ export default function ShippingDetailPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

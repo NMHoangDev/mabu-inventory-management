@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { deleteCustomer, getCustomerById, updateCustomer } from "@/lib/customers/repository";
 import type { CustomerInput } from "@/lib/customers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("customers.view");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const customer = await getCustomerById(id);
@@ -62,6 +65,8 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("customers.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const body = await request.json();
@@ -98,6 +103,8 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requirePermission("customers.delete");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const success = await deleteCustomer(id);

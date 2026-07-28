@@ -4,6 +4,7 @@ import { ensureDatabase } from "@/lib/db/migration";
 import { createProduct, updateProduct } from "@/lib/products/repository";
 import { loadWorkbookSheet, rowsToObjects } from "@/lib/imports/xlsx-helpers";
 import { PRODUCT_IMPORT_HEADER_MAP } from "@/lib/products/import-fields";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,6 +98,8 @@ async function classifyRows(rows: ParsedRow[], skus: string[]) {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("products.import");
+  if (guard) return guard;
   try {
     const form = await request.formData();
     const mode = String(form.get("mode") ?? "parse");

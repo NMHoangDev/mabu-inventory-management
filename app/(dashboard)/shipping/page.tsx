@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   Box,
   Clock,
@@ -79,6 +80,7 @@ export default function ShippingOverviewPage() {
   }, [s]);
 
   return (
+    <PageGuard permission="shipping.view">
     <div className="flex-1 overflow-y-auto bg-slate-50">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
@@ -325,6 +327,7 @@ export default function ShippingOverviewPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSiteSettings, updateSiteSettings } from "@/lib/storefront/settings";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requirePermission("settings.manage_storefront");
+  if (guard) return guard;
   try {
     const settings = await getSiteSettings();
     return NextResponse.json({ settings });
@@ -31,6 +34,8 @@ const updateSchema = z.object({
 });
 
 export async function PATCH(request: Request) {
+  const guard = await requirePermission("settings.manage_storefront");
+  if (guard) return guard;
   try {
     const body = await request.json();
     const parsed = updateSchema.safeParse(body);

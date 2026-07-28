@@ -14,6 +14,8 @@ import {
   FileText,
   Settings
 } from "lucide-react";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type ReceiptStatus = "pending" | "in_progress" | "completed" | "cancelled";
 type PaymentStatus = "unpaid" | "partial" | "paid";
@@ -62,6 +64,7 @@ function formatDateTime(iso: string): string {
 }
 
 export default function GoodsReceiptsListPage() {
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<GoodsReceiptRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -120,6 +123,7 @@ export default function GoodsReceiptsListPage() {
   }, [page, totalPages]);
 
   return (
+    <PageGuard permission="goods_receipts.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white border-b flex items-center justify-between px-6 flex-shrink-0">
         <h1 className="text-lg font-semibold text-slate-800">Danh sách đơn nhập hàng</h1>
@@ -161,12 +165,14 @@ export default function GoodsReceiptsListPage() {
             <Settings className="w-4 h-4" /> Quản lý hàng NCC
           </button>
         </div>
-        <Link
-          href="/products/goods-receipts/new"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Tạo đơn nhập hàng
-        </Link>
+        {hasPermission("goods_receipts.create") ? (
+          <Link
+            href="/products/goods-receipts/new"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Tạo đơn nhập hàng
+          </Link>
+        ) : null}
       </div>
 
       <div className="bg-white px-4 pt-2 border-b flex-shrink-0">
@@ -319,5 +325,6 @@ export default function GoodsReceiptsListPage() {
         </div>
       </footer>
     </div>
+    </PageGuard>
   );
 }

@@ -6,6 +6,7 @@ import {
 } from "@/lib/promotions/repository";
 import { createPromotionSchema } from "@/lib/promotions/validation";
 import type { PromotionMethod, PromotionStatus, PromotionType } from "@/lib/promotions/types";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,8 @@ const METHODS = ["order_total", "per_product", "by_quantity", "addon_by_order_to
 const TYPES = ["discount", "gift"] as const;
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("promotions.view");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const filters: PromotionFilters = {
@@ -42,6 +45,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("promotions.create");
+  if (guard) return guard;
   try {
     const parsed = createPromotionSchema.safeParse(await request.json());
     if (!parsed.success) {

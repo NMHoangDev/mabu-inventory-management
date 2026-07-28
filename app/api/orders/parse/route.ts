@@ -5,6 +5,7 @@ import {
   applyOrderDraft,
   type ParsedOrderDraft,
 } from "@/lib/orders/ai-parse";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,6 +85,8 @@ const applySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("orders.create");
+  if (guard) return guard;
   try {
     const contentType = request.headers.get("content-type") ?? "";
 

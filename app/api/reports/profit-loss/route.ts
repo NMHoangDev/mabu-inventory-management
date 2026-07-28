@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureDatabase } from "@/lib/db/migration";
 import { getPool, isDatabaseConfigured } from "@/lib/db/connection";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,8 @@ export const dynamic = "force-dynamic";
 //     NCC đã nằm trong giá vốn qua goods_receipts, tính thêm vào đây sẽ trùng.
 //   - Top sản phẩm + biểu đồ theo ngày: group by thật từ order_items/orders.
 export async function GET(request: Request) {
+  const guard = await requirePermission("reports.view_finance");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const from = url.searchParams.get("date_from") || url.searchParams.get("from") || "";

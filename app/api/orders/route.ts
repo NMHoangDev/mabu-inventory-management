@@ -6,11 +6,14 @@ import {
   listOrders,
   OrderItemInput,
 } from "@/lib/orders/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("orders.view");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const search = url.searchParams.get("search") ?? undefined;
@@ -93,6 +96,8 @@ const createSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("orders.create");
+  if (guard) return guard;
   try {
     const body = await request.json();
     const parsed = createSchema.safeParse(body);

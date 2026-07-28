@@ -12,6 +12,7 @@ import {
   ReportTable
 } from "@/components/reports/ReportShell";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface TopCustomerRow {
   customer_id: string | null;
@@ -56,6 +57,7 @@ export default function CustomersReportPage() {
   }, [load]);
 
   return (
+    <PageGuard permission="reports.view_customers">
     <ReportShell
       title="Báo cáo khách hàng"
       description="Tổng quan số lượng khách hàng và khách hàng mang lại doanh thu cao nhất."
@@ -120,5 +122,6 @@ export default function CustomersReportPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

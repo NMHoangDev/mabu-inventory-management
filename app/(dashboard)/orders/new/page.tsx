@@ -30,6 +30,7 @@ import {
 import { formatCurrencyVND } from "@/lib/shared/format";
 import { ApplyPromotionModal } from "@/components/orders/ApplyPromotionModal";
 import type { PromotionCandidate } from "@/lib/promotions/types";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface Product {
   id: string;
@@ -664,6 +665,7 @@ export default function NewOrderPage() {
   };
 
   return (
+    <PageGuard permission="orders.create">
     <div className="flex flex-col min-h-screen bg-[#f4f6f8]">
       {/* Top app bar */}
       <header className="h-14 bg-white border-b border-[#c0c6d6] flex justify-between items-center px-6 shrink-0 sticky top-0 z-20">
@@ -1218,6 +1220,7 @@ export default function NewOrderPage() {
         />
       )}
     </div>
+    </PageGuard>
   );
 }
 

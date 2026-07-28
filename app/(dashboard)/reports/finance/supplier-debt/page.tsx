@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { ReportShell, ReportTable, formatFullDate } from "@/components/reports/ReportShell";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface DebtRow {
   id: string | null;
@@ -40,6 +41,7 @@ export default function SupplierDebtPage() {
   }, [load]);
 
   return (
+    <PageGuard permission="reports.view_finance">
     <ReportShell
       title="Báo cáo công nợ nhà cung cấp"
       description="Đơn nhập hàng còn chưa thanh toán đủ cho nhà cung cấp (chưa thanh toán / thanh toán một phần)."
@@ -86,5 +88,6 @@ export default function SupplierDebtPage() {
         />
       </div>
     </ReportShell>
+    </PageGuard>
   );
 }

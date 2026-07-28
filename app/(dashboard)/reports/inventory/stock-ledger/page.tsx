@@ -15,6 +15,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchInventoryLedger } from "@/services/reportService";
 import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const TYPE_STYLE: Record<string, string> = {
   "Nhập kho": "text-green-600 bg-green-50",
@@ -56,6 +57,7 @@ export default function StockLedgerPage() {
   const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
+    <PageGuard permission="reports.view_inventory">
     <ReportShell
       title="Sổ kho"
       description="Lịch sử giao dịch xuất nhập kho"
@@ -119,5 +121,6 @@ export default function StockLedgerPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

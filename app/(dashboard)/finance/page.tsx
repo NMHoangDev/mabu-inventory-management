@@ -17,6 +17,7 @@ import {
   ArrowUpCircle,
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface AgingRow {
   bucket: string;
@@ -89,6 +90,7 @@ export default function FinancePage() {
   const maxAging = data.aging.reduce((max, a) => Math.max(max, a.amount), 0) || 1;
 
   return (
+    <PageGuard anyOf={["receipt_vouchers.view", "payment_vouchers.view"]}>
     <div className="space-y-4">
       <header className="flex items-center justify-between flex-wrap gap-2">
         <div>
@@ -269,6 +271,7 @@ export default function FinancePage() {
         )}
       </div>
     </div>
+    </PageGuard>
   );
 }
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface ReturnableItemRow {
   order_item_id: string;
@@ -131,6 +132,7 @@ export default function CreateOrderReturnPage() {
   }
 
   return (
+    <PageGuard permission="order_returns.create">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6 bg-slate-100">
       <header className="h-14 bg-white border-b px-6 flex items-center justify-between flex-shrink-0">
         <button
@@ -238,5 +240,6 @@ export default function CreateOrderReturnPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { setPromotionStatus } from "@/lib/promotions/repository";
 import { promotionStatusSchema } from "@/lib/promotions/validation";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Route riêng cho nút bật/tắt nhanh ở trang danh sách — hẹp, không thể lỡ ghi đè `rules`. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("promotions.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const parsed = promotionStatusSchema.safeParse(await request.json());

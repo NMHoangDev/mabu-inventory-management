@@ -2,11 +2,14 @@
 import { getInventoryProductDetail } from "@/lib/products/inventory";
 import { deleteProduct, updateProduct } from "@/lib/products/repository";
 import { listSuppliersForProduct } from "@/lib/suppliers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("products.view");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const product = await getInventoryProductDetail(id);
@@ -25,6 +28,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("products.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const body = await request.json();
@@ -43,6 +48,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("products.delete");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const success = await deleteProduct(id);

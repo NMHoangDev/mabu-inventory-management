@@ -14,6 +14,7 @@ import {
   Undo2
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const SOURCE_LABELS: Record<string, string> = {
   store: "Tại quầy",
@@ -152,6 +153,7 @@ export default function SalesReportPage() {
   const maxRevenue = Math.max(...dailyData.map((d) => d.revenue), 1);
 
   return (
+    <PageGuard permission="reports.view_sales">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       {/* Top Header */}
       <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0">
@@ -487,5 +489,6 @@ export default function SalesReportPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }

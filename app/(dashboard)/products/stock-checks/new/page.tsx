@@ -11,6 +11,7 @@ import {
   Package,
   Filter
 } from "lucide-react";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface SystemStockRow {
   product_id: string;
@@ -307,6 +308,7 @@ export default function NewStockCheckPage() {
   }
 
   return (
+    <PageGuard permission="stock_checks.create">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6 bg-slate-100">
       <header className="h-14 bg-white border-b px-6 flex items-center justify-between flex-shrink-0">
         <button
@@ -774,5 +776,6 @@ export default function NewStockCheckPage() {
         </svg>
       </button>
     </div>
+    </PageGuard>
   );
 }

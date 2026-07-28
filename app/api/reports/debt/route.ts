@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureDatabase } from "@/lib/db/migration";
 import { getPool, isDatabaseConfigured } from "@/lib/db/connection";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 // (phải trả nhà cung cấp, dựa trên goods_receipts.payment_status — cột này
 // mới thêm cùng lúc tách thanh toán khỏi tồn kho ở đơn nhập hàng).
 export async function GET(request: Request) {
+  const guard = await requirePermission("reports.view_finance");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const type = url.searchParams.get("type") === "supplier" ? "supplier" : "customer";

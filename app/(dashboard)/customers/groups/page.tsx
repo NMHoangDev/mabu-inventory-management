@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plus, ArrowUpDown, Trash2, Pencil } from "lucide-react";
 import { CustomerGroupFormModal, CustomerGroupFormData } from "./CustomerGroupFormModal";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface CustomerGroup extends CustomerGroupFormData {
   id: string;
@@ -11,6 +13,7 @@ interface CustomerGroup extends CustomerGroupFormData {
 }
 
 export default function CustomerGroupsPage() {
+  const { hasPermission } = usePermissions();
   const [groups, setGroups] = useState<CustomerGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -86,16 +89,19 @@ export default function CustomerGroupsPage() {
   }
 
   return (
+    <PageGuard permission="customers.view">
     <div className="space-y-4">
       {/* Action Bar */}
       <div className="flex justify-end">
-        <button
-          onClick={openCreate}
-          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2 transition"
-        >
-          <Plus className="w-4 h-4" />
-          Thêm nhóm khách hàng
-        </button>
+        {hasPermission("customers.create") ? (
+          <button
+            onClick={openCreate}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2 transition"
+          >
+            <Plus className="w-4 h-4" />
+            Thêm nhóm khách hàng
+          </button>
+        ) : null}
       </div>
 
       {/* Data Table */}
@@ -178,20 +184,24 @@ export default function CustomerGroupsPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); openEdit(g); }}
-                        className="text-gray-400 hover:text-blue-600 transition"
-                        title="Chỉnh sửa"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setDeleteId(g.id); }}
-                        className="text-gray-400 hover:text-red-600 transition"
-                        title="Xoá"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {hasPermission("customers.edit") ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openEdit(g); }}
+                          className="text-gray-400 hover:text-blue-600 transition"
+                          title="Chỉnh sửa"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      ) : null}
+                      {hasPermission("customers.delete") ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteId(g.id); }}
+                          className="text-gray-400 hover:text-red-600 transition"
+                          title="Xoá"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -294,5 +304,6 @@ export default function CustomerGroupsPage() {
         </div>
       )}
     </div>
+    </PageGuard>
   );
 }

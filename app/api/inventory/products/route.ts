@@ -1,10 +1,13 @@
 ﻿import { NextResponse } from "next/server";
 import { listInventoryProducts } from "@/lib/products/inventory";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requirePermission("inventory.view");
+  if (guard) return guard;
   try {
     const products = await listInventoryProducts();
     return NextResponse.json({ products });

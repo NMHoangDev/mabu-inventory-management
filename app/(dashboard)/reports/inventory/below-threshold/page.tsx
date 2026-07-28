@@ -15,6 +15,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchBelowThreshold } from "@/services/reportService";
 import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const URGENT_STYLE: Record<string, string> = {
   "Khẩn cấp": "text-red-500 bg-red-50",
@@ -53,6 +54,7 @@ export default function BelowThresholdPage() {
   const d = data;
 
   return (
+    <PageGuard permission="reports.view_inventory">
     <ReportShell
       title="Báo cáo tồn kho dưới định mức"
       backHref="/reports/inventory"
@@ -124,5 +126,6 @@ export default function BelowThresholdPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

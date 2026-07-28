@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { removeProductFromSupplier } from "@/lib/suppliers/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,6 +9,8 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string; productId: string }> }
 ) {
+  const guard = await requirePermission("suppliers.edit");
+  if (guard) return guard;
   try {
     const { id, productId } = await context.params;
     await removeProductFromSupplier(id, productId);

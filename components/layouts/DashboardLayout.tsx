@@ -32,6 +32,7 @@ import {
   Undo2
 } from "lucide-react";
 import { useApp } from "@/components/providers/AppProvider";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
 import StaffBadge from "@/components/layouts/StaffBadge";
 
 const navItems = [
@@ -40,27 +41,27 @@ const navItems = [
   { key: "summary", path: "/summary", label: "Tổng hợp", group: "Hóa đơn", icon: Table2 },
   { key: "documents", path: "/documents", label: "Tài liệu hóa đơn", group: "Hóa đơn", icon: FileText },
   {
-    key: "customers", path: "/customers", label: "Khách hàng", group: "Khách hàng", icon: Users,
+    key: "customers", path: "/customers", label: "Khách hàng", group: "Khách hàng", icon: Users, requiredPermission: "customers.view",
     subItems: [
       { key: "customer-list", path: "/customers", label: "Danh sách khách hàng" },
       { key: "customer-groups", path: "/customers/groups", label: "Nhóm khách hàng" }
     ]
   },
   {
-    key: "products", path: "/products", label: "Sản phẩm / SKU", group: "Vận hành", icon: Package,
+    key: "products", path: "/products", label: "Sản phẩm / SKU", group: "Vận hành", icon: Package, requiredPermission: "products.view",
     subItems: [
       { key: "product-list", path: "/products", label: "Danh sách sản phẩm" },
-      { key: "product-inventory", path: "/products/inventory", label: "Quản lý kho" },
-      { key: "product-purchase-orders", path: "/products/purchase-orders", label: "Đặt hàng nhập" },
-      { key: "product-goods-receipts", path: "/products/goods-receipts", label: "Nhập hàng" },
-      { key: "product-stock-checks", path: "/products/stock-checks", label: "Kiểm hàng" },
-      { key: "product-cost-adjustments", path: "/products/cost-adjustments", label: "Điều chỉnh giá vốn" },
+      { key: "product-inventory", path: "/products/inventory", label: "Quản lý kho", requiredPermission: "inventory.view" },
+      { key: "product-purchase-orders", path: "/products/purchase-orders", label: "Đặt hàng nhập", requiredPermission: "purchase_orders.view" },
+      { key: "product-goods-receipts", path: "/products/goods-receipts", label: "Nhập hàng", requiredPermission: "goods_receipts.view" },
+      { key: "product-stock-checks", path: "/products/stock-checks", label: "Kiểm hàng", requiredPermission: "stock_checks.view" },
+      { key: "product-cost-adjustments", path: "/products/cost-adjustments", label: "Điều chỉnh giá vốn", requiredPermission: "cost_adjustments.view" },
       { key: "product-categories", path: "/products/categories", label: "Danh mục sản phẩm" },
       { key: "product-pricing", path: "/products/pricing", label: "Bảng giá" }
     ]
   },
   {
-    key: "suppliers", path: "/suppliers", label: "Nhà cung cấp", group: "Vận hành", icon: Building2,
+    key: "suppliers", path: "/suppliers", label: "Nhà cung cấp", group: "Vận hành", icon: Building2, requiredPermission: "suppliers.view",
     subItems: [
       { key: "suppliers-list", path: "/suppliers", label: "Tất cả nhà cung cấp" },
       { key: "suppliers-groups", path: "/suppliers/groups", label: "Nhóm nhà cung cấp" }
@@ -73,7 +74,7 @@ const navItems = [
     key: "zalo-accounts", path: "/zalo/accounts", label: "Quản lý TK Zalo", group: "Hệ thống", icon: UserCog
   },
   {
-    key: "orders", path: "/orders", label: "Đơn hàng", group: "Vận hành", icon: ShoppingCart,
+    key: "orders", path: "/orders", label: "Đơn hàng", group: "Vận hành", icon: ShoppingCart, requiredPermission: "orders.view",
     subItems: [
       { key: "orders-list", path: "/orders", label: "Tất cả đơn hàng" },
       { key: "orders-new", path: "/orders/new", label: "Tạo đơn hàng" },
@@ -81,49 +82,49 @@ const navItems = [
     ]
   },
   {
-    key: "order-returns", path: "/orders/returns", label: "Đơn trả hàng", group: "Vận hành", icon: Undo2,
+    key: "order-returns", path: "/orders/returns", label: "Đơn trả hàng", group: "Vận hành", icon: Undo2, requiredPermission: "order_returns.view",
     subItems: [
       { key: "order-returns-list", path: "/orders/returns", label: "Tất cả đơn trả hàng" },
       { key: "order-returns-new", path: "/orders/returns/new", label: "Tạo đơn trả hàng" }
     ]
   },
-  { key: "pos", path: "/pos", label: "Bán hàng (POS)", group: "Vận hành", icon: Receipt },
+  { key: "pos", path: "/pos", label: "Bán hàng (POS)", group: "Vận hành", icon: Receipt, requiredPermission: "orders.create" },
   {
-    key: "promotions", path: "/promotions", label: "Khuyến mại", group: "Vận hành", icon: BadgePercent,
+    key: "promotions", path: "/promotions", label: "Khuyến mại", group: "Vận hành", icon: BadgePercent, requiredPermission: "promotions.view",
     subItems: [
       { key: "promotions-list", path: "/promotions", label: "Tất cả khuyến mại" },
       { key: "promotions-new", path: "/promotions/new", label: "Tạo khuyến mại" }
     ]
   },
   {
-    key: "shipping", path: "/shipping", label: "Vận chuyển", group: "Vận hành", icon: Truck,
+    key: "shipping", path: "/shipping", label: "Vận chuyển", group: "Vận hành", icon: Truck, requiredPermission: "shipping.view",
     subItems: [
       { key: "shipping-overview", path: "/shipping", label: "Tổng quan" },
       { key: "shipping-list", path: "/shipping/orders", label: "Quản lý vận đơn" },
       { key: "shipping-new", path: "/shipping/orders/new", label: "Tạo vận đơn" },
-      { key: "shipping-config", path: "/shipping/config", label: "Cấu hình vận chuyển" }
+      { key: "shipping-config", path: "/shipping/config", label: "Cấu hình vận chuyển", requiredPermission: "shipping.manage_settings" }
     ]
   },
   {
     key: "reports", path: "/reports/sales", label: "Báo cáo", group: "Vận hành", icon: BarChart3,
     subItems: [
-      { key: "reports-sales", path: "/reports/sales", label: "Báo cáo bán hàng" },
-      { key: "reports-purchases", path: "/reports/purchases", label: "Báo cáo nhập hàng" },
-      { key: "reports-inventory", path: "/reports/inventory", label: "Báo cáo kho" },
-      { key: "reports-finance", path: "/reports/finance", label: "Báo cáo tài chính" },
-      { key: "reports-customers", path: "/reports/customers", label: "Báo cáo khách hàng" }
+      { key: "reports-sales", path: "/reports/sales", label: "Báo cáo bán hàng", requiredPermission: "reports.view_sales" },
+      { key: "reports-purchases", path: "/reports/purchases", label: "Báo cáo nhập hàng", requiredPermission: "reports.view_purchases" },
+      { key: "reports-inventory", path: "/reports/inventory", label: "Báo cáo kho", requiredPermission: "reports.view_inventory" },
+      { key: "reports-finance", path: "/reports/finance", label: "Báo cáo tài chính", requiredPermission: "reports.view_finance" },
+      { key: "reports-customers", path: "/reports/customers", label: "Báo cáo khách hàng", requiredPermission: "reports.view_customers" }
     ]
   },
   {
     key: "finance", path: "/finance", label: "Sổ quỹ", group: "Vận hành", icon: Wallet,
     subItems: [
-      { key: "finance-receipt-vouchers", path: "/finance/receipt-vouchers", label: "Phiếu thu" },
-      { key: "finance-payment-vouchers", path: "/finance/payment-vouchers", label: "Phiếu chi" },
+      { key: "finance-receipt-vouchers", path: "/finance/receipt-vouchers", label: "Phiếu thu", requiredPermission: "receipt_vouchers.view" },
+      { key: "finance-payment-vouchers", path: "/finance/payment-vouchers", label: "Phiếu chi", requiredPermission: "payment_vouchers.view" },
       { key: "finance-cash-ledger", path: "/finance/cash-ledger", label: "Sổ quỹ" }
     ]
   },
-  { key: "automations", path: "/automations", label: "Tự động hóa", group: "Vận hành", icon: Zap },
-  { key: "storefront-settings", path: "/settings/storefront", label: "Website bán hàng", group: "Vận hành", icon: Store },
+  { key: "automations", path: "/automations", label: "Tự động hóa", group: "Vận hành", icon: Zap, requiredPermission: "automations.view" },
+  { key: "storefront-settings", path: "/settings/storefront", label: "Website bán hàng", group: "Vận hành", icon: Store, requiredPermission: "settings.manage_storefront" },
   { key: "assistant", path: "/assistant", label: "Trợ lý AI", group: "Hệ thống", icon: Sparkles },
   { key: "settings", path: "/settings", label: "Cài đặt", group: "Hệ thống", icon: Settings },
   { key: "blueprint", path: "/blueprint", label: "Design Blueprint", group: "Hệ thống", icon: FileText }
@@ -134,10 +135,18 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { store, error, notice, setError, setNotice } = useApp();
+  const { hasPermission } = usePermissions();
 
-  let currentNav = navItems.find((item) => item.path === pathname) ?? navItems[0];
-  if (!navItems.find((item) => item.path === pathname)) {
-    for (const item of navItems) {
+  const visibleNavItems = navItems
+    .filter((item) => !item.requiredPermission || hasPermission(item.requiredPermission))
+    .map((item) => ({
+      ...item,
+      subItems: item.subItems?.filter((sub) => !sub.requiredPermission || hasPermission(sub.requiredPermission))
+    }));
+
+  let currentNav = visibleNavItems.find((item) => item.path === pathname) ?? visibleNavItems[0];
+  if (!visibleNavItems.find((item) => item.path === pathname)) {
+    for (const item of visibleNavItems) {
       if (item.subItems) {
         const subItem = item.subItems.find((sub) => pathname === sub.path || pathname.startsWith(`${sub.path}/`));
         if (subItem) {
@@ -147,7 +156,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
       }
     }
   }
-  const navGroups = Array.from(new Set(navItems.map((item) => item.group)));
+  const navGroups = Array.from(new Set(visibleNavItems.map((item) => item.group)));
   const errorDocuments = store.documents.filter((doc) => doc.status === "error").length;
 
   const renderSidebar = (isCollapsed: boolean) => (
@@ -176,7 +185,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
               <div className="mx-auto mb-2 h-px w-6 bg-sidebar-border opacity-60" />
             )}
             <div className="space-y-0.5">
-              {navItems
+              {visibleNavItems
                 .filter((item) => item.group === group)
                 .map((item) => {
                   const Icon = item.icon;

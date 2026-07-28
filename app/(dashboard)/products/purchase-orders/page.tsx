@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Loader2, Plus, Upload, Download, ChevronLeft, ChevronRight, FileText } from "lucide-react";
 import { downloadCsv } from "@/lib/shared/csv-export";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type PurchaseOrderStatus = "draft" | "pending" | "partial" | "completed" | "cancelled";
 
@@ -58,6 +60,7 @@ function isVisibleToTab(status: PurchaseOrderStatus, tab: TabKey): boolean {
 }
 
 export default function PurchaseOrdersListPage() {
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<PurchaseOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -143,6 +146,7 @@ export default function PurchaseOrdersListPage() {
   };
 
   return (
+    <PageGuard permission="purchase_orders.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white border-b flex items-center justify-between px-6 flex-shrink-0">
         <h1 className="text-lg font-semibold text-slate-800">Danh sách đơn đặt hàng nhập</h1>
@@ -183,12 +187,14 @@ export default function PurchaseOrdersListPage() {
             <Upload className="w-4 h-4" /> Nhập file
           </button>
         </div>
-        <Link
-          href="/products/purchase-orders/new"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Tạo đơn đặt hàng
-        </Link>
+        {hasPermission("purchase_orders.create") ? (
+          <Link
+            href="/products/purchase-orders/new"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Tạo đơn đặt hàng
+          </Link>
+        ) : null}
       </div>
 
       <div className="bg-white px-4 pt-2 border-b flex-shrink-0">
@@ -346,5 +352,6 @@ export default function PurchaseOrdersListPage() {
         </div>
       </footer>
     </div>
+    </PageGuard>
   );
 }

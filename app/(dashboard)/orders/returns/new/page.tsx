@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Loader2, Search, Undo2 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface ReturnableOrderRow {
   id: string;
@@ -75,6 +76,7 @@ export default function PickOrderToReturnPage() {
   const endIdx = Math.min(safePage * pageSize, total);
 
   return (
+    <PageGuard permission="order_returns.create">
     <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#f4f6f8]">
       <div>
         <h1 className="text-xl font-bold text-[#0d1d29]">Chọn đơn hàng để trả</h1>
@@ -177,5 +179,6 @@ export default function PickOrderToReturnPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

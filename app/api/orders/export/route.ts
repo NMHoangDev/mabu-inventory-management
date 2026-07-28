@@ -3,6 +3,7 @@ import { z } from "zod";
 import { listOrders, listOrdersForExport, type Order, type OrderListFilters } from "@/lib/orders/repository";
 import { buildWorkbookBuffer, xlsxResponse, timestampedFilename } from "@/lib/shared/excel-export";
 import { ORDER_EXPORT_COLUMNS } from "@/lib/orders/export-fields";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,6 +70,8 @@ function orderToItemRows(order: Order): Record<string, unknown>[] {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("orders.export");
+  if (guard) return guard;
   try {
     const parsed = bodySchema.safeParse(await request.json());
     if (!parsed.success) {

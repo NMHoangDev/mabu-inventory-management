@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { PromotionForm } from "@/components/promotions/PromotionForm";
+import { PageGuard } from "@/components/auth/PageGuard";
 import type { PromotionMethod } from "@/lib/promotions/types";
 
 const VALID_METHODS: PromotionMethod[] = ["order_total", "per_product", "by_quantity", "addon_by_order_total"];
@@ -16,8 +17,10 @@ function NewPromotionInner() {
 
 export default function NewPromotionPage() {
   return (
+    <PageGuard permission="promotions.create">
     <Suspense fallback={null}>
       <NewPromotionInner />
     </Suspense>
+    </PageGuard>
   );
 }

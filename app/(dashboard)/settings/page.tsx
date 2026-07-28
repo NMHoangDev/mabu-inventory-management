@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { KeyRound, Users } from "lucide-react";
 
 export default function SettingsPage() {
   return (
@@ -16,6 +17,30 @@ export default function SettingsPage() {
           </div>
           <Link href="/blueprint" className="rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted">
             Xem blueprint
+          </Link>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">Thiết lập cửa hàng</h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Link href="/settings/staff" className="panel flex items-start gap-3 p-4 hover:bg-muted/40">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+              <Users className="h-4.5 w-4.5" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold">Nhân viên</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">Thêm mới & quản lý tài khoản nhân viên</div>
+            </div>
+          </Link>
+          <Link href="/settings/roles" className="panel flex items-start gap-3 p-4 hover:bg-muted/40">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+              <KeyRound className="h-4.5 w-4.5" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold">Vai trò và phân quyền</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">Quản lý & phân quyền tài khoản nhân viên theo module</div>
+            </div>
           </Link>
         </div>
       </div>

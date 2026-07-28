@@ -4,11 +4,14 @@ import {
   listPurchaseOrders,
   type CreatePurchaseOrderInput
 } from "@/lib/purchase-orders/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requirePermission("purchase_orders.view");
+  if (guard) return guard;
   try {
     const list = await listPurchaseOrders();
     return NextResponse.json(list);
@@ -21,6 +24,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("purchase_orders.create");
+  if (guard) return guard;
   try {
     const body = (await request.json()) as CreatePurchaseOrderInput;
     if (!Array.isArray(body.items) || body.items.length === 0) {

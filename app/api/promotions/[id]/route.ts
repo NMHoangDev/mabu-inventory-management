@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { getPromotion, updatePromotion, deletePromotion } from "@/lib/promotions/repository";
 import { updatePromotionSchema } from "@/lib/promotions/validation";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("promotions.view");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const promotion = await getPromotion(id);
@@ -23,6 +26,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("promotions.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const parsed = updatePromotionSchema.safeParse(await request.json());
@@ -47,6 +52,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("promotions.delete");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const deleted = await deletePromotion(id);

@@ -17,6 +17,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseByProduct, type ProductPurchaseData } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function ByProductPage() {
   const [period, setPeriod] = useState<Period>("30d");
@@ -53,6 +54,7 @@ export default function ByProductPage() {
   const d = data;
 
   return (
+    <PageGuard permission="reports.view_purchases">
     <ReportShell
       title="Báo cáo nhập hàng theo sản phẩm"
       backHref="/reports/purchases"
@@ -128,5 +130,6 @@ export default function ByProductPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { createSupplier, searchSuppliers, type Supplier } from "@/lib/purchase-orders/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("purchase_orders.view");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const q = url.searchParams.get("q") ?? "";
@@ -19,6 +22,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("purchase_orders.create");
+  if (guard) return guard;
   try {
     const body = (await request.json()) as Partial<Supplier>;
     if (!body.name || !String(body.name).trim()) {

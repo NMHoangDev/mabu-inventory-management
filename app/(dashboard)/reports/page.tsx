@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import { formatCurrencyVND, parseNumeric } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function ReportsPage() {
   const { store, setError } = useApp();
@@ -35,6 +36,7 @@ export default function ReportsPage() {
   };
 
   return (
+    <PageGuard anyOf={["reports.view_sales", "reports.view_purchases", "reports.view_inventory", "reports.view_finance", "reports.view_customers"]}>
     <section className="space-y-5">
       <div className="panel p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -81,5 +83,6 @@ export default function ReportsPage() {
         </div>
       </div>
     </section>
+    </PageGuard>
   );
 }

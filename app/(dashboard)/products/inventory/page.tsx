@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, ImageIcon, Loader2, Package, Printer, Search, Settings, SlidersHorizontal } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
 import { zaloAuthApi } from "@/lib/zalo-api";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type InventoryProduct = {
   id: string;
@@ -37,6 +39,7 @@ function fmtDate(value: string) {
 }
 
 export default function ProductInventoryPage() {
+  const { hasPermission } = usePermissions();
   const [products, setProducts] = useState<InventoryProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -149,6 +152,7 @@ export default function ProductInventoryPage() {
   }, [query, typeFilter, brandFilter, statusFilter, pageSize]);
 
   return (
+    <PageGuard permission="inventory.view">
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
@@ -261,7 +265,7 @@ export default function ProductInventoryPage() {
                           }
                         }}
                       />
-                    ) : (
+                    ) : hasPermission("inventory.edit") ? (
                       <button
                         type="button"
                         title="Bấm để sửa tồn kho"
@@ -274,6 +278,10 @@ export default function ProductInventoryPage() {
                           fmtNumber(product.total_inventory)
                         )}
                       </button>
+                    ) : (
+                      <span className="inline-flex min-w-[3rem] items-center justify-center px-2 py-1">
+                        {fmtNumber(product.total_inventory)}
+                      </span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-center text-slate-500">{fmtDate(product.created_at)}</td>
@@ -314,5 +322,6 @@ export default function ProductInventoryPage() {
         </div>
       </div>
     </section>
+    </PageGuard>
   );
 }

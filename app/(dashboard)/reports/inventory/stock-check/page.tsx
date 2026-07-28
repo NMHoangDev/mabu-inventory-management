@@ -15,6 +15,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchStockCheck } from "@/services/reportService";
 import { InventoryExportButton } from "@/components/reports/InventoryExportButton";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const STATUS_STYLE: Record<string, string> = {
   "Hoàn thành": "text-green-600 bg-green-50",
@@ -58,6 +59,7 @@ export default function StockCheckPage() {
   const range = period === "custom" && dateFrom && dateTo ? { from: dateFrom, to: dateTo } : getDateRange(period);
 
   return (
+    <PageGuard permission="reports.view_inventory">
     <ReportShell
       title="Báo cáo kiểm kê hàng hóa"
       backHref="/reports/inventory"
@@ -111,5 +113,6 @@ export default function StockCheckPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

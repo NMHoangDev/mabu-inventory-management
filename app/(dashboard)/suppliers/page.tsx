@@ -6,6 +6,8 @@ import { Plus, Loader2, Download, Upload, ChevronLeft, ChevronRight, Pencil, Tra
 import { downloadCsv } from "@/lib/shared/csv-export";
 import { AddSupplierModal } from "@/invoice-flow-manager-fe/components/suppliers/AddSupplierModal";
 import { SupplierProductSearch, type SupplierProductHit } from "@/components/suppliers/SupplierProductSearch";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface SupplierRow {
   id: string;
@@ -32,6 +34,7 @@ function formatDate(iso: string): string {
 }
 
 export default function SuppliersPage() {
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<SupplierRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -125,13 +128,16 @@ export default function SuppliersPage() {
   }
 
   return (
+    <PageGuard permission="suppliers.view">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       <header className="h-14 bg-white px-6 py-4 border-b flex justify-between items-center flex-shrink-0">
         <h1 className="text-2xl font-semibold text-slate-800">Nhà cung cấp</h1>
         <div className="flex gap-3">
-          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2" onClick={openCreateModal}>
-            <Plus className="w-4 h-4" /> Thêm nhà cung cấp
-          </button>
+          {hasPermission("suppliers.create") ? (
+            <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2" onClick={openCreateModal}>
+              <Plus className="w-4 h-4" /> Thêm nhà cung cấp
+            </button>
+          ) : null}
           <button className="bg-white border hover:bg-gray-50 text-gray-700 px-4 py-2 rounded shadow-sm text-sm font-medium flex items-center gap-2">
             Trợ giúp
           </button>
@@ -308,27 +314,31 @@ export default function SuppliersPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </Link>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(row.id)}
-                            title="Sửa"
-                            className="p-1.5 rounded text-slate-500 hover:bg-slate-100 hover:text-blue-600"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDelete(row)}
-                            disabled={deletingId === row.id}
-                            title="Xoá"
-                            className="p-1.5 rounded text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                          >
-                            {deletingId === row.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-4 h-4" />
-                            )}
-                          </button>
+                          {hasPermission("suppliers.edit") ? (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(row.id)}
+                              title="Sửa"
+                              className="p-1.5 rounded text-slate-500 hover:bg-slate-100 hover:text-blue-600"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          ) : null}
+                          {hasPermission("suppliers.delete") ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(row)}
+                              disabled={deletingId === row.id}
+                              title="Xoá"
+                              className="p-1.5 rounded text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                            >
+                              {deletingId === row.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -415,5 +425,6 @@ export default function SuppliersPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool, isDatabaseConfigured } from "@/lib/db/connection";
 import { ensureDatabase } from "@/lib/db/migration";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ function str(v: unknown, f = ""): string {
 }
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("reports.view_purchases");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const dateFrom = url.searchParams.get("date_from") ?? "";

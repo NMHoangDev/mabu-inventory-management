@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { downloadCsv } from "@/lib/shared/csv-export";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   Calendar,
   ChevronDown,
@@ -123,6 +124,7 @@ export default function CashLedgerPage() {
     .reduce((s, r) => s + r.amount, 0);
 
   return (
+    <PageGuard anyOf={["receipt_vouchers.view", "payment_vouchers.view"]}>
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6">
       {/* Top Navbar */}
       <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
@@ -453,5 +455,6 @@ export default function CashLedgerPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }

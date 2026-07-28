@@ -15,6 +15,8 @@ import {
   Filter,
   Edit3,
 } from "lucide-react";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface Condition {
   field: string;
@@ -84,6 +86,7 @@ const FIELD_SUGGESTIONS: Record<string, string[]> = {
 };
 
 export default function AutomationsPage() {
+  const { hasPermission } = usePermissions();
   const [rules, setRules] = useState<Rule[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,6 +142,7 @@ export default function AutomationsPage() {
   }
 
   return (
+    <PageGuard permission="automations.view">
     <div className="space-y-4">
       <header className="flex items-center justify-between flex-wrap gap-2">
         <div>
@@ -148,12 +152,14 @@ export default function AutomationsPage() {
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">Rule engine chạy nền — kích hoạt hành động khi có sự kiện.</p>
         </div>
-        <button
-          onClick={() => setEditing(emptyRule())}
-          className="px-3 py-2 bg-amber-500 text-white text-sm rounded-lg font-medium hover:bg-amber-600 flex items-center gap-1.5"
-        >
-          <Plus className="h-4 w-4" /> Tạo rule mới
-        </button>
+        {hasPermission("automations.create") ? (
+          <button
+            onClick={() => setEditing(emptyRule())}
+            className="px-3 py-2 bg-amber-500 text-white text-sm rounded-lg font-medium hover:bg-amber-600 flex items-center gap-1.5"
+          >
+            <Plus className="h-4 w-4" /> Tạo rule mới
+          </button>
+        ) : null}
       </header>
 
       {editing && (
@@ -214,26 +220,32 @@ export default function AutomationsPage() {
                 {running === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                 Test
               </button>
-              <button
-                onClick={() => toggleRule(r)}
-                className={`text-xs px-2 py-1 border rounded flex items-center gap-1 ${
-                  r.enabled ? "hover:bg-red-50 hover:border-red-300" : "hover:bg-emerald-50 hover:border-emerald-300"
-                }`}
-              >
-                <Power className="h-3 w-3" /> {r.enabled ? "Tắt" : "Bật"}
-              </button>
-              <button
-                onClick={() => setEditing(r)}
-                className="text-xs px-2 py-1 border rounded hover:bg-slate-50 flex items-center gap-1"
-              >
-                <Edit3 className="h-3 w-3" /> Sửa
-              </button>
-              <button
-                onClick={() => deleteRule(r)}
-                className="text-xs px-2 py-1 border rounded hover:bg-red-50 hover:border-red-300 text-red-600 flex items-center gap-1"
-              >
-                <Trash2 className="h-3 w-3" /> Xóa
-              </button>
+              {hasPermission("automations.edit") ? (
+                <button
+                  onClick={() => toggleRule(r)}
+                  className={`text-xs px-2 py-1 border rounded flex items-center gap-1 ${
+                    r.enabled ? "hover:bg-red-50 hover:border-red-300" : "hover:bg-emerald-50 hover:border-emerald-300"
+                  }`}
+                >
+                  <Power className="h-3 w-3" /> {r.enabled ? "Tắt" : "Bật"}
+                </button>
+              ) : null}
+              {hasPermission("automations.edit") ? (
+                <button
+                  onClick={() => setEditing(r)}
+                  className="text-xs px-2 py-1 border rounded hover:bg-slate-50 flex items-center gap-1"
+                >
+                  <Edit3 className="h-3 w-3" /> Sửa
+                </button>
+              ) : null}
+              {hasPermission("automations.delete") ? (
+                <button
+                  onClick={() => deleteRule(r)}
+                  className="text-xs px-2 py-1 border rounded hover:bg-red-50 hover:border-red-300 text-red-600 flex items-center gap-1"
+                >
+                  <Trash2 className="h-3 w-3" /> Xóa
+                </button>
+              ) : null}
             </div>
           </div>
         ))}
@@ -264,6 +276,7 @@ export default function AutomationsPage() {
         </div>
       )}
     </div>
+    </PageGuard>
   );
 }
 

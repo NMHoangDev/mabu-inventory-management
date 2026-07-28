@@ -12,6 +12,7 @@ import {
   Wallet
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type CostAdjustmentStatus = "draft" | "in_progress" | "completed" | "cancelled";
 
@@ -148,6 +149,7 @@ export default function CostAdjustmentDetailPage() {
   const isFinal = ca.status === "completed" || ca.status === "cancelled";
 
   return (
+    <PageGuard permission="cost_adjustments.view">
     <div className="flex flex-col gap-4 px-4 pb-8 lg:px-6">
       <div className="flex items-center justify-between">
         <Link
@@ -302,6 +304,7 @@ export default function CostAdjustmentDetailPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

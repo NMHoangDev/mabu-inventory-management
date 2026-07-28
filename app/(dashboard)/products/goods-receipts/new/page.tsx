@@ -12,6 +12,7 @@ import {
   Download
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface Supplier {
   id: string;
@@ -256,6 +257,7 @@ export default function NewGoodsReceiptPage() {
   }
 
   return (
+    <PageGuard permission="goods_receipts.create">
     <div className="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-6 bg-[#f0f2f5]">
       <header className="h-14 bg-white border-b px-6 flex items-center justify-between flex-shrink-0">
         <button
@@ -705,5 +707,6 @@ export default function NewGoodsReceiptPage() {
         </svg>
       </button>
     </div>
+    </PageGuard>
   );
 }

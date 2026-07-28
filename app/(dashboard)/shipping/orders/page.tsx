@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { downloadCsv } from "@/lib/shared/csv-export";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   Download,
   Plus,
@@ -87,6 +89,7 @@ function fmtDate(iso: string | null) {
 
 export default function ShippingListPage() {
   const router = useRouter();
+  const { hasPermission } = usePermissions();
   const [shippings, setShippings] = useState<Shipping[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -127,6 +130,7 @@ export default function ShippingListPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
+    <PageGuard permission="shipping.view">
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       {/* Top bar */}
       <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
@@ -167,13 +171,15 @@ export default function ShippingListPage() {
             <Download className="w-4 h-4" />
             <span className="text-sm font-medium">Xuất file</span>
           </button>
-          <button
-            onClick={() => router.push("/shipping/orders/new")}
-            className="bg-[#0088FF] text-white px-4 py-2 rounded shadow-sm hover:bg-blue-600 transition flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="font-medium">Tạo đơn và giao hàng</span>
-          </button>
+          {hasPermission("shipping.create") ? (
+            <button
+              onClick={() => router.push("/shipping/orders/new")}
+              className="bg-[#0088FF] text-white px-4 py-2 rounded shadow-sm hover:bg-blue-600 transition flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="font-medium">Tạo đơn và giao hàng</span>
+            </button>
+          ) : null}
         </div>
 
         {/* Filter card */}
@@ -369,6 +375,7 @@ export default function ShippingListPage() {
         </button>
       </div>
     </div>
+    </PageGuard>
   );
 }
 

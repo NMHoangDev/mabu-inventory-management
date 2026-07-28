@@ -13,6 +13,8 @@ import {
   Search,
 } from "lucide-react";
 import { PromotionTypePickerModal } from "@/components/promotions/PromotionTypePickerModal";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 import {
   PROMOTION_METHOD_LABELS,
   PROMOTION_STATUS_CLASSES,
@@ -33,6 +35,7 @@ function fmtDateTime(iso: string | null): string {
 
 export default function PromotionsPage() {
   const router = useRouter();
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<PromotionListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -91,6 +94,7 @@ export default function PromotionsPage() {
   ];
 
   return (
+    <PageGuard permission="promotions.view">
     <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#f4f6f8]">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -99,13 +103,15 @@ export default function PromotionsPage() {
             Cấu hình chương trình chiết khấu, hệ thống sẽ gợi ý khi tạo đơn hàng.
           </p>
         </div>
-        <button
-          onClick={() => setTypePickerOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Tạo khuyến mại</span>
-        </button>
+        {hasPermission("promotions.create") ? (
+          <button
+            onClick={() => setTypePickerOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Tạo khuyến mại</span>
+          </button>
+        ) : null}
       </div>
 
       {/* Filter bar */}
@@ -170,12 +176,14 @@ export default function PromotionsPage() {
                   <td colSpan={7} className="p-12 text-center">
                     <BadgePercent className="w-10 h-10 text-[#c0c6d6] mx-auto mb-3" />
                     <p className="text-sm text-[#404754]">Chưa có chương trình khuyến mại nào.</p>
-                    <button
-                      onClick={() => setTypePickerOpen(true)}
-                      className="mt-3 text-sm font-semibold text-[#005baf] hover:underline"
-                    >
-                      Tạo khuyến mại đầu tiên
-                    </button>
+                    {hasPermission("promotions.create") ? (
+                      <button
+                        onClick={() => setTypePickerOpen(true)}
+                        className="mt-3 text-sm font-semibold text-[#005baf] hover:underline"
+                      >
+                        Tạo khuyến mại đầu tiên
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ) : (
@@ -255,6 +263,7 @@ export default function PromotionsPage() {
 
       {typePickerOpen && <PromotionTypePickerModal onClose={() => setTypePickerOpen(false)} />}
     </div>
+    </PageGuard>
   );
 }
 

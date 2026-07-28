@@ -33,6 +33,8 @@ import {
 import { ExcelExportDialog, type ExportScope } from "@/components/shared/ExcelExportDialog";
 import { PRODUCT_EXPORT_GROUPS } from "@/lib/products/export-fields";
 import { ImportExcelModal } from "@/components/imports/ImportExcelModal";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type ProductCandidate = {
   id: string;
@@ -62,6 +64,7 @@ function cleanText(value: unknown) {
 
 export default function ProductsPage() {
   const { store, setStore, productMeta, setProductMeta, setNotice, setError, confirmAction, refreshLookups } = useApp();
+  const { hasPermission } = usePermissions();
 
   // Mode: list vs form view
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -1186,6 +1189,7 @@ export default function ProductsPage() {
 
   // Dashboard Page rendering
   return (
+    <PageGuard permission="products.view">
     <section className="space-y-5">
       {/* Top Banner Action */}
       <div className="panel p-5">
@@ -1198,27 +1202,33 @@ export default function ProductsPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={() => setImportOpen(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <Upload className="h-4 w-4" />
-              Nhập file
-            </button>
-            <button
-              onClick={() => setExportOpen(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <Download className="h-4 w-4" />
-              Xuất file
-            </button>
-            <button
-              onClick={() => openForm()}
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 shadow-soft"
-            >
-              <Plus className="h-4 w-4" />
-              Thêm sản phẩm
-            </button>
+            {hasPermission("products.import") ? (
+              <button
+                onClick={() => setImportOpen(true)}
+                className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <Upload className="h-4 w-4" />
+                Nhập file
+              </button>
+            ) : null}
+            {hasPermission("products.export") ? (
+              <button
+                onClick={() => setExportOpen(true)}
+                className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <Download className="h-4 w-4" />
+                Xuất file
+              </button>
+            ) : null}
+            {hasPermission("products.create") ? (
+              <button
+                onClick={() => openForm()}
+                className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 shadow-soft"
+              >
+                <Plus className="h-4 w-4" />
+                Thêm sản phẩm
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1451,20 +1461,24 @@ export default function ProductsPage() {
                             >
                               <Eye className="h-4 w-4" />
                             </button>
-                            <button 
-                              onClick={() => openForm(p, false)}
-                              className="rounded p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
-                              title="Sửa sản phẩm"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteProduct(p.id, p.name)}
-                              className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
-                              title="Xóa sản phẩm"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {hasPermission("products.edit") ? (
+                              <button
+                                onClick={() => openForm(p, false)}
+                                className="rounded p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
+                                title="Sửa sản phẩm"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </button>
+                            ) : null}
+                            {hasPermission("products.delete") ? (
+                              <button
+                                onClick={() => handleDeleteProduct(p.id, p.name)}
+                                className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
+                                title="Xóa sản phẩm"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -1928,5 +1942,6 @@ export default function ProductsPage() {
         </a>
       </div>
     </section>
+    </PageGuard>
   );
 }

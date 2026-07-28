@@ -16,14 +16,17 @@ import {
   StickyNote,
   ShoppingCart,
 } from "lucide-react";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const PARTNERS = ["NINJA VAN", "JNT Express", "GHN", "GHTK", "Viettel Post", "Chành Lộc Hà"];
 
 export default function NewShippingPage() {
   return (
+    <PageGuard permission="shipping.create">
     <Suspense fallback={null}>
       <NewShippingPageInner />
     </Suspense>
+    </PageGuard>
   );
 }
 

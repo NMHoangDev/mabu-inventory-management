@@ -15,6 +15,7 @@ import {
 } from "@/invoice-flow-manager-fe/components/reports/ReportShell";
 import { fetchPurchaseByOrder, type PurchaseOrderData } from "@/services/reportService";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 const STATUS_COLORS: Record<string, string> = {
   "Hoàn thành": "text-green-600 bg-green-50",
@@ -65,6 +66,7 @@ export default function ByOrderPage() {
   const d = data;
 
   return (
+    <PageGuard permission="reports.view_purchases">
     <ReportShell
       title="Báo cáo nhập hàng theo đơn nhập"
       backHref="/reports/purchases"
@@ -117,5 +119,6 @@ export default function ByOrderPage() {
         </>
       ) : null}
     </ReportShell>
+    </PageGuard>
   );
 }

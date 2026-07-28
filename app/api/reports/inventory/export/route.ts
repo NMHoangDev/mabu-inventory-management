@@ -16,6 +16,7 @@ import {
   type InventoryExportGroupBy
 } from "@/lib/reports/inventory-export-fields";
 import { buildWorkbookBuffer, xlsxResponse, timestampedFilename } from "@/lib/shared/excel-export";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("reports.export_inventory");
+  if (guard) return guard;
   try {
     if (!isDatabaseConfigured) {
       return NextResponse.json({ error: "Database chưa được cấu hình." }, { status: 503 });

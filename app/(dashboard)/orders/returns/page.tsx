@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Loader2, Plus, Search, Undo2 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface OrderReturnRow {
   id: string;
@@ -33,6 +35,7 @@ function fmtDateTime(iso: string): string {
 
 export default function OrderReturnsPage() {
   const router = useRouter();
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<OrderReturnRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -79,6 +82,7 @@ export default function OrderReturnsPage() {
   const endIdx = Math.min(safePage * pageSize, total);
 
   return (
+    <PageGuard permission="order_returns.view">
     <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#f4f6f8]">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -87,13 +91,15 @@ export default function OrderReturnsPage() {
             Danh sách các phiếu trả hàng đã tạo — mỗi phiếu tự động hoàn kho và tạo phiếu chi ở Sổ quỹ.
           </p>
         </div>
-        <button
-          onClick={() => router.push("/orders/returns/new")}
-          className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Tạo đơn trả hàng</span>
-        </button>
+        {hasPermission("order_returns.create") ? (
+          <button
+            onClick={() => router.push("/orders/returns/new")}
+            className="flex items-center gap-2 px-4 py-2 bg-[#005baf] text-white font-bold rounded-lg hover:bg-[#005eb3] transition-all shadow-sm"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Tạo đơn trả hàng</span>
+          </button>
+        ) : null}
       </div>
 
       <div className="bg-white border border-[#c0c6d6] rounded-xl p-4 flex flex-wrap gap-4 items-center shadow-sm">
@@ -134,12 +140,14 @@ export default function OrderReturnsPage() {
                   <td colSpan={6} className="p-12 text-center">
                     <Undo2 className="w-10 h-10 text-[#c0c6d6] mx-auto mb-3" />
                     <p className="text-sm text-[#404754]">Chưa có phiếu trả hàng nào.</p>
-                    <button
-                      onClick={() => router.push("/orders/returns/new")}
-                      className="mt-3 text-sm font-semibold text-[#005baf] hover:underline"
-                    >
-                      Tạo đơn trả hàng đầu tiên
-                    </button>
+                    {hasPermission("order_returns.create") ? (
+                      <button
+                        onClick={() => router.push("/orders/returns/new")}
+                        className="mt-3 text-sm font-semibold text-[#005baf] hover:underline"
+                      >
+                        Tạo đơn trả hàng đầu tiên
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ) : (
@@ -210,5 +218,6 @@ export default function OrderReturnsPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

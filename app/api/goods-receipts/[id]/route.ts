@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { getGoodsReceipt, updateGoodsReceipt, type UpdateGoodsReceiptInput } from "@/lib/goods-receipts/repository";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("goods_receipts.view");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const data = await getGoodsReceipt(id);
@@ -24,6 +27,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 // ở MỌI trạng thái, kể cả "completed" (updateGoodsReceipt tự hoàn/cộng lại
 // tồn kho tương ứng, xem lib/goods-receipts/repository.ts).
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const guard = await requirePermission("goods_receipts.edit");
+  if (guard) return guard;
   try {
     const { id } = await context.params;
     const body = (await request.json()) as UpdateGoodsReceiptInput;

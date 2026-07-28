@@ -17,9 +17,12 @@ import {
   Check
 } from "lucide-react";
 import type { Category } from "@/lib/products/categories";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 export default function ProductCategoriesPage() {
   const { setError, setNotice, confirmAction } = useApp();
+  const { hasPermission } = usePermissions();
 
   // Mode: list vs create
   const [isCreating, setIsCreating] = useState(false);
@@ -420,6 +423,7 @@ export default function ProductCategoriesPage() {
 
   // Categories list rendering
   return (
+    <PageGuard permission="products.view">
     <section className="space-y-5">
       {/* Top action header */}
       <div className="panel p-5">
@@ -431,13 +435,15 @@ export default function ProductCategoriesPage() {
               Phân loại danh mục giúp bạn cấu trúc sản phẩm mạch lạc hơn để quản lý tồn kho và đồng bộ đa kênh.
             </p>
           </div>
-          <button 
-            onClick={() => setIsCreating(true)}
-            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 shadow-soft"
-          >
-            <Plus className="h-4 w-4" />
-            Thêm danh mục
-          </button>
+          {hasPermission("products.create") ? (
+            <button
+              onClick={() => setIsCreating(true)}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 shadow-soft"
+            >
+              <Plus className="h-4 w-4" />
+              Thêm danh mục
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -571,13 +577,15 @@ export default function ProductCategoriesPage() {
                       {cat.product_count ?? 0} sản phẩm
                     </td>
                     <td className="px-4 py-4 text-center">
-                      <button 
-                        onClick={() => handleDelete(cat.id, cat.name)}
-                        className="rounded-lg p-2 text-red-600 hover:bg-red-50 transition-colors"
-                        title="Xóa danh mục này"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {hasPermission("products.delete") ? (
+                        <button
+                          onClick={() => handleDelete(cat.id, cat.name)}
+                          className="rounded-lg p-2 text-red-600 hover:bg-red-50 transition-colors"
+                          title="Xóa danh mục này"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -622,5 +630,6 @@ export default function ProductCategoriesPage() {
         </a>
       </div>
     </section>
+    </PageGuard>
   );
 }

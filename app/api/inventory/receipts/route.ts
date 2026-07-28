@@ -5,11 +5,14 @@ import {
   createStockReceipt,
   listStockReceipts,
 } from "@/lib/inventory/receipts";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requirePermission("inventory.view");
+  if (guard) return guard;
   try {
     const url = new URL(request.url);
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 50)));
@@ -48,6 +51,8 @@ const manualSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("inventory.create");
+  if (guard) return guard;
   try {
     const body = await request.json();
 

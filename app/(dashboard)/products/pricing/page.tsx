@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2, Save, Search, Settings2 } from "lucide-react";
 import { ProductWebsiteModal } from "./ProductWebsiteModal";
+import { usePermissions } from "@/components/providers/PermissionsProvider";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 interface ProductRow {
   id: string;
@@ -23,6 +25,7 @@ interface ProductRow {
 type PriceField = "cost_price" | "compare_at_price" | "price";
 
 export default function ProductPricingPage() {
+  const { hasPermission } = usePermissions();
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -135,6 +138,7 @@ export default function ProductPricingPage() {
   }
 
   return (
+    <PageGuard permission="products.view">
     <section className="space-y-5">
       <div className="panel p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -231,7 +235,7 @@ export default function ProductPricingPage() {
                         </button>
                       </td>
                       <td className="p-3 text-center">
-                        {isDirty(row) ? (
+                        {isDirty(row) && hasPermission("products.edit") ? (
                           <button
                             onClick={() => save(row)}
                             disabled={savingId === row.id}
@@ -269,6 +273,7 @@ export default function ProductPricingPage() {
         />
       )}
     </section>
+    </PageGuard>
   );
 }
 

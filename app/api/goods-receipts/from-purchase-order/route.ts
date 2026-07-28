@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createGoodsReceiptFromPurchaseOrder } from "@/lib/inventory/receipts";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,8 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = await requirePermission("goods_receipts.create");
+  if (guard) return guard;
   try {
     const raw = await request.json();
     const parsed = schema.safeParse(raw);

@@ -23,6 +23,7 @@ import {
   AlertTriangle
 } from "lucide-react";
 import { formatCurrencyVND } from "@/lib/shared/format";
+import { PageGuard } from "@/components/auth/PageGuard";
 
 type ReceiptStatus = "pending" | "in_progress" | "completed" | "cancelled";
 type PaymentStatus = "unpaid" | "partial" | "paid";
@@ -500,6 +501,7 @@ export default function GoodsReceiptDetailPage() {
   const allStockAdded = gr.items.length > 0 && stockAddedCount === gr.items.length;
 
   return (
+    <PageGuard permission="goods_receipts.view">
     <div className="flex flex-col gap-4 px-4 pb-8 lg:px-6">
       {/* Top bar */}
       <div className="flex items-center justify-between">
@@ -1067,6 +1069,7 @@ export default function GoodsReceiptDetailPage() {
         </div>
       ) : null}
     </div>
+    </PageGuard>
   );
 }
 
