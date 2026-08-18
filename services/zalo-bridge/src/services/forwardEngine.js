@@ -110,8 +110,30 @@ const imageBatches = new Map();
 const accountForwardQueue = new Map(); // accountId -> Promise (đuôi hàng đợi)
 const accountLastForwardFinishedAt = new Map(); // accountId -> timestamp
 
+// Trần thời gian cho 1 "lượt" chuyển tiếp (forwardText/forwardMedia/forwardSticker)
+// chạy trong hàng đợi tuần tự. BUG đã phát hiện (2026-08-18, xem điều tra
+// zalo_forward_logs trống hoàn toàn cho account 'shop-owner' dù message vẫn
+// đến đều): api.forwardMessage()/sendMessage() của zca-js gọi thẳng ra mạng,
+// KHÔNG có timeout nội tại — nếu 1 lượt bị treo (network stall, Zalo server
+// không phản hồi...), promise đó không bao giờ resolve/reject, khiến
+// runSerialized() (chỉ .catch() được lượt REJECT, không xử lý được lượt PENDING
+// mãi mãi) bị kẹt vĩnh viễn — MỌI tin nhắn tới sau đó của account này im lặng
+// xếp hàng chờ mãi, không log, không lỗi, không forward, cho tới khi restart
+// bridge. Ép timeout ở đây để 1 lượt treo tự động coi là lỗi và nhường lượt
+// kế tiếp, thay vì làm nghẽn hàng đợi mãi mãi.
+const FORWARD_TASK_TIMEOUT_MS = Number(process.env.ZALO_FORWARD_TASK_TIMEOUT_MS || 45000);
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withTaskTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timeout sau ${ms}ms`)), ms)
+    ),
+  ]);
 }
 
 // Xếp `task` vào hàng đợi của account, đảm bảo chạy sau lượt trước đó ÍT NHẤT
@@ -129,7 +151,13 @@ function runSerialized(accountId, task) {
       const wait = FORWARD_DELAY_MS - (Date.now() - lastFinishedAt);
       if (wait > 0) await sleep(wait);
       try {
-        await task();
+        await withTaskTimeout(task(), FORWARD_TASK_TIMEOUT_MS, `[forward] [${accountId}] task`);
+      } catch (err) {
+        // Trước đây lỗi/timeout ở đây không được log gì cả — chỉ âm thầm
+        // reject nextTail (chỉ được dọn ở .catch() của LƯỢT KẾ TIẾP, không ai
+        // nhìn thấy nguyên nhân). Log rõ ra để không còn "forward biến mất
+        // không dấu vết" như bug đã gặp.
+        logger.error(`[forward] [${accountId}] serialized task failed: ${err.message}`);
       } finally {
         accountLastForwardFinishedAt.set(accountId, Date.now());
       }
@@ -239,7 +267,13 @@ async function logForward(entry) {
   try {
     const sb = getClient();
     if (!sb) return;
-    await sb.from('zalo_forward_logs').insert({
+    // BUG đã fix (2026-08-18): trước đây không destructure {error} từ kết quả
+    // insert() — supabase-js KHÔNG throw khi Postgrest từ chối insert (RLS,
+    // constraint...), chỉ trả về {error: {...}} — nên mọi lần insert thất bại
+    // đều trôi qua try/catch này mà không hề lộ ra (không throw = catch không
+    // chạy), khiến zalo_forward_logs có thể trống dù forward đã thật sự chạy
+    // (thành công lẫn thất bại) mà không ai biết insert log bị từ chối.
+    const { error } = await sb.from('zalo_forward_logs').insert({
       rule_id: entry.rule_id ?? null,
       account_id: entry.account_id,
       source_thread_id: entry.source_thread_id,
@@ -249,6 +283,9 @@ async function logForward(entry) {
       status: entry.status,
       error: entry.error ?? null,
     });
+    if (error) {
+      logger.error(`[forward] logForward insert rejected: ${error.message}`);
+    }
   } catch (err) {
     logger.error(`[forward] logForward failed: ${err.message}`);
   }
@@ -574,6 +611,13 @@ export async function handleIncomingGroupMessage({ accountId, api, msg, threadId
 
     const rules = await getRulesForMaster(accountId, threadId);
     if (rules.length === 0) return;
+
+    // Log ngắn khi khớp master rule — trước đây KHÔNG có log nào ở nhánh
+    // thành công (chỉ ghi zalo_forward_logs), nên khi hàng đợi runSerialized()
+    // bị kẹt (xem FORWARD_TASK_TIMEOUT_MS ở trên) hoặc logForward() âm thầm
+    // fail, hoàn toàn không có dấu vết nào để biết forward có tới bước này
+    // hay không. Chỉ log khi khớp rule (không log mọi message) để tránh spam.
+    logger.info(`[forward] [${accountId}] master matched thread=${threadId} rules=${rules.length}`);
 
     if (!consumeRateBudget(accountId)) {
       logger.warn(`[forward] [${accountId}] rate limit (${MAX_PER_MIN}/min) exceeded, skip master=${threadId}`);
