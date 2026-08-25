@@ -1,5 +1,9 @@
 /**
  * lib/storefront/checkout.ts — tạo đơn hàng từ giỏ hàng storefront.
+ * Checkout kiểu "khách vãng lai" (không yêu cầu đăng nhập) — khớp đúng UX gốc
+ * của giao diện Denfood: chỉ hỏi tên/SĐT/địa chỉ, xác nhận đơn qua Zalo. Server
+ * tự tìm-hoặc-tạo customers theo SĐT để đơn vẫn gắn được customer_id thật.
+ *
  * KHÔNG tin giá/tồn kho client gửi lên (có thể bị sửa qua devtools) — luôn
  * tra lại `products` để lấy giá/tên/tồn kho hiện tại trước khi gọi
  * createOrder(). Xem STOREFRONT_PLAN.md mục 4.
@@ -8,7 +12,7 @@
 import { getPool, isDatabaseConfigured } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { createOrder, type Order, type PaymentMethod } from "../orders/repository";
-import type { Customer } from "../customers/repository";
+import { createCustomer } from "../customers/repository";
 
 export interface CheckoutItemInput {
   product_id: string;
@@ -16,15 +20,26 @@ export interface CheckoutItemInput {
 }
 
 export interface CheckoutInput {
+  name: string;
+  phone: string;
   items: CheckoutItemInput[];
   payment_method: PaymentMethod;
   shipping_address: string;
   note?: string;
 }
 
-export async function checkout(customer: Customer, input: CheckoutInput): Promise<Order> {
+async function findOrCreateCustomer(pool: ReturnType<typeof getPool>, name: string, phone: string) {
+  const existing = await pool.query(`select id, name, phone from customers where phone = $1 limit 1`, [phone]);
+  if (existing.rows.length > 0) return existing.rows[0] as { id: string; name: string; phone: string };
+  const created = await createCustomer({ name, phone });
+  return { id: created.id, name: created.name, phone: created.phone };
+}
+
+export async function checkout(input: CheckoutInput): Promise<Order> {
   if (!isDatabaseConfigured) throw new Error("Database chưa cấu hình.");
   if (!input.items.length) throw new Error("Giỏ hàng đang trống.");
+  if (!input.name.trim()) throw new Error("Vui lòng nhập tên.");
+  if (!input.phone.trim()) throw new Error("Vui lòng nhập số điện thoại.");
   if (!input.shipping_address?.trim()) throw new Error("Vui lòng nhập địa chỉ giao hàng.");
 
   await ensureDatabase();
@@ -57,6 +72,8 @@ export async function checkout(customer: Customer, input: CheckoutInput): Promis
       unit_price: Number(product.price ?? 0),
     };
   });
+
+  const customer = await findOrCreateCustomer(pool, input.name.trim(), input.phone.trim());
 
   const addressNote = `Địa chỉ giao hàng: ${input.shipping_address.trim()}`;
   const note = input.note?.trim() ? `${addressNote}\n${input.note.trim()}` : addressNote;

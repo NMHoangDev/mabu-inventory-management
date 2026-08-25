@@ -50,10 +50,42 @@ const config: Config = {
         honey: {
           50: "#fff9e8",
           100: "#fff0bd"
-        }
+        },
+        // Namespace riêng cho storefront /shop (xem .shop-scope trong globals.css) —
+        // KHÔNG dùng tên trùng với token dashboard ở trên (primary/border/muted...)
+        // để tránh đổi màu toàn bộ (dashboard).
+        "shop-primary": "var(--shop-primary)",
+        "shop-primary-dark": "var(--shop-primary-dark)",
+        "shop-primary-light": "var(--shop-primary-light)",
+        "shop-surface": "var(--shop-surface)",
+        "shop-text": "var(--shop-text)",
+        "shop-text-muted": "var(--shop-text-muted)",
+        "shop-border": "var(--shop-border)"
+      },
+      fontFamily: {
+        shop: ["Geist", "Inter", "system-ui", "sans-serif"]
       },
       boxShadow: {
         panel: "0 18px 50px rgba(15, 23, 42, 0.08)"
+      },
+      animation: {
+        "shop-slide-in-right": "shopSlideInRight 0.3s ease-out",
+        "shop-slide-in-up": "shopSlideInUp 0.3s ease-out",
+        "shop-fade-in": "shopFadeIn 0.2s ease-out"
+      },
+      keyframes: {
+        shopSlideInRight: {
+          "0%": { transform: "translateX(100%)" },
+          "100%": { transform: "translateX(0)" }
+        },
+        shopSlideInUp: {
+          "0%": { transform: "translateY(100%)" },
+          "100%": { transform: "translateY(0)" }
+        },
+        shopFadeIn: {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" }
+        }
       }
     }
   },

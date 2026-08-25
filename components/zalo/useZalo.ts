@@ -819,6 +819,14 @@ export function useZalo() {
       // Đợi 300ms cho phép SSE POST hoàn tất, sau đó refetch.
       await new Promise((r) => setTimeout(r, 300));
       await refreshCurrentThread();
+      // BUG ẢNH KHÔNG HIỂN THỊ (fix): khi gửi ảnh, lượt echo ĐẦU của chính
+      // Zalo (isSelf) đôi khi kèm placeholder link rác trong lúc CDN còn xử
+      // lý ảnh thật (xem comment isValidImageUrl trong supabaseSync.js) — vì
+      // vậy giá trị fetch ở dòng trên có thể CHƯA có ảnh thật. Refetch thêm
+      // 1 lần sau 2.5s để lấy được image_urls thật mà bridge ghi đè sau đó.
+      setTimeout(() => {
+        void refreshCurrentThread();
+      }, 2500);
       // Optimistic local sort: thread mình vừa nhắn là "có tin gần nhất" → đẩy
       // lên đầu danh sách ngay, không cần đợi round-trip từ DB.
       const nowIso = new Date().toISOString();
@@ -1088,6 +1096,13 @@ if (type === "new_message") {
                       String(openConvIdRef.current) === targetThread
                     ) {
                       void refreshCurrentThread();
+                      // Fix ảnh không hiển thị: bridge persist tin (kèm
+                      // image_urls) là fire-and-forget, không đảm bảo đã
+                      // ghi xong trước lúc refetch này chạy → refetch thêm
+                      // 1 lần sau 2.5s để không kẹt ở bản ghi rỗng ảnh.
+                      setTimeout(() => {
+                        void refreshCurrentThread();
+                      }, 2500);
                     }
                     // Optimistic sort local + cập nhật latest_*/ unread_count
                     // ngay khi SSE đến — kể cả nhánh không có message_id (bridge
@@ -1200,6 +1215,18 @@ if (type === "new_message") {
                   String(openConvIdRef.current) === targetThread
                 ) {
                   void refreshCurrentThread();
+                  // BUG ẢNH KHÔNG HIỂN THỊ (fix): messageRow gửi lên đây LUÔN
+                  // có image_urls=[] (payload SSE từ bridge không kèm field
+                  // này — xem sessionManager.js) và được lưu insertOnly=true
+                  // (ignoreDuplicates), nên nếu dòng bridge tự persist (CÓ
+                  // image_urls thật, ghi đè được) chưa kịp chạy xong lúc
+                  // refetch phía trên → bubble hiện ra không có ảnh và không
+                  // tự sửa lại nếu không có gì trigger refetch lần 2. Refetch
+                  // thêm 1 lần sau 2.5s để lấy được ảnh thật nếu bridge ghi
+                  // xong muộn hơn.
+                  setTimeout(() => {
+                    void refreshCurrentThread();
+                  }, 2500);
                 }
                 // 1) Optimistic update cho state local — UI thread list "jump"
                 //    lên đầu ngay khi user nhận tin nhắn mới, không phải đợi DB.

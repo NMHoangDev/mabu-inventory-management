@@ -9,7 +9,9 @@ import {
   Loader2,
   Printer,
   AlertCircle,
-  Scale
+  Scale,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { usePermissions } from "@/components/providers/PermissionsProvider";
 import { PageGuard } from "@/components/auth/PageGuard";
@@ -77,6 +79,8 @@ export default function StockCheckDetailPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
   const fetchData = () => {
     if (!id) return;
@@ -103,6 +107,12 @@ export default function StockCheckDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Reset về trang 1 mỗi khi xem 1 phiếu kiểm khác (đổi id trên URL) — tránh
+  // kẹt ở trang 5 khi phiếu mới tải vào chỉ có 1 trang.
+  useEffect(() => {
+    setPage(1);
+  }, [id]);
+
   const totals = useMemo(() => {
     if (!sc) return { system: 0, actual: 0, variance: 0 };
     return sc.items.reduce(
@@ -114,6 +124,14 @@ export default function StockCheckDetailPage() {
       { system: 0, actual: 0, variance: 0 }
     );
   }, [sc]);
+
+  const totalPages = sc ? Math.max(1, Math.ceil(sc.items.length / PAGE_SIZE)) : 1;
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const pagedItems = useMemo(() => {
+    if (!sc) return [];
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return sc.items.slice(start, start + PAGE_SIZE);
+  }, [sc, currentPage]);
 
   const transitionStatus = async (next: StockCheckStatus, confirm?: string) => {
     if (!sc || busy) return;
@@ -253,9 +271,9 @@ export default function StockCheckDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sc.items.map((it, idx) => (
+                {pagedItems.map((it, idx) => (
                   <tr key={it.id} className="hover:bg-slate-50/50">
-                    <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
+                    <td className="px-3 py-2 text-slate-500">{(currentPage - 1) * PAGE_SIZE + idx + 1}</td>
                     <td className="px-3 py-2">
                       {it.image_url ? (
                         <img src={it.image_url} alt="" className="h-10 w-10 rounded object-cover" />
@@ -310,6 +328,34 @@ export default function StockCheckDetailPage() {
             </table>
           </div>
         )}
+        {sc.items.length > PAGE_SIZE ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-3 py-2.5 text-sm text-slate-600">
+            <span>
+              Hiển thị {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, sc.items.length)} / {sc.items.length} sản phẩm
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" /> Trước
+              </button>
+              <span className="text-xs text-slate-500">
+                Trang {currentPage}/{totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Sau <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">

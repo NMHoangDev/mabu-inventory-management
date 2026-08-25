@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useApp } from "@/invoice-flow-manager-fe/components/providers/AppProvider";
 import { normalizeFinancials, normalizeNumberText, parseNumeric, cleanInvoiceProductName, formatCurrencyVND } from "@/lib/shared/format";
@@ -79,17 +79,51 @@ export default function ProductsPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
   const [categories, setCategories] = useState<any[]>([]);
+  const [categoryEditingId, setCategoryEditingId] = useState<string | null>(null);
+  const [categorySavingId, setCategorySavingId] = useState<string | null>(null);
   const [copiedSku, setCopiedSku] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<ExportScope>("all");
   const [exporting, setExporting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const productImageInputRef = useRef<HTMLInputElement | null>(null);
 
   function copySku(sku: string) {
     navigator.clipboard.writeText(sku).then(() => {
       setCopiedSku(sku);
       setTimeout(() => setCopiedSku((cur) => (cur === sku ? null : cur)), 1500);
     });
+  }
+
+  // Đổi phân loại tức thì ngay trên danh sách (không cần mở form sửa đầy
+  // đủ) — chỉ PATCH đúng field category_id (updateProduct() hỗ trợ update
+  // từng phần, xem lib/products/repository.ts).
+  async function handleCategoryChange(productId: string, newCategoryId: string) {
+    const nextCategoryId = newCategoryId || null;
+    setCategoryEditingId(null);
+    setCategorySavingId(productId);
+    try {
+      const res = await fetch(`/api/products/${productId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category_id: nextCategoryId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Không đổi được phân loại.");
+      const nextCategoryName = nextCategoryId
+        ? categories.find((c) => c.id === nextCategoryId)?.name ?? ""
+        : "";
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === productId ? { ...p, category_id: nextCategoryId, category_name: nextCategoryName } : p
+        )
+      );
+      setNotice("Đã đổi phân loại sản phẩm.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Có lỗi khi đổi phân loại.");
+    } finally {
+      setCategorySavingId(null);
+    }
   }
 
   // Filters for standard products
@@ -998,44 +1032,68 @@ export default function ProductsPage() {
             {/* Product Image */}
             <section className="bg-white rounded-lg border p-5 shadow-sm space-y-3">
               <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">Ảnh sản phẩm</h2>
-              <div className="border border-dashed rounded-lg p-6 flex flex-col items-center justify-center bg-slate-50 relative transition-all hover:bg-slate-100 hover:border-primary/50 group/upload cursor-pointer overflow-hidden">
-                {imageUrl ? (
-                  <div className="relative group w-full aspect-square rounded overflow-hidden border">
-                    <img src={imageUrl} alt="Preview" className="w-full h-full object-cover" />
-                    {!isReadOnly && (
-                      <button 
-                        type="button" 
+              {!isReadOnly && (
+                <input
+                  ref={productImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onloadend = () => setImageUrl(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              )}
+              {imageUrl ? (
+                <div className="relative group w-full aspect-square rounded-lg overflow-hidden border">
+                  <img src={imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                  {!isReadOnly && (
+                    <>
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+                      <div className="absolute inset-x-0 bottom-0 flex justify-center pb-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={() => productImageInputRef.current?.click()}
+                          title="Thay đổi ảnh sản phẩm"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md hover:bg-white"
+                        >
+                          <Edit className="h-3.5 w-3.5" /> Đổi ảnh
+                        </button>
+                      </div>
+                      <button
+                        type="button"
                         onClick={() => setImageUrl("")}
-                        className="absolute inset-0 bg-black/55 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs font-bold"
+                        title="Xoá ảnh"
+                        className="absolute top-2 right-2 rounded-full bg-black/50 p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70"
                       >
-                        Thay đổi ảnh
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    <ImageIcon className="h-8 w-8 text-slate-400 mb-1" />
-                    <span className="text-[10px] text-slate-500 text-center">Gán liên kết hình ảnh trực tiếp từ URL bên dưới hoặc bấm vào đây để chọn file ảnh (lưu dạng Base64 để test)</span>
-                    {!isReadOnly && (
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onloadend = () => {
-                              setImageUrl(reader.result as string);
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        }}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                      />
-                    )}
-                  </>
-                )}
-              </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isReadOnly}
+                  onClick={() => productImageInputRef.current?.click()}
+                  className="group/upload relative flex w-full aspect-square flex-col items-center justify-center rounded-lg border border-dashed bg-slate-50 transition-all hover:bg-slate-100 hover:border-primary/50 disabled:cursor-not-allowed disabled:hover:bg-slate-50 disabled:hover:border-inherit"
+                >
+                  <span className="flex flex-col items-center gap-1 px-4 text-center transition-opacity group-hover/upload:opacity-0">
+                    <ImageIcon className="h-8 w-8 text-slate-400" />
+                    <span className="text-[10px] text-slate-500">Chưa có ảnh sản phẩm</span>
+                  </span>
+                  {!isReadOnly && (
+                    <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-primary opacity-0 transition-opacity group-hover/upload:opacity-100">
+                      <Upload className="h-8 w-8" />
+                      <span className="text-[10px] font-semibold">Bấm để tải ảnh lên</span>
+                    </span>
+                  )}
+                </button>
+              )}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-500 mb-1">Đường dẫn ảnh (URL)</label>
                 <input 
@@ -1440,7 +1498,41 @@ export default function ProductsPage() {
                           {p.unit || "cái"}
                         </td>
                         <td className="px-6 py-4 text-center">
-                          <div className="text-xs font-semibold text-slate-700">{p.category_name || "—"}</div>
+                          {categoryEditingId === p.id ? (
+                            <select
+                              autoFocus
+                              defaultValue={p.category_id || ""}
+                              disabled={categorySavingId === p.id}
+                              onChange={(e) => handleCategoryChange(p.id, e.target.value)}
+                              onBlur={() => setCategoryEditingId(null)}
+                              className="w-full max-w-[160px] rounded border border-primary/40 px-1.5 py-1 text-xs focus:border-primary focus:outline-none"
+                            >
+                              <option value="">— Chưa phân loại —</option>
+                              {categories.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => hasPermission("products.edit") && setCategoryEditingId(p.id)}
+                              disabled={categorySavingId === p.id}
+                              title={hasPermission("products.edit") ? "Bấm để đổi phân loại" : undefined}
+                              className={`text-xs font-semibold text-slate-700 ${
+                                hasPermission("products.edit")
+                                  ? "cursor-pointer hover:text-primary hover:underline"
+                                  : "cursor-default"
+                              }`}
+                            >
+                              {categorySavingId === p.id ? (
+                                <Loader2 className="inline h-3 w-3 animate-spin" />
+                              ) : (
+                                p.category_name || "—"
+                              )}
+                            </button>
+                          )}
                           {p.brand_name && <div className="text-[10px] text-slate-400 mt-0.5">{p.brand_name}</div>}
                         </td>
                         <td className="px-6 py-4 text-right font-semibold text-slate-700 tabular-nums">

@@ -698,11 +698,11 @@ export const zaloAuthApi = {
       has_session: !!data.has_session
     };
   },
-  async login(staffId: string, password: string): Promise<{ ok: true; staffId: string }> {
+  async login(email: string, password: string): Promise<{ ok: true; staffId: string }> {
     const res = await fetch("/api/auth/zalo/me", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staffId, password }),
+      body: JSON.stringify({ email, password }),
       credentials: "include"
     });
     return readJson(res);

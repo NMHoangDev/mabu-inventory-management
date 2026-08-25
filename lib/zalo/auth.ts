@@ -171,11 +171,18 @@ export function canBroadcastTo(staff: StaffSession, accountId: string): boolean 
   return staff.assignments.some((a) => a.account_id === accountId && a.can_broadcast);
 }
 
-/** Cookie options khi set current_staff_id. */
+/**
+ * Cookie options khi set current_staff_id.
+ *
+ * maxAge = 7 ngày: khi cookie hết hạn, browser tự xoá và không gửi lên nữa —
+ * request kế tiếp tới bất kỳ route (dashboard) nào sẽ rơi vào nhánh
+ * `if (!staffId)` ở middleware.ts, tự redirect về /login (không cần thêm
+ * logic riêng cho "hết hạn" — hết hạn = như chưa từng đăng nhập).
+ */
 export const STAFF_COOKIE_NAME = "current_staff_id";
 export const STAFF_COOKIE_OPTS = {
   path: "/",
   sameSite: "lax" as const,
   httpOnly: false,
-  maxAge: 60 * 60 * 24 * 30 // 30 ngày
+  maxAge: 60 * 60 * 24 * 7 // 7 ngày
 };

@@ -9,7 +9,9 @@ import {
   X,
   Loader2,
   Package,
-  Filter
+  Filter,
+  Upload,
+  AlertTriangle
 } from "lucide-react";
 import { PageGuard } from "@/components/auth/PageGuard";
 
@@ -33,9 +35,34 @@ interface DraftItem {
   actual_quantity: number;
   variance_reason: string;
   note: string;
+  /** Giá vốn hệ thống hiện tại / giá vốn đọc từ file nhập (0 = không có dữ
+   * liệu, vd item thêm tay qua ô tìm kiếm chứ không phải từ file Excel). */
+  system_cost_price: number;
+  file_cost_price: number;
 }
 
 type TabKey = "all" | "pending" | "matched" | "variance";
+
+interface UnmatchedImportRow {
+  sku: string;
+  actual_quantity: number;
+}
+
+interface ToCreateImportRow {
+  sku: string;
+  product_name: string;
+  unit: string;
+  actual_quantity: number;
+  cost_price: number;
+}
+
+interface CostPriceFixRow {
+  product_id: string;
+  sku: string;
+  product_name: string;
+  system_cost_price: number;
+  file_cost_price: number;
+}
 
 const emptyItem = (): DraftItem => ({
   rowKey: `tmp-${Math.random().toString(36).slice(2, 9)}`,
@@ -47,7 +74,9 @@ const emptyItem = (): DraftItem => ({
   system_quantity: 0,
   actual_quantity: 0,
   variance_reason: "",
-  note: ""
+  note: "",
+  system_cost_price: 0,
+  file_cost_price: 0
 });
 
 function parseNumberInput(text: string): number {
@@ -93,8 +122,13 @@ export default function NewStockCheckPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [unmatchedSkus, setUnmatchedSkus] = useState<UnmatchedImportRow[]>([]);
+  const [pendingCreate, setPendingCreate] = useState<ToCreateImportRow[]>([]);
+  const [costPriceFixes, setCostPriceFixes] = useState<CostPriceFixRow[]>([]);
   const productBoxRef = useRef<HTMLDivElement | null>(null);
   const productInputRef = useRef<HTMLInputElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     fetch("/api/staff")
@@ -208,7 +242,9 @@ export default function NewStockCheckPage() {
       system_quantity: Number(row.system_quantity) || 0,
       actual_quantity: 0,
       variance_reason: "",
-      note: ""
+      note: "",
+      system_cost_price: 0,
+      file_cost_price: 0
     };
   }
 
@@ -249,6 +285,124 @@ export default function NewStockCheckPage() {
     setProductQuery("");
   }
 
+  function openImportFile() {
+    importInputRef.current?.click();
+  }
+
+  // Nhập file "Báo cáo tồn kho" xuất từ hệ thống bán hàng (Sapo) — quét cột
+  // Mã SKU + Tồn kho, khớp với sản phẩm trong hệ thống, đổ vào phiếu kiểm để
+  // người dùng REVIEW trước khi "Cân bằng kho" (không tự động ghi tồn kho
+  // ngay khi nhập file — an toàn hơn vì đây là dữ liệu ngoài, có thể sai SKU).
+  async function handleImportFile(file: File) {
+    setImporting(true);
+    setError("");
+    setNotice("");
+    setUnmatchedSkus([]);
+    setPendingCreate([]);
+    setCostPriceFixes([]);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/stock-checks/import-excel", {
+        method: "POST",
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Không nhập được file.");
+
+      const incoming: Array<{
+        product_id: string;
+        sku: string;
+        product_name: string;
+        unit: string;
+        image_url: string;
+        system_quantity: number;
+        actual_quantity: number;
+        system_cost_price: number;
+        file_cost_price: number;
+      }> = Array.isArray(data.items) ? data.items : [];
+
+      setItems((prev) => {
+        const next = [...prev];
+        for (const row of incoming) {
+          const idx = next.findIndex((it) => it.product_id === row.product_id);
+          if (idx !== -1) {
+            next[idx] = {
+              ...next[idx],
+              system_quantity: row.system_quantity,
+              actual_quantity: row.actual_quantity,
+              system_cost_price: row.system_cost_price,
+              file_cost_price: row.file_cost_price
+            };
+          } else {
+            next.push({
+              rowKey: `import-${row.product_id}`,
+              product_id: row.product_id,
+              sku: row.sku,
+              product_name: row.product_name,
+              unit: row.unit,
+              image_url: row.image_url,
+              system_quantity: row.system_quantity,
+              actual_quantity: row.actual_quantity,
+              variance_reason: "",
+              note: "",
+              system_cost_price: row.system_cost_price,
+              file_cost_price: row.file_cost_price
+            });
+          }
+        }
+        return next;
+      });
+
+      if (Array.isArray(data.unmatched)) setUnmatchedSkus(data.unmatched);
+      if (Array.isArray(data.toCreate)) {
+        const incomingToCreate: ToCreateImportRow[] = data.toCreate;
+        setPendingCreate((prev) => {
+          const next = [...prev];
+          for (const row of incomingToCreate) {
+            const idx = next.findIndex((r) => r.sku.toLowerCase() === row.sku.toLowerCase());
+            if (idx !== -1) next[idx] = row;
+            else next.push(row);
+          }
+          return next;
+        });
+      }
+
+      // Lệch giá vốn: chỉ tính khi file CÓ giá vốn thật (>0) và khác giá vốn
+      // hệ thống — sẽ tự cập nhật khi bấm "Tạo phiếu kiểm"/"Cân bằng kho".
+      const fixes: CostPriceFixRow[] = incoming
+        .filter((row) => row.file_cost_price > 0 && Math.abs(row.file_cost_price - row.system_cost_price) > 0.01)
+        .map((row) => ({
+          product_id: row.product_id,
+          sku: row.sku,
+          product_name: row.product_name,
+          system_cost_price: row.system_cost_price,
+          file_cost_price: row.file_cost_price
+        }));
+      setCostPriceFixes((prev) => {
+        const next = [...prev];
+        for (const row of fixes) {
+          const idx = next.findIndex((r) => r.product_id === row.product_id);
+          if (idx !== -1) next[idx] = row;
+          else next.push(row);
+        }
+        return next;
+      });
+
+      const s = data.summary ?? {};
+      const parts = [`Đã nhập file: ${s.matched ?? incoming.length}/${s.totalRows ?? incoming.length} SKU khớp hệ thống`];
+      if (s.toCreate) parts.push(`${s.toCreate} SKU mới sẽ được tạo khi bạn lưu phiếu`);
+      if (s.costPriceMismatch) parts.push(`${s.costPriceMismatch} SKU sẽ cập nhật lại giá vốn theo file`);
+      if (s.unmatched) parts.push(`${s.unmatched} SKU không đủ dữ liệu để tạo (thiếu tên)`);
+      if (s.duplicateInFile) parts.push(`${s.duplicateInFile} SKU lặp trong file (đã gộp, lấy dòng cuối)`);
+      setNotice(parts.join(", ") + ".");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Có lỗi khi nhập file.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function handleAddTag() {
     const value = tagInput.trim();
     if (!value) return;
@@ -264,13 +418,97 @@ export default function NewStockCheckPage() {
   }
 
   async function handleSubmit(action: "save" | "balance") {
-    if (items.length === 0) {
+    if (items.length === 0 && pendingCreate.length === 0) {
       setError("Vui lòng thêm ít nhất một sản phẩm vào phiếu kiểm.");
       return;
     }
     setError("");
     setSubmitting(true);
     try {
+      let allItems = items;
+
+      // Nếu có SKU từ file nhập chưa tồn tại trong hệ thống, và/hoặc có SKU
+      // đã tồn tại nhưng giá vốn trong file khác giá vốn hệ thống → xử lý
+      // NGAY LÚC NÀY (người dùng vừa bấm lưu/cân bằng — hành động xác nhận
+      // rõ ràng). Không tạo/sửa ở bước preview/nhập file để còn cơ hội
+      // review trước khi ghi dữ liệu.
+      if (pendingCreate.length > 0 || costPriceFixes.length > 0) {
+        const createRes = await fetch("/api/stock-checks/import-excel/create-missing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rows: pendingCreate,
+            costPriceUpdates: costPriceFixes.map((f) => ({
+              product_id: f.product_id,
+              cost_price: f.file_cost_price
+            }))
+          })
+        });
+        const createData = await createRes.json();
+        if (!createRes.ok) throw new Error(createData?.error ?? "Không tạo được sản phẩm mới.");
+
+        const createdList: Array<{
+          product_id: string;
+          sku: string;
+          product_name: string;
+          unit: string;
+          actual_quantity: number;
+        }> = Array.isArray(createData.created) ? createData.created : [];
+        const costPriceUpdatedList: Array<{ product_id: string; cost_price: number }> = Array.isArray(
+          createData.costPriceUpdated
+        )
+          ? createData.costPriceUpdated
+          : [];
+        const costPriceByProductId = new Map(costPriceUpdatedList.map((r) => [r.product_id, r.cost_price]));
+
+        const createdItems: DraftItem[] = createdList.map((row) => {
+          const pendingRow = pendingCreate.find((p) => p.sku.toLowerCase() === row.sku.toLowerCase());
+          return {
+            rowKey: `created-${row.product_id}`,
+            product_id: row.product_id,
+            sku: row.sku,
+            product_name: row.product_name,
+            unit: row.unit,
+            image_url: "",
+            system_quantity: 0,
+            actual_quantity: row.actual_quantity,
+            variance_reason: "",
+            note: "",
+            system_cost_price: pendingRow?.cost_price ?? 0,
+            file_cost_price: pendingRow?.cost_price ?? 0
+          };
+        });
+        allItems = [
+          ...items.map((it) =>
+            it.product_id && costPriceByProductId.has(it.product_id)
+              ? { ...it, system_cost_price: costPriceByProductId.get(it.product_id)! }
+              : it
+          ),
+          ...createdItems
+        ];
+        setItems(allItems);
+        setCostPriceFixes((prev) => prev.filter((f) => !costPriceByProductId.has(f.product_id)));
+
+        const createdSkus = new Set(createdList.map((r) => r.sku.toLowerCase()));
+        const remainingPending = pendingCreate.filter((r) => !createdSkus.has(r.sku.toLowerCase()));
+        setPendingCreate(remainingPending);
+
+        const createErrors: Array<{ sku: string; message: string }> = Array.isArray(createData.errors)
+          ? createData.errors
+          : [];
+        if (createErrors.length > 0) {
+          // Dừng lại để người dùng thấy lỗi trước khi tiếp tục — các sản phẩm
+          // tạo thành công đã được gộp vào items (không mất), chỉ những SKU
+          // lỗi còn nằm lại trong pendingCreate để thử lại.
+          setError(
+            `Không tạo được ${createErrors.length} sản phẩm (SKU: ${createErrors
+              .map((e) => e.sku)
+              .join(", ")}). Các sản phẩm còn lại đã được thêm vào phiếu — bấm lại để tiếp tục lưu, hoặc xoá SKU lỗi khỏi danh sách nhập.`
+          );
+          return;
+        }
+      }
+
       const res = await fetch("/api/stock-checks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -281,7 +519,7 @@ export default function NewStockCheckPage() {
           note,
           tags,
           status: action === "balance" ? "balanced" : "draft",
-          items: items.map((it, idx) => ({
+          items: allItems.map((it, idx) => ({
             product_id: it.product_id,
             sku: it.sku,
             product_name: it.product_name,
@@ -351,6 +589,114 @@ export default function NewStockCheckPage() {
       {notice ? (
         <div className="mx-6 mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
           {notice}
+        </div>
+      ) : null}
+      {unmatchedSkus.length > 0 ? (
+        <div className="mx-6 mt-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-medium">
+                  {unmatchedSkus.length} SKU trong file không khớp sản phẩm nào trong hệ thống — chưa được thêm vào phiếu kiểm:
+                </div>
+                <div className="mt-1 text-xs text-amber-700">
+                  {unmatchedSkus
+                    .slice(0, 15)
+                    .map((r) => r.sku || "(trống)")
+                    .join(", ")}
+                  {unmatchedSkus.length > 15 ? ` … và ${unmatchedSkus.length - 15} SKU khác` : ""}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setUnmatchedSkus([])}
+              className="text-amber-500 hover:text-amber-700 flex-shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {pendingCreate.length > 0 ? (
+        <div className="mx-6 mt-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="flex items-start gap-2">
+              <Upload className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div className="font-medium">
+                {pendingCreate.length} SKU chưa có trong hệ thống — sẽ tự tạo sản phẩm mới khi bạn bấm
+                &quot;Tạo phiếu kiểm&quot; / &quot;Cân bằng kho&quot; bên dưới:
+              </div>
+            </div>
+            <button
+              onClick={() => setPendingCreate([])}
+              className="text-blue-500 hover:text-blue-700 flex-shrink-0"
+              title="Bỏ qua toàn bộ (không tạo SKU nào trong danh sách này)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="max-h-32 overflow-y-auto space-y-1 text-xs">
+            {pendingCreate.map((row) => (
+              <div
+                key={row.sku}
+                className="flex items-center justify-between gap-2 rounded bg-white/70 px-2 py-1"
+              >
+                <span className="truncate">
+                  <span className="font-mono">{row.sku}</span> — {row.product_name}
+                  {row.unit ? ` · ${row.unit}` : ""} · {formatNumber(row.actual_quantity)}
+                  {row.cost_price > 0 ? ` · Giá vốn: ${formatNumber(row.cost_price)}` : ""}
+                </span>
+                <button
+                  onClick={() => setPendingCreate((prev) => prev.filter((r) => r.sku !== row.sku))}
+                  className="flex-shrink-0 text-blue-400 hover:text-red-600"
+                  title="Bỏ SKU này (không tạo sản phẩm mới cho SKU này)"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {costPriceFixes.length > 0 ? (
+        <div className="mx-6 mt-3 rounded-md border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div className="font-medium">
+                {costPriceFixes.length} SKU lệch giá vốn so với file — sẽ tự cập nhật lại khi bạn bấm
+                &quot;Tạo phiếu kiểm&quot; / &quot;Cân bằng kho&quot; bên dưới:
+              </div>
+            </div>
+            <button
+              onClick={() => setCostPriceFixes([])}
+              className="text-purple-500 hover:text-purple-700 flex-shrink-0"
+              title="Bỏ qua toàn bộ (không sửa giá vốn theo file)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="max-h-32 overflow-y-auto space-y-1 text-xs">
+            {costPriceFixes.map((row) => (
+              <div
+                key={row.product_id}
+                className="flex items-center justify-between gap-2 rounded bg-white/70 px-2 py-1"
+              >
+                <span className="truncate">
+                  <span className="font-mono">{row.sku}</span> — {row.product_name} ·{" "}
+                  {formatNumber(row.system_cost_price)} → <b>{formatNumber(row.file_cost_price)}</b>
+                </span>
+                <button
+                  onClick={() => setCostPriceFixes((prev) => prev.filter((r) => r.product_id !== row.product_id))}
+                  className="flex-shrink-0 text-purple-400 hover:text-red-600"
+                  title="Bỏ SKU này (giữ nguyên giá vốn hệ thống)"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -481,8 +827,24 @@ export default function NewStockCheckPage() {
               })}
             </div>
             <div className="flex items-center gap-6 text-[13px] text-slate-500">
-              <button className="flex items-center gap-1.5 hover:text-blue-600">
-                <Plus className="w-4 h-4" /> Nhập file
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void handleImportFile(file);
+                }}
+              />
+              <button
+                onClick={openImportFile}
+                disabled={importing}
+                className="flex items-center gap-1.5 hover:text-blue-600 disabled:opacity-60"
+              >
+                {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                Nhập file
               </button>
               <button className="flex items-center gap-1.5 hover:text-blue-600">
                 <Package className="w-4 h-4" /> Chú thích phím tắt
@@ -596,9 +958,13 @@ export default function NewStockCheckPage() {
             </button>
           </div>
 
-          <div className="bg-slate-50 border-y border-slate-200 overflow-x-auto">
-            <table className="w-full text-left text-[13px] font-semibold text-slate-700 min-w-[1000px]">
-              <thead>
+          {/* Header + body trong CÙNG 1 table (trước đây là 2 table riêng — mỗi
+              table tự tính độ rộng cột theo nội dung của chính nó, nên header
+              và giá trị bị lệch cột khi nội dung 2 bên khác nhau). Dùng 1
+              overflow-x-auto + 1 table đảm bảo cột luôn khớp nhau. */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm min-w-[1000px]">
+              <thead className="bg-slate-50 border-y border-slate-200 text-[13px] font-semibold text-slate-700">
                 <tr>
                   <th className="px-4 py-2.5 w-12 text-center">STT</th>
                   <th className="px-4 py-2.5 w-16">Ảnh</th>
@@ -607,53 +973,59 @@ export default function NewStockCheckPage() {
                   <th className="px-4 py-2.5 w-32 text-right">Tồn chi nhánh</th>
                   <th className="px-4 py-2.5 w-32 text-right">Tồn thực tế</th>
                   <th className="px-4 py-2.5 w-24 text-right">Lệch</th>
+                  <th className="px-4 py-2.5 w-28 text-right">Giá vốn</th>
+                  <th className="px-4 py-2.5 w-32 text-right">Giá trị tồn kho</th>
                   <th className="px-4 py-2.5 w-36">Lý do</th>
                   <th className="px-4 py-2.5">Ghi chú</th>
                   <th className="px-4 py-2.5 w-8"></th>
                 </tr>
               </thead>
-            </table>
-          </div>
-
-          {stockLoading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-slate-500 text-sm">
-              <Loader2 className="w-5 h-5 animate-spin" /> Đang tải tồn kho hệ thống…
-            </div>
-          ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 bg-white">
-              <div className="mb-6 opacity-20">
-                <svg
-                  fill="none"
-                  height="100"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.5"
-                  viewBox="0 0 24 24"
-                  width="100"
-                >
-                  <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-                  <path d="m3.3 7 8.7 5 8.7-5" />
-                  <path d="M12 22V12" />
-                </svg>
-              </div>
-              <p className="text-slate-500 text-sm mb-4">
-                Phiếu kiểm hàng của bạn chưa có sản phẩm nào
-              </p>
-              <button
-                onClick={() => setProductQuery("")}
-                className="px-6 py-2 border border-blue-600 text-blue-600 rounded text-sm font-medium hover:bg-blue-50"
-              >
-                Nhập file
-              </button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm min-w-[1000px]">
-                <tbody className="divide-y">
-                  {visibleItems.length === 0 ? (
+              <tbody className="divide-y">
+                {stockLoading ? (
+                  <tr>
+                    <td colSpan={12} className="py-16 text-center text-sm text-slate-500">
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="w-5 h-5 animate-spin" /> Đang tải tồn kho hệ thống…
+                      </span>
+                    </td>
+                  </tr>
+                ) : items.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="py-20">
+                      <div className="flex flex-col items-center justify-center bg-white">
+                        <div className="mb-6 opacity-20">
+                          <svg
+                            fill="none"
+                            height="100"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="1.5"
+                            viewBox="0 0 24 24"
+                            width="100"
+                          >
+                            <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+                            <path d="m3.3 7 8.7 5 8.7-5" />
+                            <path d="M12 22V12" />
+                          </svg>
+                        </div>
+                        <p className="text-slate-500 text-sm mb-4">
+                          Phiếu kiểm hàng của bạn chưa có sản phẩm nào
+                        </p>
+                        <button
+                          onClick={openImportFile}
+                          disabled={importing}
+                          className="px-6 py-2 border border-blue-600 text-blue-600 rounded text-sm font-medium hover:bg-blue-50 disabled:opacity-60 inline-flex items-center gap-2"
+                        >
+                          {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                          Nhập file
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : visibleItems.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="text-center py-12 text-slate-500 text-sm">
+                      <td colSpan={12} className="text-center py-12 text-slate-500 text-sm">
                         Không có sản phẩm nào trong tab này.
                       </td>
                     </tr>
@@ -715,6 +1087,33 @@ export default function NewStockCheckPage() {
                           >
                             {formatNumber(variance)}
                           </td>
+                          {(() => {
+                            const hasMismatch =
+                              it.file_cost_price > 0 &&
+                              Math.abs(it.file_cost_price - it.system_cost_price) > 0.01;
+                            const effectiveCostPrice = it.file_cost_price || it.system_cost_price;
+                            return (
+                              <>
+                                <td
+                                  className={`px-4 py-2.5 w-28 text-right tabular-nums ${
+                                    hasMismatch ? "font-medium text-purple-600" : "text-slate-700"
+                                  }`}
+                                  title={
+                                    hasMismatch
+                                      ? `Giá vốn hệ thống: ${formatNumber(it.system_cost_price)} → file: ${formatNumber(it.file_cost_price)}`
+                                      : undefined
+                                  }
+                                >
+                                  {effectiveCostPrice > 0 ? formatNumber(effectiveCostPrice) : "—"}
+                                </td>
+                                <td className="px-4 py-2.5 w-32 text-right tabular-nums text-slate-600">
+                                  {effectiveCostPrice > 0
+                                    ? formatNumber(it.actual_quantity * effectiveCostPrice)
+                                    : "—"}
+                                </td>
+                              </>
+                            );
+                          })()}
                           <td className="px-4 py-2.5 w-36">
                             <select
                               value={it.variance_reason}
@@ -756,7 +1155,6 @@ export default function NewStockCheckPage() {
                 </tbody>
               </table>
             </div>
-          )}
         </section>
       </div>
 

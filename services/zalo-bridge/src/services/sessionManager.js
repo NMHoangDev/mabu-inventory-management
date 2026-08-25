@@ -832,6 +832,17 @@ const RECONNECT_DELAY_MS = 30000; // 30 giây
 
 async function autoReconnect(accountId) {
   const currentState = sessions.get(accountId);
+  // Guard chống trigger trùng: 'closed' handler VÀ watchdog (5 phút) đều có
+  // thể gọi autoReconnect() độc lập với nhau khi session đang down cùng lúc
+  // (vd Zalo đóng WS liên tục trong lúc watchdog vừa tick). Không có guard
+  // này, cả 2 sẽ cùng schedule 1 setTimeout gọi loginWithCookies() riêng —
+  // nếu 2 lần login chạy đè lên nhau (chưa cái nào set isWsConnected=true
+  // kịp) sẽ tạo 2 WS connection cho cùng 1 account → Zalo tự kick 1 cái
+  // (Overlimit) → sinh thêm 'closed' event → dễ thành vòng lặp reconnect.
+  if (currentState?.reconnecting) {
+    logger.info(`[${accountId}] Auto-reconnect already in progress, skip duplicate trigger.`);
+    return;
+  }
   const attempts = (currentState?.reconnectAttempts || 0) + 1;
   if (attempts > MAX_RECONNECT_ATTEMPTS) {
     logger.error(`[${accountId}] Auto-reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts. Manual intervention required.`);
@@ -842,20 +853,34 @@ async function autoReconnect(accountId) {
     return;
   }
 
-  if (currentState) currentState.reconnectAttempts = attempts;
+  if (currentState) {
+    currentState.reconnectAttempts = attempts;
+    currentState.reconnecting = true;
+  }
   logger.info(`[${accountId}] Auto-reconnect attempt ${attempts}/${MAX_RECONNECT_ATTEMPTS} in ${RECONNECT_DELAY_MS / 1000}s...`);
 
   setTimeout(async () => {
     const creds = loadCreds(accountId);
     if (!creds) {
       logger.error(`[${accountId}] Auto-reconnect: no saved credentials found.`);
+      const stuck = sessions.get(accountId);
+      if (stuck) stuck.reconnecting = false;
       return;
     }
     try {
       await sessionManager.loginWithCookies(accountId, creds.inboxId ?? null, creds);
       logger.info(`[${accountId}] Auto-reconnect SUCCESS on attempt ${attempts}`);
+      // loginWithCookies() thành công sẽ sessions.set() 1 state MỚI (không có
+      // field `reconnecting`) — NHƯNG nếu nó tự nhận session đã sống rồi và
+      // `skipped: true` (guard riêng của loginWithCookies) thì state CŨ (đang
+      // có reconnecting=true) vẫn còn nguyên → phải clear ở đây để không kẹt
+      // guard vĩnh viễn, chặn mọi lần reconnect sau này.
+      const s = sessions.get(accountId);
+      if (s) s.reconnecting = false;
     } catch (err) {
       logger.error(`[${accountId}] Auto-reconnect attempt ${attempts} failed: ${err.message}`);
+      const s = sessions.get(accountId);
+      if (s) s.reconnecting = false;
       // Tiếp tục thử lại
       autoReconnect(accountId);
     }
@@ -902,6 +927,7 @@ export const sessionManager = {
       qrPng: null,
       status: 'waiting_qr',
       isWsConnected: false,
+      reconnecting: false,
     });
 
     const zalo = new Zalo({ imageMetadataGetter, logging: true, selfListen: true });
@@ -1026,7 +1052,7 @@ export const sessionManager = {
       status: 'logged_in', isWsConnected: true,
       listenerId: 0, isSyncing: false, syncLock: null,
       syncIntervalId: null, watchdogId: null,
-      reconnectAttempts: 0, lastAliveCheckTime: 0
+      reconnectAttempts: 0, reconnecting: false, lastAliveCheckTime: 0
     });
     saveCreds(accountId, { ...creds, imei, inboxId, zaloId, displayName, chatwootAccountId });
     reflectStatus(accountId, 'connected', {

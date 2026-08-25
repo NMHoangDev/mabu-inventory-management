@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getCurrentCustomer } from "@/lib/customers/auth";
 import { checkout } from "@/lib/storefront/checkout";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
+  name: z.string().min(1, "Vui lòng nhập tên."),
+  phone: z.string().min(8, "Số điện thoại không hợp lệ."),
   items: z
     .array(z.object({ product_id: z.string(), quantity: z.number().int().min(1) }))
     .min(1, "Giỏ hàng đang trống."),
@@ -17,10 +18,6 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const customer = await getCurrentCustomer();
-    if (!customer) {
-      return NextResponse.json({ error: "Vui lòng đăng nhập để đặt hàng." }, { status: 401 });
-    }
     const body = await request.json();
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
@@ -29,7 +26,7 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const order = await checkout(customer, parsed.data);
+    const order = await checkout(parsed.data);
     return NextResponse.json({ order }, { status: 201 });
   } catch (error) {
     console.error("POST /api/storefront/checkout failed:", error);

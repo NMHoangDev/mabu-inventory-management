@@ -2,14 +2,19 @@
  * lib/storefront/catalog.ts — đọc sản phẩm/danh mục công khai cho website bán
  * hàng. CHỈ trả field an toàn để hiển thị công khai — không bao giờ select
  * cost_price/preferred_supplier/reorder_point... (dữ liệu nội bộ). Sản phẩm
- * phải "hiển thị trên website" (status='active' và published_at khác null,
- * xem STOREFRONT_PLAN.md mục 6.1) mới xuất hiện ở đây.
+ * hiển thị trên website khi status='active' VÀ (đã bật toggle "Hiển thị trên
+ * website" ở /products/pricing — published_at khác null, xem STOREFRONT_PLAN.md
+ * mục 6.1 — HOẶC tồn kho còn trên 1). Auto-hiển thị theo tồn kho (2026-08-18,
+ * theo yêu cầu) để sản phẩm còn hàng hiện lên web ngay không cần bật tay từng
+ * cái; published_at vẫn là override thủ công (bật rồi thì hiện bất kể tồn kho
+ * bao nhiêu, kể cả 0/1 — vd sản phẩm đặt trước).
  */
 
 import { getPool, isDatabaseConfigured } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
+import { getDemoCategories, getDemoProductBySlug, getDemoProducts, isDemoMode } from "./demoData";
 
-const PUBLISHED_WHERE = `p.status = 'active' and p.published_at is not null`;
+const PUBLISHED_WHERE = `p.status = 'active' and (p.published_at is not null or coalesce(p.stock, 0) > 1)`;
 
 export interface StorefrontProductImage {
   url: string;
@@ -23,6 +28,7 @@ export interface StorefrontProductSummary {
   short_description: string;
   unit: string;
   price: number;
+  compare_at_price: number | null;
   stock: number;
   category_id: string | null;
   category_name: string | null;
@@ -42,6 +48,20 @@ export interface StorefrontCategory {
   product_count: number;
 }
 
+interface RealCategoryRef {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+// Demo mode (lib/storefront/demoData.ts) đặt tên danh mục giả trùng ý nghĩa
+// với danh mục thật khi có thể (vd "Phụ kiện tóc") — tra map này để MERGE
+// theo tên thay vì hiện 2 pill trùng tên (1 thật + 1 giả) ở sidebar/header.
+async function fetchRealCategoryRefs(pool: ReturnType<typeof getPool>): Promise<RealCategoryRef[]> {
+  const res = await pool.query(`select id, name, slug from categories`);
+  return res.rows;
+}
+
 function normalizeSearch(q: string): string {
   return q
     .normalize("NFD")
@@ -57,8 +77,11 @@ export async function listStorefrontProducts(opts: {
   page_size?: number;
 } = {}): Promise<{ products: StorefrontProductSummary[]; total: number; page: number; page_size: number }> {
   const page = Math.max(1, opts.page ?? 1);
-  const pageSize = Math.max(1, Math.min(60, opts.page_size ?? 24));
-  if (!isDatabaseConfigured) return { products: [], total: 0, page, page_size: pageSize };
+  const pageSize = Math.max(1, Math.min(300, opts.page_size ?? 24));
+  if (!isDatabaseConfigured) {
+    const demo = isDemoMode() ? getDemoProducts({ search: opts.search, category_slug: opts.category_slug }) : [];
+    return { products: demo, total: demo.length, page, page_size: pageSize };
+  }
   await ensureDatabase();
   const pool = getPool();
 
@@ -91,7 +114,7 @@ export async function listStorefrontProducts(opts: {
     pool.query(
       `select
          p.id, p.name, p.slug, p.short_description, p.unit,
-         p.price, coalesce(p.stock, 0) as stock,
+         p.price, p.compare_at_price, coalesce(p.stock, 0) as stock,
          p.category_id, c.name as category_name,
          coalesce((select url from product_images where product_id = p.id order by position asc limit 1), '') as image_url
        from products p
@@ -103,9 +126,36 @@ export async function listStorefrontProducts(opts: {
     ),
   ]);
 
+  const realProducts = dataRes.rows.map(rowToSummary);
+  const realTotal = countRes.rows[0]?.cnt ?? 0;
+
+  // Demo mode (xem lib/storefront/demoData.ts) — chèn thêm sản phẩm giả vào
+  // TRANG ĐẦU để không lặp lại khi khách/bạn phân trang; chỉ chạy khi
+  // NODE_ENV !== 'production' nên không thể lọt lên web live.
+  if (isDemoMode()) {
+    const realCats = await fetchRealCategoryRefs(pool);
+    const byNameLower = new Map(realCats.map((c) => [c.name.trim().toLowerCase(), c]));
+    const bySlug = new Map(realCats.map((c) => [c.slug, c]));
+    const targetCategoryName = opts.category_slug ? bySlug.get(opts.category_slug)?.name : undefined;
+    const demo = getDemoProducts({
+      search: opts.search,
+      category_slug: opts.category_slug,
+      category_name: targetCategoryName,
+    }).map((d) => {
+      const match = d.category_name ? byNameLower.get(d.category_name.trim().toLowerCase()) : undefined;
+      return match ? { ...d, category_id: match.id, category_name: match.name } : d;
+    });
+    return {
+      products: page === 1 ? [...realProducts, ...demo] : realProducts,
+      total: realTotal + demo.length,
+      page,
+      page_size: pageSize,
+    };
+  }
+
   return {
-    products: dataRes.rows.map(rowToSummary),
-    total: countRes.rows[0]?.cnt ?? 0,
+    products: realProducts,
+    total: realTotal,
     page,
     page_size: pageSize,
   };
@@ -119,6 +169,7 @@ function rowToSummary(row: any): StorefrontProductSummary {
     short_description: row.short_description ?? "",
     unit: row.unit ?? "",
     price: Number(row.price ?? 0),
+    compare_at_price: row.compare_at_price != null ? Number(row.compare_at_price) : null,
     stock: Number(row.stock ?? 0),
     category_id: row.category_id ?? null,
     category_name: row.category_name ?? null,
@@ -127,13 +178,13 @@ function rowToSummary(row: any): StorefrontProductSummary {
 }
 
 export async function getStorefrontProductBySlug(slug: string): Promise<StorefrontProductDetail | null> {
-  if (!isDatabaseConfigured) return null;
+  if (!isDatabaseConfigured) return isDemoMode() ? getDemoProductBySlug(slug) : null;
   await ensureDatabase();
   const pool = getPool();
   const res = await pool.query(
     `select
        p.id, p.name, p.slug, p.short_description, p.description, p.unit,
-       p.price, coalesce(p.stock, 0) as stock,
+       p.price, p.compare_at_price, coalesce(p.stock, 0) as stock,
        p.category_id, c.name as category_name
      from products p
      left join categories c on c.id = p.category_id
@@ -141,7 +192,9 @@ export async function getStorefrontProductBySlug(slug: string): Promise<Storefro
      limit 1`,
     [slug]
   );
-  if (res.rows.length === 0) return null;
+  if (res.rows.length === 0) {
+    return isDemoMode() ? getDemoProductBySlug(slug) : null;
+  }
   const row = res.rows[0];
 
   const imagesRes = await pool.query(
@@ -158,9 +211,13 @@ export async function getStorefrontProductBySlug(slug: string): Promise<Storefro
 }
 
 export async function listStorefrontCategories(): Promise<StorefrontCategory[]> {
-  if (!isDatabaseConfigured) return [];
+  const demo = isDemoMode() ? getDemoCategories() : [];
+  if (!isDatabaseConfigured) return demo.filter((c) => c.product_count > 0);
   await ensureDatabase();
   const pool = getPool();
+  // KHÔNG lọc count(p.id) > 0 ở SQL nữa — cần giữ cả danh mục thật 0 sản
+  // phẩm ở đây để merge count demo vào (vd danh mục thật mới tạo, sản phẩm
+  // demo cùng tên "đẩy" nó lên >0) — lọc sau khi merge, ở dòng cuối.
   const res = await pool.query(
     `select
        c.id, c.name, c.slug, coalesce(c.image_url, '') as image_url,
@@ -168,14 +225,29 @@ export async function listStorefrontCategories(): Promise<StorefrontCategory[]> 
      from categories c
      left join products p on p.category_id = c.id and ${PUBLISHED_WHERE}
      group by c.id
-     having count(p.id) > 0
      order by c.position asc, c.name asc`
   );
-  return res.rows.map((r) => ({
+  const merged: StorefrontCategory[] = res.rows.map((r) => ({
     id: r.id,
     name: r.name,
     slug: r.slug,
     image_url: r.image_url,
     product_count: r.product_count,
   }));
+  const byNameLower = new Map(merged.map((c) => [c.name.trim().toLowerCase(), c]));
+
+  // Demo mode: danh mục giả trùng TÊN với danh mục thật → cộng dồn count vào
+  // đúng row thật (giữ nguyên id/slug thật, không tạo pill trùng tên thứ 2).
+  // Không trùng tên nào → thêm mới như 1 danh mục riêng (thuần demo).
+  for (const d of demo) {
+    const match = byNameLower.get(d.name.trim().toLowerCase());
+    if (match) {
+      match.product_count += d.product_count;
+    } else {
+      merged.push(d);
+      byNameLower.set(d.name.trim().toLowerCase(), d);
+    }
+  }
+
+  return merged.filter((c) => c.product_count > 0);
 }

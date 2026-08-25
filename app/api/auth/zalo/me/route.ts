@@ -1,10 +1,12 @@
 /**
  * GET  /api/auth/zalo/me — trả về staff session hiện tại
- * POST /api/auth/zalo/me { staffId, password } — verify mật khẩu rồi mới set
- *   cookie current_staff_id.
+ * POST /api/auth/zalo/me { email, password } — tìm staff theo email, verify
+ *   mật khẩu rồi mới set cookie current_staff_id.
  *
  * Trước đây POST chỉ format-check staffId (bất kỳ UUID nào cũng login được,
  * không hề kiểm tra credential) — đây là lỗ hổng auth nghiêm trọng đã fix.
+ * Sau đó đổi từ "chọn tên trong danh sách" sang nhập email+mật khẩu trực tiếp
+ * (không hiển thị danh sách toàn bộ nhân viên ở trang login nữa).
  * Bootstrap: staff chưa có password_hash (lần đăng nhập đầu, kể cả admin@local
  * được seed sẵn) → mật khẩu gõ vào lần đầu sẽ được lưu làm mật khẩu chính thức.
  */
@@ -50,13 +52,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const staffId = typeof body?.staffId === "string" ? body.staffId.trim() : "";
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
-  if (!staffId) {
-    return NextResponse.json({ error: "staffId required" }, { status: 400 });
-  }
-  if (!/^[0-9a-f-]{36}$/i.test(staffId)) {
-    return NextResponse.json({ error: "staffId không hợp lệ" }, { status: 400 });
+  if (!email) {
+    return NextResponse.json({ error: "Vui lòng nhập email." }, { status: 400 });
   }
   if (password.length < 4) {
     return NextResponse.json({ error: "Mật khẩu cần ít nhất 4 ký tự." }, { status: 400 });
@@ -69,15 +68,16 @@ export async function POST(req: NextRequest) {
   const { data: staff, error } = await sb
     .from("staff")
     .select("id,is_active,password_hash")
-    .eq("id", staffId)
+    .ilike("email", email)
     .maybeSingle();
   if (error || !staff) {
-    return NextResponse.json({ error: "Tài khoản không tồn tại." }, { status: 404 });
+    return NextResponse.json({ error: "Email hoặc mật khẩu không đúng." }, { status: 401 });
   }
   if (!staff.is_active) {
     return NextResponse.json({ error: "Tài khoản đã bị vô hiệu hoá." }, { status: 403 });
   }
 
+  const staffId = String(staff.id);
   if (!staff.password_hash) {
     // Lần đăng nhập đầu tiên cho tài khoản này → set mật khẩu vừa nhập.
     const password_hash = hashPassword(password);
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Không thiết lập được mật khẩu." }, { status: 500 });
     }
   } else if (!verifyPassword(password, staff.password_hash)) {
-    return NextResponse.json({ error: "Sai mật khẩu." }, { status: 401 });
+    return NextResponse.json({ error: "Email hoặc mật khẩu không đúng." }, { status: 401 });
   }
 
   const res = NextResponse.json({ ok: true, staffId });

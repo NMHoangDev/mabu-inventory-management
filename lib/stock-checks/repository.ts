@@ -1,7 +1,5 @@
 import { isDatabaseConfigured, getPool } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
-import { applyInventoryLevelDelta } from "../inventory/receipts";
-import { recordStockMovement } from "../inventory/stock-movements";
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -246,25 +244,35 @@ export async function createStockCheck(input: CreateStockCheckInput): Promise<St
 
     const newRow = orderResult.rows[0];
 
-    for (const item of items) {
+    // Bulk insert TOÀN BỘ item trong 1 câu (thay vì N insert tuần tự) — với
+    // file nhập Excel có thể lên tới hàng trăm dòng, N round-trip riêng tới
+    // Supabase (network xa) là phần chiếm phần lớn thời gian "Cân bằng kho".
+    if (items.length > 0) {
       await client.query(
         `insert into stock_check_items (
           stock_check_id, product_id, sku, product_name, unit, image_url,
           system_quantity, actual_quantity, variance, variance_reason, note, position
-        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        )
+        select $1, t.product_id, t.sku, t.product_name, t.unit, t.image_url,
+               t.system_quantity, t.actual_quantity, t.variance, t.variance_reason, t.note, t.position
+        from unnest(
+          $2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[],
+          $7::numeric[], $8::numeric[], $9::numeric[], $10::text[], $11::text[], $12::int[]
+        ) as t(product_id, sku, product_name, unit, image_url,
+               system_quantity, actual_quantity, variance, variance_reason, note, position)`,
         [
           newRow.id,
-          item.product_id,
-          item.sku,
-          item.product_name,
-          item.unit,
-          item.image_url,
-          item.system_quantity,
-          item.actual_quantity,
-          item.variance,
-          item.variance_reason,
-          item.note,
-          item.position
+          items.map((item) => item.product_id),
+          items.map((item) => item.sku),
+          items.map((item) => item.product_name),
+          items.map((item) => item.unit),
+          items.map((item) => item.image_url),
+          items.map((item) => item.system_quantity),
+          items.map((item) => item.actual_quantity),
+          items.map((item) => item.variance),
+          items.map((item) => item.variance_reason),
+          items.map((item) => item.note),
+          items.map((item) => item.position)
         ]
       );
     }
@@ -307,12 +315,17 @@ export async function createStockCheck(input: CreateStockCheckInput): Promise<St
 //      hiển thị "balanced" nhưng tồn kho chưa từng được sửa theo số kiểm thực tế.
 //   2. transitionStockCheckStatus — khi cân bằng sau khi phiếu đã ở trạng
 //      thái khác (draft/in_progress).
+// PERF: bản cũ lặp N item với ~4 query/item (update products, resolve
+// variant, resolve location, upsert inventory_levels, insert stock_movements,
+// update marker) — với file nhập Excel vài trăm dòng, đây là hàng nghìn
+// round-trip tuần tự tới Supabase (network xa) → "Cân bằng kho" mất vài
+// phút. Bản dưới dồn TOÀN BỘ thành ~8 câu query bất kể N, không đổi hành vi
+// (idempotent qua stock_applied_at, vẫn ghi đủ stock_movements + inventory_levels).
 async function applyStockCheckVariance(
   client: any,
   stockCheckId: string,
   stockCheckCode: string
 ): Promise<{ stockApplied: boolean }> {
-  let stockApplied = false;
   const headerRes = await client.query(
     `select staff, branch from stock_checks where id = $1::uuid`,
     [stockCheckId]
@@ -327,55 +340,148 @@ async function applyStockCheckVariance(
     [stockCheckId]
   );
 
-  for (const item of itemsRes.rows) {
-    if (item.stock_applied_at) continue;
+  const pending = itemsRes.rows.filter((it: any) => !it.stock_applied_at);
+  if (pending.length === 0) return { stockApplied: false };
+
+  // Gộp theo product_id — cộng dồn delta để chỉ update tồn kho 1 lần/sản
+  // phẩm. UI hiện tại chặn thêm 2 dòng cùng sản phẩm vào 1 phiếu nên trong
+  // thực tế mỗi product_id chỉ xuất hiện 1 lần; gộp ở đây chỉ để an toàn.
+  const toApplyIds: string[] = [];
+  const toSkipIds: string[] = [];
+  const deltaByProduct = new Map<string, number>();
+  for (const item of pending) {
     const productId = item.product_id ? String(item.product_id) : null;
     const delta = Number(item.variance ?? 0);
     if (!productId || delta === 0) {
-      await client.query(
-        `update stock_check_items set stock_applied_at = now() where id = $1`,
-        [String(item.id)]
-      );
+      toSkipIds.push(String(item.id));
       continue;
     }
-
-    const stockRes = await client.query(
-      `update products
-          set stock = greatest(0, coalesce(stock, 0) + $2),
-              stock_updated_at = now(),
-              updated_at = now()
-        where id = $1
-        returning stock`,
-      [productId, delta]
-    );
-    await applyInventoryLevelDelta(
-      client,
-      productId,
-      delta,
-      `(Kiểm kê ${stockCheckCode} · item ${String(item.id).slice(0, 8)})`
-    );
-    await recordStockMovement(client, {
-      productId,
-      movementType: "stock_check",
-      quantityChange: delta,
-      resultingStock: Number(stockRes.rows[0]?.stock ?? 0),
-      referenceTable: "stock_checks",
-      referenceId: stockCheckId,
-      referenceCode: stockCheckCode,
-      staff: checkStaff,
-      branch: checkBranch,
-    });
-    await client.query(
-      `update stock_check_items set stock_applied_at = now() where id = $1`,
-      [String(item.id)]
-    );
-    stockApplied = true;
-    console.info(
-      `[stock] ${delta > 0 ? "+" : ""}${delta} → product ${productId} (Kiểm kê ${stockCheckCode} · item ${String(item.id).slice(0, 8)})`
-    );
+    toApplyIds.push(String(item.id));
+    deltaByProduct.set(productId, (deltaByProduct.get(productId) ?? 0) + delta);
   }
 
-  return { stockApplied };
+  if (deltaByProduct.size === 0) {
+    if (toSkipIds.length > 0) {
+      await client.query(
+        `update stock_check_items set stock_applied_at = now() where id = any($1::uuid[])`,
+        [toSkipIds]
+      );
+    }
+    return { stockApplied: false };
+  }
+
+  const productIds = Array.from(deltaByProduct.keys());
+  const deltas = productIds.map((id) => deltaByProduct.get(id)!);
+
+  // 1) Cộng/trừ tồn kho thật — 1 update cho toàn bộ sản phẩm.
+  const stockRes = await client.query(
+    `update products p
+        set stock = greatest(0, coalesce(p.stock, 0) + v.delta),
+            stock_updated_at = now(),
+            updated_at = now()
+       from unnest($1::uuid[], $2::numeric[]) as v(id, delta)
+      where p.id = v.id
+      returning p.id, p.stock`,
+    [productIds, deltas]
+  );
+  const resultingStockByProduct = new Map<string, number>(
+    stockRes.rows.map((r: any) => [String(r.id), Number(r.stock)])
+  );
+
+  // 2) Đảm bảo mỗi sản phẩm có 1 product_variants mặc định (UI "Khả dụng"
+  // đọc tồn qua variant/inventory_levels — xem applyInventoryLevelDelta ở
+  // lib/inventory/receipts.ts). Hầu hết đã có sẵn từ lúc tạo sản phẩm; bulk
+  // tạo bù cho phần thiếu (hiếm).
+  const variantRes = await client.query(
+    `select distinct on (product_id) product_id, id
+       from product_variants
+      where product_id = any($1::uuid[])
+      order by product_id, position asc`,
+    [productIds]
+  );
+  const variantByProduct = new Map<string, string>(
+    variantRes.rows.map((r: any) => [String(r.product_id), String(r.id)])
+  );
+  const missingVariantProductIds = productIds.filter((id) => !variantByProduct.has(id));
+  if (missingVariantProductIds.length > 0) {
+    const createdVariants = await client.query(
+      `insert into product_variants (product_id, title, sku, price, cost_price, position)
+       select p.id, 'Mặc định',
+              coalesce(nullif(p.sku, ''), 'SKU-' || substr(p.id::text, 1, 8)),
+              coalesce(p.price, 0), 0, 1
+         from products p
+        where p.id = any($1::uuid[])
+        returning product_id, id`,
+      [missingVariantProductIds]
+    );
+    for (const r of createdVariants.rows) {
+      variantByProduct.set(String(r.product_id), String(r.id));
+    }
+  }
+
+  // 3) Location mặc định — resolve 1 LẦN (trước đây resolve lại mỗi item
+  // dù kết quả luôn giống nhau từ lần thứ 2).
+  const locRes = await client.query(
+    `select id from locations order by is_default desc, created_at asc limit 1`
+  );
+  let locationId: string;
+  if (locRes.rows.length > 0) {
+    locationId = String(locRes.rows[0].id);
+  } else {
+    const createdLoc = await client.query(
+      `insert into locations (name, is_default, is_active)
+       values ('Cửa hàng chính', true, true)
+       returning id`
+    );
+    locationId = String(createdLoc.rows[0].id);
+  }
+
+  // 4) Cộng/trừ inventory_levels (nguồn tồn "Khả dụng" trên UI) — upsert
+  // bằng delta thô rồi clamp âm về 0 ở câu sau, thay vì phải SELECT "before"
+  // riêng cho mỗi dòng như bản cũ (applyInventoryLevelDelta per-item).
+  const variantIds = productIds.map((id) => variantByProduct.get(id)!);
+  const locationIds = productIds.map(() => locationId);
+  await client.query(
+    `insert into inventory_levels (variant_id, location_id, quantity, updated_at)
+     select t.variant_id, t.location_id, t.delta, now()
+       from unnest($1::uuid[], $2::uuid[], $3::numeric[]) as t(variant_id, location_id, delta)
+     on conflict (variant_id, location_id) do update set
+       quantity = coalesce(inventory_levels.quantity, 0) + excluded.quantity,
+       updated_at = now()`,
+    [variantIds, locationIds, deltas]
+  );
+  await client.query(
+    `update inventory_levels set quantity = 0, updated_at = now()
+      where quantity < 0 and variant_id = any($1::uuid[])`,
+    [variantIds]
+  );
+
+  // 5) Ghi lịch sử stock_movements — bulk insert 1 câu.
+  const resultingStocksInOrder = productIds.map((id) => resultingStockByProduct.get(id) ?? 0);
+  await client.query(
+    `insert into stock_movements (
+       product_id, movement_type, quantity_change, resulting_stock,
+       reference_table, reference_id, reference_code, staff, branch
+     )
+     select t.product_id, 'stock_check', t.delta, t.resulting_stock,
+            'stock_checks', $2::uuid, $3, $4, $5
+       from unnest($1::uuid[], $6::numeric[], $7::numeric[]) as t(product_id, delta, resulting_stock)`,
+    [productIds, stockCheckId, stockCheckCode, checkStaff, checkBranch, deltas, resultingStocksInOrder]
+  );
+
+  // 6) Đánh dấu tất cả item đã xử lý (cả nhóm áp lẫn nhóm bỏ qua) — 1 update.
+  const allTouchedIds = [...toApplyIds, ...toSkipIds];
+  await client.query(
+    `update stock_check_items set stock_applied_at = now() where id = any($1::uuid[])`,
+    [allTouchedIds]
+  );
+
+  console.info(
+    `[stock] Cân bằng kiểm kê ${stockCheckCode}: áp tồn kho cho ${productIds.length} sản phẩm ` +
+    `(${toApplyIds.length} dòng có chênh lệch, ${toSkipIds.length} dòng bỏ qua).`
+  );
+
+  return { stockApplied: true };
 }
 
 export async function transitionStockCheckStatus(input: {

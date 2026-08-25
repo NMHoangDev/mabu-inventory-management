@@ -21,7 +21,6 @@ import {
   LogIn,
   LogOut,
   ShieldCheck,
-  UserCog,
   Users
 } from "lucide-react";
 import { zaloAuthApi, type CurrentStaff } from "@/lib/zalo-api";
@@ -43,6 +42,15 @@ export default function StaffBadge() {
       const res = await zaloAuthApi.me();
       setStaff(res.staff);
       setHasSession(res.has_session);
+      // Session hết hạn/bị vô hiệu hoá NGAY TRONG LÚC tab đang mở (cookie
+      // current_staff_id tự hết hạn sau 7 ngày, hoặc bị đăng xuất/khoá từ
+      // nơi khác) — middleware chỉ chặn được ở request/navigation KẾ TIẾP,
+      // không tự đẩy user đang đứng yên trên 1 trang ra /login. Poll 60s +
+      // mỗi lần focus window ở đây để bắt được ngay, không cần đợi họ tự bấm
+      // gì hoặc chuyển trang mới nhận ra đã mất session.
+      if (!res.has_session) {
+        router.push(`/login?next=${encodeURIComponent(pathname)}`);
+      }
     } catch {
       setStaff({
         id: null,
@@ -82,10 +90,10 @@ export default function StaffBadge() {
     setBusy(true);
     try {
       await zaloAuthApi.logout();
-      await refresh();
       setOpen(false);
-      // Force refresh server components để các route admin hiển thị lại gate.
-      router.refresh();
+      // refresh() sẽ thấy has_session=false → tự router.push('/login') luôn,
+      // không cần gọi router.refresh() riêng nữa.
+      await refresh();
     } finally {
       setBusy(false);
     }
@@ -187,15 +195,11 @@ export default function StaffBadge() {
 
           {/* Actions */}
           <div className="p-1.5">
-            <Link
-              href={`/login?next=${encodeURIComponent(pathname)}`}
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700"
-            >
-              <UserCog className="h-4 w-4" />
-              {isLoggedIn ? "Đăng nhập nhân viên khác" : "Đăng nhập nhân viên"}
-            </Link>
-            {isLoggedIn && (
+            {isLoggedIn ? (
+              // Trang /login giờ tự redirect đi luôn nếu đang có session hợp
+              // lệ (xem app/login/page.tsx) — nên "đăng nhập tài khoản khác"
+              // phải đăng xuất trước, KHÔNG thể chỉ điều hướng sang /login
+              // như trước (sẽ bị bounce ngược lại ngay).
               <button
                 type="button"
                 onClick={handleLogout}
@@ -209,15 +213,14 @@ export default function StaffBadge() {
                 )}
                 Đăng xuất
               </button>
-            )}
-            {!isLoggedIn && (
+            ) : (
               <Link
-                href="/login?next=/thong-bao-zalo"
+                href={`/login?next=${encodeURIComponent(pathname)}`}
                 onClick={() => setOpen(false)}
-                className="mt-0.5 flex items-center gap-2 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 px-3 py-2 text-sm font-bold text-white hover:opacity-90"
+                className="flex items-center gap-2 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 px-3 py-2 text-sm font-bold text-white hover:opacity-90"
               >
                 <LogIn className="h-4 w-4" />
-                Đăng nhập ngay để dùng Zalo
+                Đăng nhập ngay
               </Link>
             )}
           </div>
@@ -226,7 +229,7 @@ export default function StaffBadge() {
           <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
             {isLoggedIn ? (
               <>
-                Cookie <code className="font-mono">current_staff_id</code> có hiệu lực 30 ngày.
+                Cookie <code className="font-mono">current_staff_id</code> có hiệu lực 7 ngày.
               </>
             ) : (
               <>
