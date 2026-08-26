@@ -116,7 +116,14 @@ function statusChanged(accountId, newStatus) {
 }
 
 function saveCreds(accountId, creds) {
-  fs.writeFileSync(credPath(accountId), JSON.stringify(creds, null, 2), { mode: 0o600 });
+  // Ghi ra file tạm rồi rename (atomic trên POSIX) — nếu writeFileSync lỗi
+  // giữa chừng (vd ENOSPC), file credentials thật không bị truncate/mất,
+  // vì writeFileSync mặc định mở file đích với flag 'w' (truncate trước khi
+  // ghi), nên ghi thẳng có thể để lại file 0 byte nếu ghi lỗi.
+  const target = credPath(accountId);
+  const tmp = `${target}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(creds, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, target);
 }
 
 function loadCreds(accountId) {
@@ -1054,7 +1061,17 @@ export const sessionManager = {
       syncIntervalId: null, watchdogId: null,
       reconnectAttempts: 0, reconnecting: false, lastAliveCheckTime: 0
     });
-    saveCreds(accountId, { ...creds, imei, inboxId, zaloId, displayName, chatwootAccountId });
+    // saveCreds ghi file đồng bộ và có thể throw (vd ENOSPC thoáng qua lúc
+    // deploy/build đang chiếm disk). Đây chỉ là persist credentials cho lần
+    // restore sau — không được để lỗi ghi đĩa chặn attachListener() bên dưới,
+    // nếu không session sẽ bị đánh dấu 'logged_in' nhưng không hề gắn listener
+    // nhận tin nhắn real-time (forward/sync im lặng chết, không tự hồi phục
+    // vì watchdog cũng nằm trong attachListener).
+    try {
+      saveCreds(accountId, { ...creds, imei, inboxId, zaloId, displayName, chatwootAccountId });
+    } catch (err) {
+      logger.error(`[${accountId}] saveCreds failed, continuing to attach listener anyway`, { err: err.message });
+    }
     reflectStatus(accountId, 'connected', {
       zaloUserId: zaloId,
       zaloDisplayName: displayName
