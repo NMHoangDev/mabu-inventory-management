@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-// Giỏ hàng client-side (localStorage) cho /shop — không phải nguồn giá trị
+// Giỏ hàng client-side (localStorage) cho /shop — không phải nguồn giá
 // thật: lúc checkout, server luôn tra lại giá/tồn kho hiện tại từ DB
 // (lib/storefront/checkout.ts) trước khi tạo đơn. Xem STOREFRONT_PLAN.md mục 4.
 export interface ShopCartProduct {
@@ -25,7 +25,7 @@ interface ShopCartState {
   isOpen: boolean;
   isCheckoutOpen: boolean;
 
-  addItem: (product: ShopCartProduct) => void;
+  addItem: (product: ShopCartProduct, quantity?: number) => void;
   removeItem: (productId: string) => void;
   updateQty: (productId: string, quantity: number) => void;
   clearCart: () => void;
@@ -46,19 +46,20 @@ export const useCartStore = create<ShopCartState>()(
       isOpen: false,
       isCheckoutOpen: false,
 
-      addItem: (product) => {
+      addItem: (product, quantity = 1) => {
         if (product.stock <= 0) return;
         set((state) => {
           const existing = state.items.find((it) => it.product_id === product.product_id);
           if (existing) {
-            const nextQty = Math.min(product.stock, existing.quantity + 1);
+            const nextQty = Math.min(product.stock, existing.quantity + quantity);
             return {
               items: state.items.map((it) =>
                 it.product_id === product.product_id ? { ...it, quantity: nextQty, stock: product.stock } : it
               ),
             };
           }
-          return { items: [...state.items, { ...product, quantity: 1 }] };
+          const initialQty = Math.min(product.stock, quantity);
+          return { items: [...state.items, { ...product, quantity: initialQty }] };
         });
       },
 

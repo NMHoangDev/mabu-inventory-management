@@ -4,17 +4,20 @@
  * cost_price/preferred_supplier/reorder_point... (dữ liệu nội bộ). Sản phẩm
  * hiển thị trên website khi status='active' VÀ (đã bật toggle "Hiển thị trên
  * website" ở /products/pricing — published_at khác null, xem STOREFRONT_PLAN.md
- * mục 6.1 — HOẶC tồn kho còn trên 1). Auto-hiển thị theo tồn kho (2026-08-18,
+ * mục 6.1 — HOẶC tồn kho còn trên 0). Auto-hiển thị theo tồn kho (2026-08-18,
  * theo yêu cầu) để sản phẩm còn hàng hiện lên web ngay không cần bật tay từng
  * cái; published_at vẫn là override thủ công (bật rồi thì hiện bất kể tồn kho
- * bao nhiêu, kể cả 0/1 — vd sản phẩm đặt trước).
+ * bao nhiêu, kể cả 0 — vd sản phẩm đặt trước).
  */
 
 import { getPool, isDatabaseConfigured } from "../db/connection";
 import { ensureDatabase } from "../db/migration";
 import { getDemoCategories, getDemoProductBySlug, getDemoProducts, isDemoMode } from "./demoData";
 
-const PUBLISHED_WHERE = `p.status = 'active' and (p.published_at is not null or coalesce(p.stock, 0) > 1)`;
+// FIX (theo feedback khách): web chỉ hiện sản phẩm còn tồn kho. Điều kiện cũ
+// "stock > 1" vô tình ẩn luôn sản phẩm chỉ còn đúng 1 cái — đổi thành
+// "stock > 0" để mọi sản phẩm còn hàng (kể cả còn 1) đều hiện lên web.
+const PUBLISHED_WHERE = `p.status = 'active' and (p.published_at is not null or coalesce(p.stock, 0) > 0)`;
 
 export interface StorefrontProductImage {
   url: string;

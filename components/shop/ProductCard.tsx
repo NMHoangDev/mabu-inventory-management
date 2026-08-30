@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { ImageOff, Plus } from "@/components/shop/icons";
+import { ImageOff, Plus, Minus, ShoppingCart } from "@/components/shop/icons";
 import { useCartStore } from "@/store/shopCart";
 import { fmtMoney } from "@/lib/storefront/format";
 import type { StorefrontProductSummary } from "@/lib/storefront/catalog";
@@ -16,23 +17,55 @@ export default function ProductCard({ product }: ProductCardProps) {
   const outOfStock = product.stock <= 0;
   const hasDiscount = !!product.compare_at_price && product.compare_at_price > product.price;
 
+  const [qty, setQty] = useState(1);
+
+  const clampQty = (value: number) => {
+    if (Number.isNaN(value) || value < 1) return 1;
+    if (product.stock > 0 && value > product.stock) return product.stock;
+    return Math.floor(value);
+  };
+
+  const handleQtyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const raw = Number(e.target.value);
+    setQty(clampQty(raw));
+  };
+
+  const handleQtyBlur = () => {
+    setQty((q) => clampQty(q));
+  };
+
+  const step = (delta: number) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setQty((q) => clampQty(q + delta));
+  };
+
   const handleAdd = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (outOfStock) return;
-    addItem({
-      product_id: product.id,
-      name: product.name,
-      slug: product.slug,
-      unit: product.unit,
-      price: product.price,
-      image_url: product.image_url,
-      stock: product.stock,
-    });
-    toast.success("Đã thêm vào giỏ", {
+
+    addItem(
+      {
+        product_id: product.id,
+        name: product.name,
+        slug: product.slug,
+        unit: product.unit,
+        price: product.price,
+        image_url: product.image_url,
+        stock: product.stock,
+      },
+      qty
+    );
+
+    toast.success(`Đã thêm ${qty} ${product.unit} vào giỏ`, {
       duration: 1800,
       style: { background: "#111111", color: "#fff", borderRadius: "12px", fontSize: "13px", fontWeight: 600 },
     });
+
+    setQty(1);
   };
 
   return (
@@ -83,18 +116,61 @@ export default function ProductCard({ product }: ProductCardProps) {
             )}
           </div>
 
-          <div className="mt-auto flex items-end justify-between pt-1">
-            <span className="truncate text-[11px] text-shop-text-muted">{product.unit}</span>
-            <button
-              type="button"
-              onClick={handleAdd}
-              disabled={outOfStock}
-              className="ml-auto flex size-8 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-shop-primary bg-white text-shop-primary transition-all hover:bg-shop-primary hover:text-white active:scale-[0.96] disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-white"
-              aria-label={`Thêm ${product.name}`}
-            >
-              <Plus size={16} strokeWidth={2.5} />
-            </button>
-          </div>
+          <span className="truncate text-[11px] text-shop-text-muted">{product.unit}</span>
+
+          {!outOfStock ? (
+            <div className="mt-1 flex items-center justify-between gap-1.5">
+              <div className="relative flex items-center overflow-hidden rounded-lg border-[1.5px] border-shop-primary/40 bg-shop-primary-light">
+                <button
+                  type="button"
+                  onClick={step(-1)}
+                  className="flex size-7 shrink-0 items-center justify-center text-shop-primary transition-colors hover:bg-shop-primary/10 active:scale-[0.94]"
+                  aria-label="Giảm số lượng"
+                >
+                  <Minus size={13} strokeWidth={2.5} />
+                </button>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={product.stock || undefined}
+                  value={qty}
+                  onClick={(e) => e.preventDefault()}
+                  onChange={handleQtyChange}
+                  onBlur={handleQtyBlur}
+                  className="w-11 border-x-[1.5px] border-shop-primary/40 bg-white py-1 px-1 text-center text-[14px] font-extrabold text-shop-primary outline-none [appearance:textfield] focus:bg-shop-primary/5 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                <button
+                  type="button"
+                  onClick={step(1)}
+                  className="flex size-7 shrink-0 items-center justify-center text-shop-primary transition-colors hover:bg-shop-primary/10 active:scale-[0.94]"
+                  aria-label="Tăng số lượng"
+                >
+                  <Plus size={13} strokeWidth={2.5} />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleAdd}
+                className="flex size-8 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-shop-primary bg-shop-primary text-white shadow-sm transition-all hover:brightness-105 active:scale-[0.96]"
+                aria-label={`Thêm ${product.name} vào giỏ`}
+              >
+                <ShoppingCart size={16} strokeWidth={2.3} />
+              </button>
+            </div>
+          ) : (
+            <div className="mt-1 flex items-end justify-end">
+              <button
+                type="button"
+                disabled
+                className="ml-auto flex size-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-300"
+                aria-label={`${product.name} hết hàng`}
+              >
+                <ShoppingCart size={16} strokeWidth={2.3} />
+              </button>
+            </div>
+          )}
         </div>
       </article>
     </div>
