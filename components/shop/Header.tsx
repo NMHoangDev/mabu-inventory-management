@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Package, Search, ShoppingCart, Store } from "@/components/shop/icons";
 import { useCartStore } from "@/store/shopCart";
-import { LOGO_WORDMARK, PHONE, PHONE_DISPLAY } from "@/components/shop/constants";
+import { PHONE, PHONE_DISPLAY } from "@/components/shop/constants";
 import type { StorefrontCategory } from "@/lib/storefront/catalog";
 
 interface HeaderProps {
@@ -80,10 +80,36 @@ function SearchInput({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Tìm bánh, kẹo, đồ ăn vặt..."
+        placeholder="Tìm phụ kiện, văn phòng phẩm..."
         className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-shop-text-muted lg:text-[14px]"
       />
     </form>
+  );
+}
+
+function CartBadge({ count, variant }: { count: number; variant: "mobile" | "desktop" }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || count === 0) return null;
+
+  const label = count > 99 ? "99+" : count;
+
+  if (variant === "mobile") {
+    return (
+      <span className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-shop-primary px-1 text-[10px] font-bold leading-4 text-white">
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <span className="absolute -right-1.5 -top-1.5 grid min-w-[18px] place-items-center rounded-full bg-black px-1 text-[10px] font-bold text-white">
+      {label}
+    </span>
   );
 }
 
@@ -118,8 +144,8 @@ export default function Header({ categories, activeCategory, searchQuery, onSear
       {/* Mobile header */}
       <header className="sticky top-0 z-30 border-b border-shop-border bg-white/98 pb-1.5 pt-1 shadow-sm backdrop-blur lg:hidden">
         <div className="px-4">
-          <div className="h-11 overflow-hidden">
-            <div className="grid grid-cols-[40px_1fr_40px] items-center">
+          <div className="h-12 overflow-hidden flex items-center">
+            <div className="grid grid-cols-[40px_1fr_40px] items-center w-full">
               <button
                 type="button"
                 className="grid size-10 place-items-center rounded-full text-black"
@@ -128,11 +154,28 @@ export default function Header({ categories, activeCategory, searchQuery, onSear
               >
                 <Store size={20} />
               </button>
-              <div className="flex flex-col items-center">
-                <Link href="/shop" className="relative h-7 w-36 overflow-hidden">
-                  <img src={LOGO_WORDMARK} alt="Denfood" className="h-full w-full object-contain" />
+              <div className="flex items-center justify-center">
+                <Link href="/shop" className="flex items-center">
+                  <svg viewBox="0 0 720 220" className="h-10 w-auto overflow-visible">
+                    <defs>
+                      <linearGradient id="logoGradHeaderM" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#6C5CE7"/>
+                        <stop offset="55%" stopColor="#4C6FFF"/>
+                        <stop offset="100%" stopColor="#FF6FA5"/>
+                      </linearGradient>
+                    </defs>
+                    <g transform="translate(30,45)">
+                      <rect x="0" y="0" width="110" height="110" rx="34" fill="url(#logoGradHeaderM)" />
+                      <path d="M55 55 L26 32 Q19 55 26 78 Z" fill="#ffffff" />
+                      <path d="M55 55 L84 32 Q91 55 84 78 Z" fill="#ffffff" />
+                      <rect x="45" y="40" width="20" height="30" rx="6" fill="#ffffff" />
+                      <circle cx="55" cy="55" r="8" fill="url(#logoGradHeaderM)" />
+                      <path d="M93 15 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4z" fill="#FFD166" />
+                    </g>
+                    <text x="165" y="122" fontFamily="Poppins, 'Arial Rounded MT Bold', Arial, sans-serif" fontWeight="800" fontSize="76" fill="url(#logoGradHeaderM)" letterSpacing="-1">Mabuu</text>
+                    <text x="168" y="166" fontFamily="Poppins, Arial, sans-serif" fontWeight="700" fontSize="26" fill="#14161F" letterSpacing="11">STORE</text>
+                  </svg>
                 </Link>
-                <p className="-mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-shop-primary">đặt nhanh</p>
               </div>
               <div aria-hidden="true" />
             </div>
@@ -154,11 +197,7 @@ export default function Header({ categories, activeCategory, searchQuery, onSear
               aria-label="Mở giỏ hàng"
             >
               <ShoppingCart size={21} />
-              {count > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-shop-primary px-1 text-[10px] font-bold leading-4 text-white">
-                  {count > 99 ? "99+" : count}
-                </span>
-              )}
+              <CartBadge count={count} variant="mobile" />
             </button>
           </div>
         </div>
@@ -171,8 +210,26 @@ export default function Header({ categories, activeCategory, searchQuery, onSear
       {/* Desktop header */}
       <header className="sticky top-0 z-30 hidden border-b border-shop-border bg-white/96 py-3 shadow-sm backdrop-blur lg:block">
         <div className="mx-auto flex max-w-7xl items-center gap-6 px-6 xl:max-w-[1440px] 2xl:max-w-[1600px]">
-          <Link href="/shop" className="relative h-9 w-40 shrink-0 overflow-hidden">
-            <img src={LOGO_WORDMARK} alt="Denfood" className="h-full w-full object-contain object-left" />
+          <Link href="/shop" className="flex shrink-0 items-center">
+            <svg viewBox="0 0 720 220" className="h-14 w-auto overflow-visible">
+              <defs>
+                <linearGradient id="logoGradHeaderD" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#6C5CE7"/>
+                  <stop offset="55%" stopColor="#4C6FFF"/>
+                  <stop offset="100%" stopColor="#FF6FA5"/>
+                </linearGradient>
+              </defs>
+              <g transform="translate(30,45)">
+                <rect x="0" y="0" width="110" height="110" rx="34" fill="url(#logoGradHeaderD)" />
+                <path d="M55 55 L26 32 Q19 55 26 78 Z" fill="#ffffff" />
+                <path d="M55 55 L84 32 Q91 55 84 78 Z" fill="#ffffff" />
+                <rect x="45" y="40" width="20" height="30" rx="6" fill="#ffffff" />
+                <circle cx="55" cy="55" r="8" fill="url(#logoGradHeaderD)" />
+                <path d="M93 15 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4z" fill="#FFD166" />
+              </g>
+              <text x="165" y="122" fontFamily="Poppins, 'Arial Rounded MT Bold', Arial, sans-serif" fontWeight="800" fontSize="76" fill="url(#logoGradHeaderD)" letterSpacing="-1">Mabuu</text>
+              <text x="168" y="166" fontFamily="Poppins, Arial, sans-serif" fontWeight="700" fontSize="26" fill="#14161F" letterSpacing="11">STORE</text>
+            </svg>
           </Link>
 
           <div className="relative min-w-0 flex-1">
@@ -201,11 +258,7 @@ export default function Header({ categories, activeCategory, searchQuery, onSear
             >
               <ShoppingCart size={16} />
               Giỏ hàng
-              {count > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 grid min-w-[18px] place-items-center rounded-full bg-black px-1 text-[10px] font-bold text-white">
-                  {count > 99 ? "99+" : count}
-                </span>
-              )}
+              <CartBadge count={count} variant="desktop" />
             </button>
           </div>
         </div>
