@@ -10,7 +10,7 @@
 import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import { STAFF_COOKIE_NAME } from "@/lib/zalo/auth";
-import ZaloForwardRulesDashboard from "@/components/zalo/ZaloForwardRulesDashboard";
+import ZaloForwardRulesDashboard from "@/components/zalo/forward/ZaloForwardRulesDashboard";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
 const KEY =

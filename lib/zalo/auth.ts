@@ -180,9 +180,20 @@ export function canBroadcastTo(staff: StaffSession, accountId: string): boolean 
  * logic riêng cho "hết hạn" — hết hạn = như chưa từng đăng nhập).
  */
 export const STAFF_COOKIE_NAME = "current_staff_id";
+
+// STAFF_COOKIE_DOMAIN (optional, vd ".timetech.markeeai.com") — khi set, cookie
+// đăng nhập dùng chung được cho MỌI subdomain, không riêng host đã login. Cần
+// cho các module tách riêng (services/zalo-account-module,
+// services/zalo-forward-module — deploy ở subdomain khác app chính) nhận được
+// session đã đăng nhập ở app chính mà không cần login lại. Để trống (mặc định)
+// thì cookie chỉ dùng được đúng host đã set — an toàn cho local dev (domain
+// dạng ".x" không match được "localhost").
+const STAFF_COOKIE_DOMAIN = process.env.STAFF_COOKIE_DOMAIN || undefined;
+
 export const STAFF_COOKIE_OPTS = {
   path: "/",
   sameSite: "lax" as const,
   httpOnly: false,
-  maxAge: 60 * 60 * 24 * 7 // 7 ngày
+  maxAge: 60 * 60 * 24 * 7, // 7 ngày
+  ...(STAFF_COOKIE_DOMAIN ? { domain: STAFF_COOKIE_DOMAIN } : {})
 };

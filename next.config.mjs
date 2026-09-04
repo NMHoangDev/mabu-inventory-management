@@ -21,6 +21,11 @@ const nextConfig = {
         destination: `${backendBase}/api/v1/:path*`
       }
     ];
+  },
+  async redirects() {
+    return [
+      { source: "/thong-bao-zalo", destination: "/zalo/chat", permanent: true }
+    ];
   }
 };
 

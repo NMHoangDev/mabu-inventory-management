@@ -30,7 +30,7 @@ import {
   type ZaloForwardLog
 } from "@/lib/zalo-api";
 import { useApp } from "@/components/providers/AppProvider";
-import ZaloAccountSwitcher from "./ZaloAccountSwitcher";
+import ZaloAccountSwitcher from "../ZaloAccountSwitcher";
 
 type GroupOption = { id: string; name: string };
 
@@ -136,7 +136,7 @@ export default function ZaloForwardRulesDashboard({ role }: { role: "admin" | "s
       <header className="flex items-start justify-between gap-2">
         <div>
           <Link
-            href="/thong-bao-zalo"
+            href="/zalo/chat"
             className="mb-1 inline-flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"
           >
             <ArrowLeft className="h-4 w-4" /> Thông báo Zalo

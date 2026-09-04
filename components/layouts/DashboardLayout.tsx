@@ -67,7 +67,11 @@ const navItems = [
     ]
   },
   {
-    key: "zalo-notify", path: "/thong-bao-zalo", label: "Thông báo Zalo", group: "Vận hành", icon: MessageCircle
+    key: "zalo-notify", path: "/zalo/chat", label: "Zalo", group: "Vận hành", icon: MessageCircle,
+    subItems: [
+      { key: "zalo-chat", path: "/zalo/chat", label: "Chat & hội thoại" },
+      { key: "zalo-forward-rules", path: "/zalo/forward-rules", label: "Chuyển tiếp tin nhắn" }
+    ]
   },
   {
     key: "orders", path: "/orders", label: "Đơn hàng", group: "Vận hành", icon: ShoppingCart, requiredPermission: "orders.view",

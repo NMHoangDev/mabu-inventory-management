@@ -42,6 +42,8 @@
   ],
   "exclude": [
     "node_modules",
-    "FlowScan Pro"
+    "FlowScan Pro",
+    "services/zalo-account-module",
+    "services/zalo-forward-module"
   ]
 }

@@ -3,7 +3,7 @@
 /**
  * ZaloAccountSwitcher
  * ─────────────────────────────────────────────────────────────────────────
- * Dropdown nằm header trang /thong-bao-zalo cho phép user chọn account Zalo
+ * Dropdown nằm header trang /zalo/chat cho phép user chọn account Zalo
  * nào đang xem. Tự động poll `refreshZaloAccounts` mỗi 15s để cập nhật status
  * (connected/disconnected/error). Khi account đang chọn chuyển trạng thái
  * (vd logout từ extension) → toast cảnh báo.

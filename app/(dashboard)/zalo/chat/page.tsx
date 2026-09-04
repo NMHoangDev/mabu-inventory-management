@@ -8,7 +8,7 @@ import ZaloAccountSwitcher from "@/components/zalo/ZaloAccountSwitcher";
 import { zaloAuthApi } from "@/lib/zalo-api";
 
 const ZaloPageContent = dynamic(
-  () => import("@/components/zalo/ZaloPageContent").then((m) => m.ZaloPageContent),
+  () => import("@/components/zalo/chat/ZaloPageContent").then((m) => m.ZaloPageContent),
   {
     ssr: false,
     loading: () => (

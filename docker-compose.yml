@@ -76,6 +76,62 @@ services:
         aliases:
           - zalo-bridge
 
+  # zalo-account-module / zalo-forward-module: publish THẲNG port ra host (0.0.0.0),
+  # KHÔNG qua router/nginx — mỗi module dự kiến có subdomain riêng cùng gốc
+  # domain với app chính (vd zalo-accounts.timetech.markeeai.com trỏ thẳng
+  # host:3002), chia sẻ đăng nhập qua cookie current_staff_id nhờ
+  # STAFF_COOKIE_DOMAIN (set ở app chính, xem lib/zalo/auth.ts) — cần set
+  # đúng domain gốc trong .env TRƯỚC khi build lại frontend, nếu không staff
+  # đã login ở app chính vẫn bị đẩy về màn "cần đăng nhập" khi mở subdomain.
+  zalo-account-module:
+    build:
+      context: .
+      dockerfile: zalo-account-module.Dockerfile
+    image: invoiceflow-zalo-account-module:latest
+    container_name: invoiceflow-zalo-account-module
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ZALO_BRIDGE_URL: http://zalo-bridge:3001
+      PORT: "3002"
+      HOST: "0.0.0.0"
+    ports:
+      - "3002:3002"
+    depends_on:
+      zalo-bridge:
+        condition: service_healthy
+    networks:
+      invoiceflow-net:
+        aliases:
+          - zalo-account-module
+
+  zalo-forward-module:
+    build:
+      context: .
+      dockerfile: zalo-forward-module.Dockerfile
+    image: invoiceflow-zalo-forward-module:latest
+    container_name: invoiceflow-zalo-forward-module
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ZALO_BRIDGE_URL: http://zalo-bridge:3001
+      PORT: "3003"
+      HOST: "0.0.0.0"
+      # An toàn mặc định TRUE — chỉ đổi "false" trên server sau khi đã verify
+      # log dry_run khớp đúng traffic thật (xem mục Rollout trong CLAUDE.md).
+      FORWARD_DRY_RUN: ${FORWARD_DRY_RUN:-true}
+    ports:
+      - "3003:3003"
+    depends_on:
+      zalo-bridge:
+        condition: service_healthy
+    networks:
+      invoiceflow-net:
+        aliases:
+          - zalo-forward-module
+
   router:
     image: nginx:1.27-alpine
     container_name: invoiceflow-router

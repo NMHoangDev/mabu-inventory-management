@@ -49,6 +49,8 @@ import { Router } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
+import axios from 'axios';
 import { ThreadType } from 'zca-js';
 import { sessionManager } from '../services/sessionManager.js';
 import { resolveGroupInfo, resolveUserInfo } from '../services/threadInfoResolver.js';
@@ -770,6 +772,241 @@ router.post('/all-platform/zalo/conversations/:id/send-media', (req, res, next) 
 router.post('/all-platform/zalo/conversations/:id/read', async (req, res) => {
   // zca-js không expose explicit mark-read; trả OK để UI không lỗi.
   res.json({ ok: true, conversation_id: req.params.id });
+});
+
+// ── Forward (dùng bởi service riêng `services/zalo-forward-module`) ─────────
+//
+// zalo-forward-module đảm nhiệm TOÀN BỘ phần điều phối forward (poll Supabase
+// zalo_messages để detect tin nhắn mới, match zalo_forward_rules, rate-limit,
+// gom ảnh theo batch, retry, ghi zalo_forward_logs) — bridge chỉ còn giữ vai
+// trò "cánh tay thực thi" gửi tin qua session sống, vì Zalo chỉ cho 1 kết nối
+// WS/account nên module ngoài không thể tự mở session riêng để gửi (xem
+// CLAUDE.md mục "Cảnh báo khi chạy bridge local").
+//
+// 3 endpoint dưới đây port lại đúng phần "gửi" của forwardEngine.js cũ
+// (forwardText/forwardMedia/forwardSticker) — giữ nguyên hành vi: forwardMessage()
+// fan-out 1 lệnh cho text không có @All (giữ tag "đã chuyển tiếp"), sendMessage()
+// tuần tự khi có @All hoặc cho media, sendSticker() tuần tự cho sticker — cùng
+// delay FORWARD_DELAY_MS giữa các lượt gửi tuần tự và retry 1 lần khi gọi lỗi.
+const FORWARD_DELAY_MS = Number(process.env.ZALO_FORWARD_DELAY_MS || 10000);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry đơn giản 1 lần (giống withRetry() của forwardEngine.js cũ) — Zalo API
+// đôi khi lỗi tạm thời (timeout, "Lỗi không xác định"...), retry 1 lần sau
+// 1.5s thường đủ để không mất tin oan.
+async function withSendRetry(fn, label, accountId) {
+  try {
+    return await fn();
+  } catch (err) {
+    logger.warn(`[${accountId}] ${label} failed (attempt 1/2), retry sau 1500ms: ${err.message}`);
+    await sleep(1500);
+    return await fn();
+  }
+}
+
+router.post('/all-platform/zalo/forward/text', async (req, res) => {
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+
+    const targetThreadIds = Array.isArray(req.body?.targetThreadIds)
+      ? req.body.targetThreadIds.map(String).filter(Boolean)
+      : [];
+    const text = String(req.body?.text || '');
+    if (targetThreadIds.length === 0) {
+      return res.status(400).json({ error: 'targetThreadIds is required' });
+    }
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const mentions = Array.isArray(req.body?.mentions) ? req.body.mentions : [];
+    const refIn = req.body?.reference;
+    const reference =
+      refIn && refIn.id
+        ? {
+            id: String(refIn.id),
+            ts: Number(refIn.ts) || Date.now(),
+            logSrcType: Number(refIn.logSrcType) || 1,
+            fwLvl: Number(refIn.fwLvl) || 1,
+          }
+        : undefined;
+
+    logger.info(
+      `[${ctx.accountId}] [FORWARD_TEXT] targets=${targetThreadIds.length} mentions=${mentions.length > 0} len=${text.length}`
+    );
+
+    // Có tag-all (@All): ForwardMessagePayload không có field mentions → phải
+    // sendMessage() tuần tự từng target — mất tag "đã chuyển tiếp", không có
+    // cách nào giữ cả 2 (xem comment gốc forwardEngine.js).
+    if (mentions.length > 0) {
+      const success = [];
+      const fail = [];
+      let isFirst = true;
+      for (const targetId of targetThreadIds) {
+        if (!isFirst) await sleep(FORWARD_DELAY_MS);
+        isFirst = false;
+        try {
+          const sent = await withSendRetry(
+            () => ctx.api.sendMessage({ msg: text, mentions }, targetId, ThreadType.Group),
+            `forward/text(tagAll) target=${targetId}`,
+            ctx.accountId
+          );
+          success.push({ threadId: targetId, msgId: sent?.message?.msgId });
+        } catch (e) {
+          fail.push({ threadId: targetId, error: e.message });
+        }
+      }
+      return res.json({ success, fail });
+    }
+
+    // Không có mention: 1 lệnh forwardMessage() fan-out tới mọi target cùng
+    // lúc, giữ nguyên tag "đã chuyển tiếp" gốc của Zalo.
+    try {
+      const resp = await withSendRetry(
+        () => ctx.api.forwardMessage({ message: text, reference }, targetThreadIds, ThreadType.Group),
+        'forward/text',
+        ctx.accountId
+      );
+      return res.json({ success: resp?.success || [], fail: resp?.fail || [] });
+    } catch (e) {
+      logger.error(`[${ctx.accountId}] forward/text failed: ${e.message}`);
+      return res.status(502).json({ error: e.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/all-platform/zalo/forward/media', async (req, res) => {
+  const localPaths = [];
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+
+    const targetThreadIds = Array.isArray(req.body?.targetThreadIds)
+      ? req.body.targetThreadIds.map(String).filter(Boolean)
+      : [];
+    const imageUrls = Array.isArray(req.body?.imageUrls) ? req.body.imageUrls.filter(Boolean) : [];
+    if (targetThreadIds.length === 0) {
+      return res.status(400).json({ error: 'targetThreadIds is required' });
+    }
+    if (imageUrls.length === 0) return res.status(400).json({ error: 'imageUrls is required' });
+
+    logger.info(`[${ctx.accountId}] [FORWARD_MEDIA] targets=${targetThreadIds.length} images=${imageUrls.length}`);
+
+    for (const url of imageUrls) {
+      try {
+        const p = await withSendRetry(
+          async () => {
+            const r = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 });
+            const buf = Buffer.from(r.data);
+            const urlParts = url.split('/');
+            const lastPart = (urlParts[urlParts.length - 1] || '').split('?')[0];
+            const filename = lastPart && lastPart.includes('.') ? lastPart : 'file';
+            const tempPath = path.join(UPLOAD_TEMP_DIR, `${crypto.randomUUID()}_${filename}`);
+            fs.writeFileSync(tempPath, buf);
+            return tempPath;
+          },
+          `forward/media download url=${url}`,
+          ctx.accountId
+        );
+        localPaths.push(p);
+      } catch (e) {
+        logger.error(`[${ctx.accountId}] forward/media download failed url=${url}: ${e.message}`);
+      }
+    }
+    if (localPaths.length === 0) {
+      return res.status(502).json({
+        error: 'download_failed',
+        success: [],
+        fail: targetThreadIds.map((t) => ({ threadId: t, error: 'download_failed' })),
+      });
+    }
+
+    const success = [];
+    const fail = [];
+    let isFirst = true;
+    for (const targetId of targetThreadIds) {
+      if (!isFirst) await sleep(FORWARD_DELAY_MS);
+      isFirst = false;
+      try {
+        const result = await withSendRetry(
+          () =>
+            ctx.api.sendMessage(
+              { msg: '', attachments: localPaths.length === 1 ? localPaths[0] : localPaths },
+              targetId,
+              ThreadType.Group
+            ),
+          `forward/media target=${targetId}`,
+          ctx.accountId
+        );
+        success.push({ threadId: targetId, msgId: result?.message?.msgId });
+      } catch (e) {
+        logger.error(`[${ctx.accountId}] forward/media target=${targetId} failed: ${e.message}`);
+        fail.push({ threadId: targetId, error: e.message });
+      }
+    }
+    return res.json({ success, fail });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    for (const p of localPaths) {
+      try {
+        fs.unlinkSync(p);
+      } catch (_) {
+        /* ignore cleanup error */
+      }
+    }
+  }
+});
+
+router.post('/all-platform/zalo/forward/sticker', async (req, res) => {
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+
+    const targetThreadIds = Array.isArray(req.body?.targetThreadIds)
+      ? req.body.targetThreadIds.map(String).filter(Boolean)
+      : [];
+    const stickerIn = req.body?.sticker;
+    if (targetThreadIds.length === 0) {
+      return res.status(400).json({ error: 'targetThreadIds is required' });
+    }
+    if (!stickerIn || !Number.isFinite(Number(stickerIn.id)) || !Number.isFinite(Number(stickerIn.cateId))) {
+      return res.status(400).json({ error: 'sticker {id, cateId} is required' });
+    }
+    const sticker = {
+      id: Number(stickerIn.id),
+      cateId: Number(stickerIn.cateId),
+      type: Number(stickerIn.type) || 1,
+    };
+
+    logger.info(`[${ctx.accountId}] [FORWARD_STICKER] targets=${targetThreadIds.length} id=${sticker.id}`);
+
+    const success = [];
+    const fail = [];
+    let isFirst = true;
+    for (const targetId of targetThreadIds) {
+      if (!isFirst) await sleep(FORWARD_DELAY_MS);
+      isFirst = false;
+      try {
+        const result = await withSendRetry(
+          () => ctx.api.sendSticker(sticker, targetId, ThreadType.Group),
+          `forward/sticker target=${targetId}`,
+          ctx.accountId
+        );
+        success.push({ threadId: targetId, msgId: result?.msgId });
+      } catch (e) {
+        logger.error(`[${ctx.accountId}] forward/sticker target=${targetId} failed: ${e.message}`);
+        fail.push({ threadId: targetId, error: e.message });
+      }
+    }
+    return res.json({ success, fail });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Broadcast: preview ───────────────────────────────────────────────────────

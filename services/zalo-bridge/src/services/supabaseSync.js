@@ -325,6 +325,17 @@ export async function persistIncomingMessage({
   const senderName = d.dName || null;
   const type = msg.type === ThreadType.Group ? 'group' : (msg.type || 'webchat');
   const imageUrls = resolveImageUrls(msg);
+  // raw_content: lưu content dạng object (vd sticker {id, cateId, type}) mà
+  // cột `content` (string-only) bỏ qua — cần cho zalo-forward-module (service
+  // riêng, poll bảng này thay vì đọc trực tiếp object msg sống) tái tạo được
+  // sticker để forward. Không ảnh hưởng luồng đọc `content`/`image_urls` hiện tại.
+  const rawContent = d.content && typeof d.content === 'object' ? d.content : null;
+  // mentions: cần cho zalo-forward-module phát hiện tag @All (sentinel uid=-1)
+  // để forward giữ đúng mention — trước đây field này hoàn toàn không được
+  // persist (chỉ tồn tại trong object msg sống của WS listener), nên nếu
+  // không lưu thì mọi tin @All khi forward qua module poll sẽ mất tag mention
+  // mà không có cách nào phát hiện lại được từ DB.
+  const mentions = Array.isArray(d.mentions) ? d.mentions : null;
 
   try {
     // 1) Upsert message — unique (user_id, source_message_id) trong DB.
@@ -344,6 +355,8 @@ export async function persistIncomingMessage({
         thread_type: threadType,
         account_id: accountId,
         image_urls: imageUrls,
+        raw_content: rawContent,
+        mentions,
       },
       {
         onConflict: 'user_id,source_message_id',

@@ -28,7 +28,7 @@ const POLL_INTERVAL_MS = 5_000;
 const DEFAULT_ACCOUNT_ID = "shop-owner";
 
 // ── Dedupe messages ──────────────────────────────────────────────────────
-// UI /thong-bao-zalo từng bị duplicate messages khi cùng 1 message thật
+// UI /zalo/chat từng bị duplicate messages khi cùng 1 message thật
 // được persist bởi bridge (source_message_id = Zalo msgId) đồng thời được
 // FE SSE handler save lại với source_message_id ngẫu nhiên (trước fix). Hai
 // row cùng nội dung cùng ts trong zalo_messages → GET /api/zalo/messages
@@ -1043,7 +1043,7 @@ if (type === "new_message") {
                 // 1) Save message vào Supabase qua Next.js route (giữ nguyên row).
                 //    POST /api/zalo/messages với insertOnly=true để không overwrite row đã có.
                 //
-                //    QUAN TRỌNG — chống duplicate messages trên /thong-bao-zalo:
+                //    QUAN TRỌNG — chống duplicate messages trên /zalo/chat:
                 //      Bridge persist trước với source_message_id = Zalo msgId
                 //      (xem supabaseSync.js#persistIncomingMessage). Frontend
                 //      CHỈ nên save khi SSE payload có message_id khớp với row

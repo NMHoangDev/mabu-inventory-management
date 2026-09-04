@@ -15,6 +15,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const STAFF_COOKIE_NAME = "current_staff_id";
+// Phải khớp STAFF_COOKIE_DOMAIN dùng khi SET cookie (lib/zalo/auth.ts) — xoá
+// cookie set với Domain=".x" mà gọi delete() không kèm domain thì trình duyệt
+// coi là 2 cookie khác nhau, cookie cũ dùng chung subdomain sẽ KHÔNG bị xoá.
+const STAFF_COOKIE_DOMAIN = process.env.STAFF_COOKIE_DOMAIN || undefined;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
 const KEY =
@@ -26,7 +30,13 @@ function redirectToLogin(req: NextRequest, clearCookie = false) {
   url.pathname = "/login";
   url.search = `?next=${encodeURIComponent(next)}`;
   const res = NextResponse.redirect(url);
-  if (clearCookie) res.cookies.delete(STAFF_COOKIE_NAME);
+  if (clearCookie) {
+    res.cookies.set(STAFF_COOKIE_NAME, "", {
+      path: "/",
+      maxAge: 0,
+      ...(STAFF_COOKIE_DOMAIN ? { domain: STAFF_COOKIE_DOMAIN } : {})
+    });
+  }
   return res;
 }
 
