@@ -9,6 +9,7 @@
 import { AlertTriangle, Loader2, MessageSquare, RefreshCcw, Search, Send, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ZaloConversation, ZaloStrangerUser, zaloApi } from "@/lib/zaloApiClient";
+import { Avatar } from "./Avatar";
 
 interface Props {
   conversations: ZaloConversation[];
@@ -17,8 +18,12 @@ interface Props {
   onOpen: (id: string) => void;
   onSync: () => void;
   accountId: string;
-  /** Gọi sau khi đã gửi "Hi" thành công cho người lạ — parent mở hội thoại đó. */
-  onStrangerMessaged: (conversationId: string) => void;
+  /**
+   * Gọi sau khi đã gửi "Hi" thành công cho người lạ — parent mở hội thoại đó.
+   * Truyền kèm tên + avatar đã tra được: getUserInfo() KHÔNG resolve được người
+   * chưa kết bạn, thiếu 2 giá trị này thì tên hội thoại rơi về "Zalo <uid>".
+   */
+  onStrangerMessaged: (conversationId: string, known: { name: string; avatar: string | null }) => void;
 }
 
 /**
@@ -106,7 +111,7 @@ export function ZaloConversationList({
       await zaloApi.sendMessage(user.conversation_id, "Hi", "user", accountId);
       setQuery("");
       setStranger(null);
-      onStrangerMessaged(user.conversation_id);
+      onStrangerMessaged(user.conversation_id, { name: user.display_name, avatar: user.avatar });
     } catch (e) {
       setLookupError(e instanceof Error ? e.message : "Gửi tin thất bại");
     } finally {
@@ -165,9 +170,11 @@ export function ZaloConversationList({
             title={`Gửi "Hi" cho ${stranger.display_name}`}
             className="mt-2 flex w-full items-center gap-2.5 rounded-lg border border-brand-border bg-brand-subtle px-3 py-2.5 text-left transition hover:bg-blue-100 disabled:opacity-60"
           >
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand text-sm font-bold text-white">
-              {stranger.display_name?.[0]?.toUpperCase() || "?"}
-            </div>
+            <Avatar
+              src={stranger.avatar}
+              name={stranger.display_name}
+              className="h-9 w-9 shrink-0 text-sm"
+            />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-slate-900">{stranger.display_name}</div>
               <div className="truncate text-xs text-slate-500">
@@ -215,9 +222,7 @@ export function ZaloConversationList({
                 onClick={() => onOpen(c.conversation_id)}
                 className={`flex w-full items-start gap-3 border-b border-slate-100 px-3.5 py-3.5 text-left transition hover:bg-slate-50 ${active ? "bg-blue-50" : ""}`}
               >
-                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-brand text-base font-bold text-white">
-                  {c.conversation_name?.[0]?.toUpperCase() || "?"}
-                </div>
+                <Avatar src={c.avatar_url} name={c.conversation_name} className="h-12 w-12 text-base" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-1">
                     <div className="truncate text-sm font-bold text-slate-800">{c.conversation_name || "Không tên"}</div>

@@ -8,6 +8,7 @@
 import { Image as ImageIcon, Loader2, MessageCircle, Paperclip, RefreshCw, Send, User, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ZaloConversation, ZaloMessage } from "@/lib/zaloApiClient";
+import { Avatar } from "./Avatar";
 
 const IMAGE_GROUP_WINDOW_MS = 3000;
 
@@ -135,9 +136,7 @@ export function ZaloChatPanel({ conv, messages, loading, sending, replyText, set
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand text-sm font-bold text-white">
-            {conv.conversation_name?.[0]?.toUpperCase() || "?"}
-          </div>
+          <Avatar src={conv.avatar_url} name={conv.conversation_name} className="h-10 w-10 text-sm" />
           <div className="min-w-0">
             <div className="truncate text-base font-bold text-slate-800">{conv.conversation_name || "Không tên"}</div>
             <div className="text-xs text-slate-500">{conv.message_count || 0} tin nhắn</div>

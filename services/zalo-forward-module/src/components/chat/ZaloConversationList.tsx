@@ -9,6 +9,7 @@
 import { Loader2, MessageSquare, RefreshCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ZaloConversation } from "@/lib/zaloApiClient";
+import { Avatar } from "./Avatar";
 
 interface Props {
   conversations: ZaloConversation[];
@@ -95,9 +96,7 @@ export function ZaloConversationList({ conversations, loading, openConvId, onOpe
                 onClick={() => onOpen(c.conversation_id)}
                 className={`flex w-full items-start gap-3 border-b border-slate-100 px-3.5 py-3.5 text-left transition hover:bg-slate-50 ${active ? "bg-blue-50" : ""}`}
               >
-                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-brand text-base font-bold text-white">
-                  {c.conversation_name?.[0]?.toUpperCase() || "?"}
-                </div>
+                <Avatar src={c.avatar_url} name={c.conversation_name} className="h-12 w-12 text-base" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-1">
                     <div className="truncate text-sm font-bold text-slate-800">{c.conversation_name || "Không tên"}</div>

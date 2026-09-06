@@ -20,10 +20,11 @@ export function ZaloPageContent({ accountId }: { accountId: string }) {
   // Mở luôn hội thoại vừa nhắn; sync để nó xuất hiện trong danh sách (hội thoại
   // với người lạ chưa từng có trong list trước đó). Dùng chung cho cả bản
   // desktop lẫn bản mobile của ZaloConversationList bên dưới.
-  function handleStrangerMessaged(conversationId: string) {
-    void z.openConversation(conversationId);
+  function handleStrangerMessaged(conversationId: string, known: { name: string; avatar: string | null }) {
+    // Truyền tên/avatar đã tra được xuống — nếu không, hội thoại với người chưa
+    // kết bạn sẽ hiện "Zalo <uid>" vì getUserInfo() không resolve được họ.
+    void z.openConversation(conversationId, known);
     z.showToast('Đã gửi "Hi".', true);
-    void z.syncConversations();
   }
 
   return (

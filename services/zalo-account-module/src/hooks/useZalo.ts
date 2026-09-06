@@ -89,12 +89,19 @@ async function saveConversationsToSupabase(list: ZaloConversation[], accountId: 
 
 const FALLBACK_NAME_RE = /^(Group|Zalo)\s+\d+$/;
 
+/**
+ * `known` = danh tính ĐÃ BIẾT CHẮC của thread (tên + avatar), dùng cho luồng
+ * tìm người lạ theo số điện thoại: lúc đó ta đã có tên thật từ kết quả tra số,
+ * trong khi getUserInfo() KHÔNG resolve được người chưa kết bạn nên nếu để tự
+ * tra lại thì tên hội thoại rơi về fallback "Zalo <uid>" dù tìm kiếm đúng.
+ */
 async function ensureConversationInSupabase(
   threadId: string,
   threadType: "user" | "group",
   accountId: string,
   fallbackName?: string,
-  latest?: { ts?: number | null; content?: string | null; senderId?: string | null; isSelf?: boolean }
+  latest?: { ts?: number | null; content?: string | null; senderId?: string | null; isSelf?: boolean },
+  known?: { name?: string | null; avatar?: string | null }
 ): Promise<void> {
   if (typeof window === "undefined" || !threadId) return;
   try {
@@ -114,9 +121,11 @@ async function ensureConversationInSupabase(
     const effectiveThreadType: "user" | "group" = existing?.thread_type === "group" ? "group" : threadType;
     if (existing && !needsResolve) return;
 
-    let resolvedName: string | undefined = fallbackName;
-    let resolvedAvatar: string | null = existing?.avatar_url ?? null;
-    if (effectiveThreadType === "group") {
+    let resolvedName: string | undefined = known?.name || fallbackName;
+    let resolvedAvatar: string | null = known?.avatar ?? existing?.avatar_url ?? null;
+    if (known?.name) {
+      // Đã biết chắc tên → bỏ qua toàn bộ bước tra lại bên dưới.
+    } else if (effectiveThreadType === "group") {
       const info = await zaloApi.getGroupInfo(threadId, accountId).catch(() => null);
       if (info?.ok) {
         resolvedName = info.group_name;
@@ -294,18 +303,45 @@ export function useZalo(accountId: string) {
   }, [fetchConversations, showToast]);
 
   const openConversation = useCallback(
-    async (convId: string) => {
+    async (convId: string, known?: { name?: string | null; avatar?: string | null }) => {
       setOpenConvId(convId);
       setMessages([]);
       const threadId = convId.includes(":") ? convId.split(":").slice(1).join(":") : convId;
 
       const existing = conversations.find((c) => c.conversation_id === threadId || c.thread_id === threadId);
       if (!existing) {
-        void ensureConversationInSupabase(threadId, "user", accountIdRef.current, `Zalo ${threadId}`, {
-          ts: Date.now(),
-          content: null,
-          isSelf: false,
-        });
+        void ensureConversationInSupabase(
+          threadId,
+          "user",
+          accountIdRef.current,
+          `Zalo ${threadId}`,
+          { ts: Date.now(), content: null, isSelf: false },
+          known
+        );
+        // Hiện ngay trong danh sách với tên thật (nếu đã biết) thay vì chờ sync
+        // — sync từ bridge có thể vẫn trả fallback cho người chưa kết bạn.
+        if (known?.name) {
+          setConversations((prev) =>
+            prev.some((c) => c.thread_id === threadId)
+              ? prev
+              : [
+                  {
+                    conversation_id: threadId,
+                    thread_id: threadId,
+                    thread_type: "user",
+                    conversation_name: known.name as string,
+                    account_id: accountIdRef.current,
+                    avatar_url: known.avatar ?? null,
+                    unread_count: 0,
+                    message_count: 0,
+                    has_messages: true,
+                    last_message_ts: Date.now(),
+                    latest_message_at: new Date().toISOString()
+                  } as ZaloConversation,
+                  ...prev
+                ]
+          );
+        }
       }
 
       setLoadingChat(true);
