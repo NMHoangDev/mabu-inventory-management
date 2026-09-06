@@ -53,6 +53,95 @@ export function getClient() {
 }
 
 /**
+ * Client THỨ HAI, trỏ tới Supabase self-host riêng cho
+ * services/zalo-account-module + services/zalo-forward-module
+ * (2026-09-06). 2 module đó đọc/ghi zalo_messages/zalo_conversations_ui trên
+ * DB self-host này — nhưng bridge (nơi DUY NHẤT nhận/gửi tin Zalo thật) trước
+ * đây chỉ ghi vào Supabase GỐC (getClient() ở trên, dùng chung app chính) →
+ * 2 module không bao giờ thấy tin nhắn thật vì DB self-host chưa từng được
+ * ghi vào. Đây là DUAL-WRITE: mọi ghi vào client này đều BEST-EFFORT, không
+ * bao giờ được phép làm hỏng/chặn luồng ghi vào Supabase gốc (client chính) —
+ * đó mới là DB thật sự phục vụ app chính + toàn bộ công ty.
+ *
+ * ENV riêng (không trùng SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY của client
+ * chính): SELFHOST_SUPABASE_URL, SELFHOST_SUPABASE_SERVICE_ROLE_KEY,
+ * SELFHOST_SUPABASE_ANON_KEY (fallback khi chưa có service role key).
+ */
+let _selfHostClient = null;
+let _selfHostWarnedMissing = false;
+
+function getSelfHostClient() {
+  if (_selfHostClient) return _selfHostClient;
+  const url = process.env.SELFHOST_SUPABASE_URL;
+  const key =
+    process.env.SELFHOST_SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SELFHOST_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    if (!_selfHostWarnedMissing) {
+      logger.warn(
+        '[supabase-sync] SELFHOST_SUPABASE_URL/key chưa set → bỏ qua dual-write cho zalo-account-module/zalo-forward-module'
+      );
+      _selfHostWarnedMissing = true;
+    }
+    return null;
+  }
+  _selfHostClient = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return _selfHostClient;
+}
+
+// Cache account_id đã ensure tồn tại trong self-host zalo_accounts (FK target
+// của zalo_messages/zalo_forward_rules ở DB đó) — chỉ cần upsert 1 lần/account
+// trong vòng đời process, không phải mỗi tin nhắn.
+const _selfHostAccountsEnsured = new Set();
+
+async function ensureSelfHostAccount(client, accountId) {
+  if (_selfHostAccountsEnsured.has(accountId)) return;
+  try {
+    await client.from('zalo_accounts').upsert(
+      { account_id: accountId, display_name: accountId, status: 'connected', is_active: true },
+      { onConflict: 'account_id', ignoreDuplicates: false }
+    );
+    _selfHostAccountsEnsured.add(accountId);
+  } catch (e) {
+    logger.warn(
+      `[supabase-sync] [${accountId}] self-host ensure account failed: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+}
+
+/**
+ * Ghi mirror 1 message + conversation row sang self-host DB — GỌI SAU KHI
+ * client chính đã ghi thành công, KHÔNG BAO GIỜ throw ra ngoài (best-effort).
+ */
+async function persistToSelfHost(row, convRow) {
+  const client = getSelfHostClient();
+  if (!client) return;
+  try {
+    await ensureSelfHostAccount(client, row.account_id);
+    const { error: msgErr } = await client.from('zalo_messages').upsert(row, {
+      onConflict: 'user_id,source_message_id',
+      ignoreDuplicates: false,
+    });
+    if (msgErr) {
+      logger.warn(`[supabase-sync] [${row.account_id}] self-host insert message err: ${msgErr.message}`);
+      return;
+    }
+    const { error: convErr } = await client
+      .from('zalo_conversations_ui')
+      .upsert(convRow, { onConflict: 'account_id,conversation_id' });
+    if (convErr) {
+      logger.warn(`[supabase-sync] [${row.account_id}] self-host upsert conv err: ${convErr.message}`);
+    }
+  } catch (e) {
+    logger.warn(
+      `[supabase-sync] [${row.account_id}] self-host dual-write failed: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+}
+
+/**
  * Build conversation_id theo format CŨ (đã lỗi thời, không dùng nữa).
  *   - user  → 'u:<threadId>'
  *   - group → 'g:<threadId>'
@@ -337,27 +426,29 @@ export async function persistIncomingMessage({
   // mà không có cách nào phát hiện lại được từ DB.
   const mentions = Array.isArray(d.mentions) ? d.mentions : null;
 
+  const messageRow = {
+    user_id: accountId,
+    group_id: threadId,            // backward-compatible với code cũ
+    thread_id: threadId,           // cột mới
+    source_message_id: messageId,
+    sender_id: senderId,
+    sender_name: senderName,
+    content,
+    ts,
+    timestamp: new Date(ts).toISOString(),
+    type,
+    is_sent: !!isSelf,
+    thread_type: threadType,
+    account_id: accountId,
+    image_urls: imageUrls,
+    raw_content: rawContent,
+    mentions,
+  };
+
   try {
     // 1) Upsert message — unique (user_id, source_message_id) trong DB.
     const { error: msgErr } = await sb.from('zalo_messages').upsert(
-      {
-        user_id: accountId,
-        group_id: threadId,            // backward-compatible với code cũ
-        thread_id: threadId,           // cột mới
-        source_message_id: messageId,
-        sender_id: senderId,
-        sender_name: senderName,
-        content,
-        ts,
-        timestamp: new Date(ts).toISOString(),
-        type,
-        is_sent: !!isSelf,
-        thread_type: threadType,
-        account_id: accountId,
-        image_urls: imageUrls,
-        raw_content: rawContent,
-        mentions,
-      },
+      messageRow,
       {
         onConflict: 'user_id,source_message_id',
         // Catch-up (getCMRecent) không bao giờ có image_urls đầy đủ (xem
@@ -413,28 +504,32 @@ const conversationId = threadId;
       api
     );
 
+    const convRow = {
+      account_id: accountId,
+      conversation_id: conversationId,
+      thread_id: threadId,
+      thread_type: threadType,
+      // CHỈ set conversation_name khi resolve trả về giá trị. null =
+      // giữ nguyên giá trị cũ trong DB (tin mình gửi, hoặc incoming
+      // nhưng không có senderName).
+      ...(resolvedName != null ? { conversation_name: resolvedName } : {}),
+      latest_message_at: new Date(ts).toISOString(),
+      latest_content: content.slice(0, 200),
+      latest_sender_id: senderId,
+      latest_is_self: !!isSelf,
+      last_message_ts: ts,
+      has_messages: true,
+      updated_at: new Date(ts).toISOString(),
+    };
+
     const { error: convErr } = await sb
       .from('zalo_conversations_ui')
-      .upsert(
-        {
-          account_id: accountId,
-          conversation_id: conversationId,
-          thread_id: threadId,
-          thread_type: threadType,
-          // CHỈ set conversation_name khi resolve trả về giá trị. null =
-          // giữ nguyên giá trị cũ trong DB (tin mình gửi, hoặc incoming
-          // nhưng không có senderName).
-          ...(resolvedName != null ? { conversation_name: resolvedName } : {}),
-          latest_message_at: new Date(ts).toISOString(),
-          latest_content: content.slice(0, 200),
-          latest_sender_id: senderId,
-          latest_is_self: !!isSelf,
-          last_message_ts: ts,
-          has_messages: true,
-          updated_at: new Date(ts).toISOString(),
-        },
-        { onConflict: 'account_id,conversation_id' }
-      );
+      .upsert(convRow, { onConflict: 'account_id,conversation_id' });
+
+    // Dual-write sang self-host DB (zalo-account-module/zalo-forward-module)
+    // — best-effort, KHÔNG await chặn response, KHÔNG bao giờ throw ra ngoài.
+    // Xem persistToSelfHost()/getSelfHostClient() ở đầu file.
+    void persistToSelfHost(messageRow, convRow);
 
     if (convErr) {
       logger.warn(
