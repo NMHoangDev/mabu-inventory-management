@@ -8,9 +8,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Loader2, Plus, RefreshCw, Users, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Loader2, Plus, RefreshCw, ShieldCheck, Users, X } from "lucide-react";
 import { apiUrl } from "@/lib/basePath";
 import type { StaffAssignment, StaffRecord, ZaloAccountSummary } from "@/lib/types";
+import { alert, btn, btnSize, card, input, label, modal, pageStack, pill, select, table } from "@/lib/ui";
 
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -148,94 +149,96 @@ export default function StaffPage() {
   const selectedAccount = accounts.find((a) => a.account_id === selectedAccountId) || null;
 
   return (
-    <div className="space-y-6">
+    <div className={pageStack}>
       <div className="flex items-center gap-3">
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-subtle text-brand">
           <Users className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-slate-900">Nhân viên & Phân quyền</h1>
-          <p className="text-xs text-slate-500">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Nhân viên & Phân quyền</h1>
+          <p className="text-sm text-slate-500">
             Thêm nhân viên bằng email Gmail để họ đăng nhập được bằng Google — hoặc mật khẩu (đặt ở lần đăng nhập đầu).
           </p>
         </div>
       </div>
 
+      <div className={alert.info}>
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          Trang này cũng là <strong>bảng whitelist đăng nhập Google</strong> — chỉ Gmail được thêm ở đây mới đăng
+          nhập được bằng Google. Nhân viên chưa có ở đây sẽ bị từ chối đăng nhập.
+        </span>
+      </div>
+
       {error ? (
-        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-          <span>{error}</span>
+        <div className={`${alert.error} justify-between`}>
+          <span className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            {error}
+          </span>
           <button type="button" onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
             <X className="h-4 w-4" />
           </button>
         </div>
       ) : null}
       {notice ? (
-        <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
-          <span>{notice}</span>
+        <div className={`${alert.success} justify-between`}>
+          <span className="flex items-start gap-2">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            {notice}
+          </span>
           <button type="button" onClick={() => setNotice(null)} className="text-emerald-400 hover:text-emerald-600">
             <X className="h-4 w-4" />
           </button>
         </div>
       ) : null}
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <section className={card}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">Danh sách nhân viên</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Danh sách nhân viên</h2>
             <p className="text-xs text-slate-500">{staff.length} nhân viên được cấp quyền truy cập.</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => void loadAll()}
-              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              className={`${btn.ghost} ${btnSize.icon}`}
               title="Làm mới"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
             {isAdmin ? (
-              <button
-                type="button"
-                onClick={() => setShowCreate(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
-              >
+              <button type="button" onClick={() => setShowCreate(true)} className={`${btn.primary} ${btnSize.sm}`}>
                 <Plus className="h-3.5 w-3.5" />
                 Thêm nhân viên
               </button>
             ) : null}
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
+        <div className={table.wrapper}>
+          <table className={table.root}>
             <thead>
-              <tr className="border-b border-slate-100 text-xs uppercase text-slate-500">
-                <th className="px-5 py-2.5 font-semibold">Nhân viên</th>
-                <th className="px-5 py-2.5 font-semibold">Vai trò</th>
-                <th className="px-5 py-2.5 font-semibold">Trạng thái</th>
+              <tr className="border-b border-slate-100">
+                <th className={table.head}>Nhân viên</th>
+                <th className={table.head}>Vai trò</th>
+                <th className={table.head}>Trạng thái</th>
               </tr>
             </thead>
             <tbody>
               {staff.map((s) => (
-                <tr key={s.id} className="border-b border-slate-50 last:border-0">
-                  <td className="px-5 py-3">
+                <tr key={s.id} className={table.row}>
+                  <td className={table.cell}>
                     <div className="font-medium text-slate-900">{s.full_name}</div>
                     <div className="text-xs text-slate-500">{s.email}</div>
                   </td>
-                  <td className="px-5 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        s.role === "admin" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
+                  <td className={table.cell}>
+                    <span className={s.role === "admin" ? pill.info : pill.neutral}>
                       {s.role === "admin" ? "Admin" : "Nhân viên"}
                     </span>
                   </td>
-                  <td className="px-5 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        s.is_active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
-                      }`}
-                    >
+                  <td className={table.cell}>
+                    <span className={s.is_active ? pill.success : pill.danger}>
                       {s.is_active ? "Đang hoạt động" : "Đã khoá"}
                     </span>
                   </td>
@@ -243,7 +246,7 @@ export default function StaffPage() {
               ))}
               {staff.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="px-5 py-10 text-center text-xs text-slate-500">
+                  <td colSpan={3} className="px-4 py-10 text-center text-xs text-slate-500">
                     {loading ? "Đang tải..." : "Chưa có nhân viên nào."}
                   </td>
                 </tr>
@@ -253,17 +256,13 @@ export default function StaffPage() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <section className={card}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">Phân quyền theo tài khoản Zalo</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Phân quyền theo tài khoản Zalo</h2>
             <p className="text-xs text-slate-500">Chọn 1 tài khoản Zalo rồi bật/tắt quyền cho từng nhân viên.</p>
           </div>
-          <select
-            value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none"
-          >
+          <select value={selectedAccountId} onChange={(e) => setSelectedAccountId(e.target.value)} className={select}>
             <option value="">— Chọn tài khoản —</option>
             {accounts.map((acc) => (
               <option key={acc.account_id} value={acc.account_id}>
@@ -278,15 +277,15 @@ export default function StaffPage() {
         ) : !selectedAccount ? (
           <div className="px-5 py-8 text-center text-xs text-slate-500">Chọn một tài khoản để xem/sửa quyền.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className={table.wrapper}>
+            <table className={table.root}>
               <thead>
-                <tr className="border-b border-slate-100 text-xs uppercase text-slate-500">
-                  <th className="px-5 py-2.5 font-semibold">Nhân viên</th>
-                  <th className="px-5 py-2.5 text-center font-semibold">Xem</th>
-                  <th className="px-5 py-2.5 text-center font-semibold">Nhắn tin</th>
-                  <th className="px-5 py-2.5 text-center font-semibold">Broadcast</th>
-                  <th className="px-5 py-2.5 text-right font-semibold">Thao tác</th>
+                <tr className="border-b border-slate-100">
+                  <th className={table.head}>Nhân viên</th>
+                  <th className={`${table.head} text-center`}>Xem</th>
+                  <th className={`${table.head} text-center`}>Nhắn tin</th>
+                  <th className={`${table.head} text-center`}>Broadcast</th>
+                  <th className={`${table.head} text-right`}>Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -294,30 +293,30 @@ export default function StaffPage() {
                   const a = assignmentFor(s.id, selectedAccount.account_id);
                   const hasAssignment = Boolean(a);
                   return (
-                    <tr key={s.id} className="border-b border-slate-50 last:border-0">
-                      <td className="px-5 py-3">
+                    <tr key={s.id} className={table.row}>
+                      <td className={table.cell}>
                         <div className="font-medium text-slate-900">{s.full_name}</div>
                         <div className="text-[11px] text-slate-500">
                           {s.email} · {s.role === "admin" ? "Admin" : "Nhân viên"}
                         </div>
                       </td>
                       {(["can_view", "can_send", "can_broadcast"] as const).map((field) => (
-                        <td key={field} className="px-5 py-3 text-center">
+                        <td key={field} className={`${table.cell} text-center`}>
                           <input
                             type="checkbox"
                             checked={Boolean(a?.[field])}
                             disabled={s.role === "admin"}
                             onChange={(e) => void handleToggleAssignment(s.id, selectedAccount.account_id, field, e.target.checked)}
-                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40"
+                            className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand disabled:opacity-40"
                           />
                         </td>
                       ))}
-                      <td className="px-5 py-3 text-right">
+                      <td className={`${table.cell} text-right`}>
                         {hasAssignment ? (
                           <button
                             type="button"
                             onClick={() => void handleRemoveAssignment(s.id, selectedAccount.account_id)}
-                            className="text-xs font-semibold text-red-500 hover:text-red-700"
+                            className="text-xs font-semibold text-red-600 hover:text-red-700"
                           >
                             Gỡ quyền
                           </button>
@@ -332,7 +331,7 @@ export default function StaffPage() {
                 })}
                 {staff.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-5 py-8 text-center text-xs text-slate-500">
+                    <td colSpan={5} className="px-4 py-8 text-center text-xs text-slate-500">
                       {loading ? "Đang tải..." : "Chưa có nhân viên nào."}
                     </td>
                   </tr>
@@ -344,52 +343,52 @@ export default function StaffPage() {
       </section>
 
       {showCreate ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-900">Thêm nhân viên</h3>
+        <div className={`${modal.overlay} flex items-center justify-center`}>
+          <div className={`${modal.panel} max-w-sm`}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-900">Thêm nhân viên</h3>
               <button type="button" onClick={() => setShowCreate(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Email (Gmail để đăng nhập Google)</label>
+                <label className={label}>Email (Gmail để đăng nhập Google)</label>
                 <input
                   type="email"
                   value={createForm.email}
                   onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
                   placeholder="ten@gmail.com"
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                  className={input}
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Họ tên</label>
+                <label className={label}>Họ tên</label>
                 <input
                   type="text"
                   value={createForm.fullName}
                   onChange={(e) => setCreateForm((f) => ({ ...f, fullName: e.target.value }))}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                  className={input}
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Vai trò</label>
+                <label className={label}>Vai trò</label>
                 <select
                   value={createForm.role}
                   onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as "admin" | "staff" }))}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                  className={`${select} w-full`}
                 >
                   <option value="staff">Nhân viên</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
             </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
+            <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
                 disabled={creating}
-                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                className={`${btn.outline} ${btnSize.sm}`}
               >
                 Hủy
               </button>
@@ -397,7 +396,7 @@ export default function StaffPage() {
                 type="button"
                 onClick={() => void handleCreateStaff()}
                 disabled={creating || !createForm.email.trim() || !createForm.fullName.trim()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                className={`${btn.primary} ${btnSize.sm}`}
               >
                 {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                 Thêm

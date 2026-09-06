@@ -20,6 +20,7 @@ import { useSearchParams } from "next/navigation";
 import { apiUrl } from "@/lib/basePath";
 import type { ZaloAccountSummary } from "@/lib/types";
 import { ZaloPageContent } from "@/components/chat/ZaloPageContent";
+import { select } from "@/lib/ui";
 
 const DEFAULT_ACCOUNT_ID = "shop-owner";
 const LAST_ACCOUNT_KEY = "zalo-account-module:chat:last-account-id";
@@ -39,7 +40,7 @@ function AccountPicker({ accountId, onChange }: { accountId: string; onChange: (
   }
 
   return (
-    <select value={accountId} onChange={(e) => onChange(e.target.value)} className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700">
+    <select value={accountId} onChange={(e) => onChange(e.target.value)} className={select}>
       {accounts.map((a) => (
         <option key={a.account_id} value={a.account_id}>
           {a.display_name || a.account_id}

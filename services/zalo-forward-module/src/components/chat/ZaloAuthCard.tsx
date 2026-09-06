@@ -35,7 +35,7 @@ export function ZaloAuthCard({ status, loading, error, onImport, onLogout, onRef
     <div className="mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-sm">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand text-white shadow-sm">
             <MessageCircle className="h-4 w-4" />
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs">

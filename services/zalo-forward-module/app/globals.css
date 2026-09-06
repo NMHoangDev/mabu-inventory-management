@@ -6,3 +6,38 @@ html,
 body {
   height: 100%;
 }
+
+/**
+ * Nền TRẮNG + bề mặt phân định bằng viền (model của webapp merkeeai), thay cho
+ * nền xám slate-50 cũ. Chữ gần như đen để tương phản rõ.
+ */
+html,
+body {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+/* Số trong bảng dùng chữ số đều bề rộng — cột số/ngày không bị nhảy khi đổi giá trị. */
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbar mảnh cho khu vực cuộn (sidebar, danh sách hội thoại, bảng). */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}

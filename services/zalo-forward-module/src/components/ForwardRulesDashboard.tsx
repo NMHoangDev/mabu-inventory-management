@@ -8,6 +8,9 @@
  * duy nhất từ /api/accounts (fallback "shop-owner" nếu bridge chưa có account
  * nào); (2) gọi API nội bộ module qua apiUrl() (helper no-op, module deploy ở
  * domain root qua subdomain riêng) thay vì /api/zalo/*.
+ *
+ * Styling port từ hệ thiết kế của zalo-account-module (src/lib/ui.ts) — chỉ
+ * đổi màu thương hiệu, KHÔNG đổi logic/behavior ở file này.
  */
 
 import {
@@ -30,6 +33,7 @@ import { forwardRulesApi } from "@/lib/forwardRulesApi";
 import { apiUrl } from "@/lib/basePath";
 import { absoluteBridgeUrl } from "@/lib/zaloApiClient";
 import type { ZaloForwardRule, ZaloForwardLog } from "@/lib/types";
+import { alert, btn, btnSize, card, input, pageStack, pill } from "@/lib/ui";
 
 type GroupOption = { id: string; name: string };
 
@@ -51,15 +55,15 @@ const ZALO_EXTENSION_DOWNLOAD_URL = "/extension-login-zalo.zip";
 function statusPillCls(status: string) {
   switch (status) {
     case "success":
-      return "bg-emerald-50 text-emerald-700";
+      return pill.success;
     case "partial":
-      return "bg-amber-50 text-amber-700";
-    case "skipped":
-      return "bg-slate-100 text-slate-600";
+      return pill.warning;
     case "dry_run":
-      return "bg-blue-50 text-blue-700";
+      return pill.info;
+    case "skipped":
+      return pill.neutral;
     default:
-      return "bg-red-50 text-red-700";
+      return pill.danger;
   }
 }
 
@@ -216,20 +220,25 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <header className="flex items-start justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Chuyển tiếp tin nhắn tự động</h1>
-          <p className="text-xs text-slate-500">
-            Module riêng — chọn 1 nhóm chính, mọi tin nhắn (text/ảnh/file/sticker) gửi trong nhóm đó sẽ
-            tự động chuyển tiếp sang các nhóm đích bên dưới.
-          </p>
+    <div className={pageStack}>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand text-white">
+            <Send className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Chuyển tiếp tin nhắn tự động</h1>
+            <p className="mt-1 max-w-xl text-sm text-slate-500">
+              Chọn 1 nhóm chính, mọi tin nhắn (text/ảnh/file/sticker) gửi trong nhóm đó sẽ tự động chuyển
+              tiếp sang các nhóm đích bên dưới.
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <a
             href={ZALO_EXTENSION_DOWNLOAD_URL}
             download="extension-login-zalo.zip"
-            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className={`${btn.outline} ${btnSize.sm}`}
             title="Tải extension Chrome đăng nhập Zalo về máy"
           >
             <Download className="h-3.5 w-3.5" />
@@ -241,7 +250,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
               type="button"
               onClick={() => void handleReimport()}
               disabled={reimporting}
-              className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+              className={`${btn.warning} ${btnSize.sm}`}
               title="Tài khoản chưa/mất kết nối Zalo — bấm để đăng nhập lại qua extension"
             >
               {reimporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -252,7 +261,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
             type="button"
             onClick={() => void refresh()}
             disabled={loading}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className={`${btn.outline} ${btnSize.sm}`}
           >
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Làm mới
@@ -264,7 +273,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
                 setEditingRule(null);
                 setShowEditor(true);
               }}
-              className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+              className={`${btn.primary} ${btnSize.sm}`}
             >
               <Plus className="h-3.5 w-3.5" />
               Tạo luật mới
@@ -274,29 +283,31 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
       </header>
 
       {notice ? (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-          {notice}
-          <button type="button" onClick={() => setNotice(null)} className="ml-2 underline">
+        <div className={alert.success}>
+          <Check className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="flex-1">{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} className="text-xs font-semibold underline">
             Đóng
           </button>
         </div>
       ) : null}
       {error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {error}
-          <button type="button" onClick={() => setError(null)} className="ml-2 underline">
+        <div className={alert.error}>
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button type="button" onClick={() => setError(null)} className="text-xs font-semibold underline">
             Đóng
           </button>
         </div>
       ) : null}
       {!canManage ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-          <AlertTriangle className="mr-1 inline h-3 w-3" />
-          Bạn cần quyền admin hoặc quyền "Broadcast" trên tài khoản này để tạo/sửa luật chuyển tiếp.
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>Bạn cần quyền admin hoặc quyền &quot;Broadcast&quot; trên tài khoản này để tạo/sửa luật chuyển tiếp.</span>
         </div>
       ) : null}
 
-      <section className="min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-white">
+      <section className={`${card} min-h-0 flex-1 overflow-auto`}>
         {rules.length === 0 ? (
           <div className="px-6 py-16 text-center text-sm text-slate-500">
             {loading ? "Đang tải..." : "Chưa có luật chuyển tiếp nào."}
@@ -312,7 +323,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
                     disabled={!canManage}
                     title={rule.is_enabled ? "Đang bật — bấm để tắt" : "Đang tắt — bấm để bật"}
                     className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${
-                      rule.is_enabled ? "bg-emerald-500" : "bg-slate-300"
+                      rule.is_enabled ? "bg-brand" : "bg-slate-300"
                     } ${canManage ? "" : "cursor-not-allowed opacity-70"}`}
                   >
                     <span
@@ -323,7 +334,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
                   </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <Send className="h-3.5 w-3.5 shrink-0 text-primary" />
+                      <Send className="h-3.5 w-3.5 shrink-0 text-brand" />
                       <span className="truncate font-semibold text-slate-900">
                         {rule.name || "Luật chuyển tiếp"}
                       </span>
@@ -411,9 +422,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
                               </td>
                               <td className="px-2 py-1.5">{log.content_type}</td>
                               <td className="px-2 py-1.5">
-                                <span className={`rounded-full px-1.5 py-0.5 font-semibold ${statusPillCls(log.status)}`}>
-                                  {log.status}
-                                </span>
+                                <span className={statusPillCls(log.status)}>{log.status}</span>
                               </td>
                               <td className="max-w-[240px] truncate px-2 py-1.5 text-red-600" title={log.error || ""}>
                                 {log.error || ""}
@@ -471,14 +480,14 @@ function GroupPickerList({
   }, [groups, excludeIds, search]);
 
   return (
-    <div className="rounded-md border border-slate-200">
-      <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2 py-1.5">
-        <Search className="h-3.5 w-3.5 text-slate-400" />
+    <div className="overflow-hidden rounded-lg border border-slate-200">
+      <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2.5 py-1.5">
+        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Tìm nhóm..."
-          className="flex-1 bg-transparent text-xs outline-none placeholder:text-slate-400"
+          className="w-full bg-transparent text-xs text-slate-900 outline-none placeholder:text-slate-400"
         />
       </div>
       <div className="max-h-48 overflow-auto">
@@ -497,8 +506,9 @@ function GroupPickerList({
                   name={mode === "single" ? "master-group" : undefined}
                   checked={checked}
                   onChange={() => (mode === "single" ? onSelectSingle?.(g.id) : onToggleMulti?.(g.id))}
+                  className="accent-brand"
                 />
-                <span className="truncate">{g.name}</span>
+                <span className="truncate text-slate-700">{g.name}</span>
               </label>
             );
           })
@@ -573,10 +583,10 @@ function RuleEditorModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[170] grid place-items-center bg-slate-950/50 px-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[170] grid place-items-center bg-black/50 px-4">
       <button type="button" className="absolute inset-0" aria-label="Đóng" onClick={onClose} />
-      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border bg-white shadow-2xl">
-        <div className="shrink-0 px-5 pt-5 text-base font-semibold">
+      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-slate-200 bg-white shadow-lg">
+        <div className="shrink-0 px-5 pt-5 text-base font-semibold text-slate-900">
           {editingRule ? "Sửa luật chuyển tiếp" : "Tạo luật chuyển tiếp mới"}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
@@ -586,7 +596,7 @@ function RuleEditorModal({
               placeholder="Tên luật (tuỳ chọn, vd: Thông báo cửa hàng)"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:outline-none"
+              className={input}
             />
 
             <div>
@@ -623,18 +633,14 @@ function RuleEditorModal({
         </div>
 
         <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-5 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
+          <button type="button" onClick={onClose} className={`${btn.outline} ${btnSize.sm}`}>
             Hủy
           </button>
           <button
             type="button"
             onClick={() => void handleSave()}
             disabled={saving || !masterId || targetIds.size === 0}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            className={`${btn.primary} ${btnSize.sm}`}
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
             Lưu

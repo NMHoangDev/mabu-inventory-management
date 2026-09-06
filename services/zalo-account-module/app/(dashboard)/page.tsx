@@ -9,10 +9,23 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, MessageCircle, Plus, RefreshCw, Smartphone, X, Check, Pencil, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Loader2,
+  MessageCircle,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Smartphone,
+  Trash2,
+  X,
+} from "lucide-react";
 import { apiUrl } from "@/lib/basePath";
 import { absoluteBridgeUrl } from "@/lib/zaloApiClient";
 import type { StaffRecord, ZaloAccountSummary } from "@/lib/types";
+import { alert, btn, btnSize, card, input, label, modal, pageStack, pill, table } from "@/lib/ui";
 
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -23,13 +36,13 @@ function getCookie(name: string): string | null {
 function statusBadge(status: string) {
   switch (status) {
     case "connected":
-      return { label: "Đã kết nối", cls: "bg-emerald-50 text-emerald-700" };
+      return { label: "Đã kết nối", cls: pill.success };
     case "waiting_qr":
-      return { label: "Chờ QR", cls: "bg-blue-50 text-blue-700" };
+      return { label: "Chờ QR", cls: pill.info };
     case "error":
-      return { label: "Lỗi", cls: "bg-red-50 text-red-700" };
+      return { label: "Lỗi", cls: pill.danger };
     default:
-      return { label: "Chưa kết nối", cls: "bg-slate-100 text-slate-600" };
+      return { label: "Chưa kết nối", cls: pill.neutral };
   }
 }
 
@@ -214,55 +227,57 @@ export default function AccountsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className={pageStack}>
       <div className="flex items-center gap-3">
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-subtle text-brand">
           <Smartphone className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-slate-900">Tài khoản Zalo</h1>
-          <p className="text-xs text-slate-500">Quản lý metadata tài khoản qua zalo-bridge.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tài khoản Zalo</h1>
+          <p className="text-sm text-slate-500">Quản lý metadata tài khoản qua zalo-bridge.</p>
         </div>
       </div>
 
       {error ? (
-        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-          <span>{error}</span>
+        <div className={`${alert.error} justify-between`}>
+          <span className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            {error}
+          </span>
           <button type="button" onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
             <X className="h-4 w-4" />
           </button>
         </div>
       ) : null}
       {notice ? (
-        <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
-          <span>{notice}</span>
+        <div className={`${alert.success} justify-between`}>
+          <span className="flex items-start gap-2">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            {notice}
+          </span>
           <button type="button" onClick={() => setNotice(null)} className="text-emerald-400 hover:text-emerald-600">
             <X className="h-4 w-4" />
           </button>
         </div>
       ) : null}
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <section className={card}>
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">Danh sách tài khoản</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Danh sách tài khoản</h2>
             <p className="text-xs text-slate-500">Không thao tác trực tiếp lên WebSocket session.</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => void loadAll()}
-              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              className={`${btn.ghost} ${btnSize.icon}`}
               title="Làm mới"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
             {isAdmin ? (
-              <button
-                type="button"
-                onClick={() => setShowCreate(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
-              >
+              <button type="button" onClick={() => setShowCreate(true)} className={`${btn.primary} ${btnSize.sm}`}>
                 <Plus className="h-3.5 w-3.5" />
                 Thêm tài khoản
               </button>
@@ -270,43 +285,43 @@ export default function AccountsPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
+        <div className={table.wrapper}>
+          <table className={table.root}>
             <thead>
-              <tr className="border-b border-slate-100 text-xs uppercase text-slate-500">
-                <th className="px-5 py-2.5 font-semibold">Tên hiển thị</th>
-                <th className="px-5 py-2.5 font-semibold">Account ID</th>
-                <th className="px-5 py-2.5 font-semibold">Trạng thái</th>
-                <th className="px-5 py-2.5 font-semibold">Zalo user</th>
-                <th className="px-5 py-2.5 font-semibold">Hoạt động cuối</th>
-                <th className="px-5 py-2.5 font-semibold text-right">Thao tác</th>
+              <tr className="border-b border-slate-100">
+                <th className={table.head}>Tên hiển thị</th>
+                <th className={table.head}>Account ID</th>
+                <th className={table.head}>Trạng thái</th>
+                <th className={table.head}>Zalo user</th>
+                <th className={table.head}>Hoạt động cuối</th>
+                <th className={`${table.head} text-right`}>Thao tác</th>
               </tr>
             </thead>
             <tbody>
               {accounts.map((acc) => {
                 const badge = statusBadge(acc.status);
                 return (
-                  <tr key={acc.account_id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
-                    <td className="px-5 py-3 font-medium text-slate-900">
+                  <tr key={acc.account_id} className={table.row}>
+                    <td className={`${table.cell} font-medium text-slate-900`}>
                       <div className="flex items-center gap-2">
                         {statusDot(acc.status)}
                         {acc.display_name}
                       </div>
                     </td>
-                    <td className="px-5 py-3 font-mono text-xs text-slate-500">{acc.account_id}</td>
-                    <td className="px-5 py-3">
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${badge.cls}`}>{badge.label}</span>
+                    <td className={`${table.cell} font-mono text-xs text-slate-500`}>{acc.account_id}</td>
+                    <td className={table.cell}>
+                      <span className={badge.cls}>{badge.label}</span>
                     </td>
-                    <td className="px-5 py-3 text-xs text-slate-500">{acc.zalo_display_name || "—"}</td>
-                    <td className="px-5 py-3 text-xs text-slate-500">
+                    <td className={`${table.cell} text-xs text-slate-500`}>{acc.zalo_display_name || "—"}</td>
+                    <td className={`${table.cell} text-xs text-slate-500`}>
                       {acc.last_seen_at ? new Date(acc.last_seen_at).toLocaleString("vi-VN") : "—"}
                     </td>
-                    <td className="px-5 py-3">
+                    <td className={table.cell}>
                       <div className="flex items-center justify-end gap-1.5">
                         {acc.status === "connected" ? (
                           <Link
                             href={`/chat?accountId=${encodeURIComponent(acc.account_id)}`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                            className={`${btn.outline} ${btnSize.sm}`}
                             title={`Vào chat với tài khoản ${acc.display_name || acc.account_id}`}
                           >
                             <MessageCircle className="h-3.5 w-3.5" />
@@ -317,7 +332,7 @@ export default function AccountsPage() {
                             type="button"
                             onClick={() => void handleReconnect(acc)}
                             disabled={reconnectingId === acc.account_id}
-                            className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                            className={`${btn.warning} ${btnSize.sm}`}
                             title="Tài khoản chưa/mất kết nối — bấm để đăng nhập lại qua extension"
                           >
                             {reconnectingId === acc.account_id ? (
@@ -333,7 +348,7 @@ export default function AccountsPage() {
                             <button
                               type="button"
                               onClick={() => openEdit(acc)}
-                              className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100"
+                              className={`${btn.outline} ${btnSize.icon}`}
                               title="Sửa"
                             >
                               <Pencil className="h-3.5 w-3.5" />
@@ -341,7 +356,7 @@ export default function AccountsPage() {
                             <button
                               type="button"
                               onClick={() => void handleDelete(acc)}
-                              className="rounded-lg border border-slate-200 p-1.5 text-red-500 hover:bg-red-50"
+                              className={`${btn.danger} ${btnSize.icon}`}
                               title="Xoá"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -355,7 +370,7 @@ export default function AccountsPage() {
               })}
               {accounts.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-xs text-slate-500">
+                  <td colSpan={6} className="px-4 py-10 text-center text-xs text-slate-500">
                     {loading ? "Đang tải..." : "Chưa có tài khoản Zalo nào."}
                   </td>
                 </tr>
@@ -366,42 +381,42 @@ export default function AccountsPage() {
       </section>
 
       {showCreate ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-900">Thêm tài khoản Zalo</h3>
+        <div className={`${modal.overlay} flex items-center justify-center`}>
+          <div className={`${modal.panel} max-w-sm`}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-900">Thêm tài khoản Zalo</h3>
               <button type="button" onClick={() => setShowCreate(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Account ID (slug)</label>
+                <label className={label}>Account ID (slug)</label>
                 <input
                   type="text"
                   value={createForm.accountId}
                   onChange={(e) => setCreateForm((f) => ({ ...f, accountId: e.target.value }))}
                   placeholder="vd: leads-01"
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 font-mono text-xs focus:border-blue-500 focus:outline-none"
+                  className={`${input} font-mono`}
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Tên hiển thị</label>
+                <label className={label}>Tên hiển thị</label>
                 <input
                   type="text"
                   value={createForm.displayName}
                   onChange={(e) => setCreateForm((f) => ({ ...f, displayName: e.target.value }))}
                   placeholder="vd: Lead Page 01"
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                  className={input}
                 />
               </div>
             </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
+            <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
                 disabled={creating}
-                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                className={`${btn.outline} ${btnSize.sm}`}
               >
                 Hủy
               </button>
@@ -409,7 +424,7 @@ export default function AccountsPage() {
                 type="button"
                 onClick={() => void handleCreate()}
                 disabled={creating || !createForm.accountId.trim()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                className={`${btn.primary} ${btnSize.sm}`}
               >
                 {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                 Tạo
@@ -420,40 +435,42 @@ export default function AccountsPage() {
       ) : null}
 
       {editingAccount ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-900">Sửa tài khoản &quot;{editingAccount.account_id}&quot;</h3>
+        <div className={`${modal.overlay} flex items-center justify-center`}>
+          <div className={`${modal.panel} max-w-sm`}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-900">
+                Sửa tài khoản &quot;{editingAccount.account_id}&quot;
+              </h3>
               <button type="button" onClick={() => setEditingAccount(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Tên hiển thị</label>
+                <label className={label}>Tên hiển thị</label>
                 <input
                   type="text"
                   value={editForm.displayName}
                   onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                  className={input}
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Số điện thoại</label>
+                <label className={label}>Số điện thoại</label>
                 <input
                   type="text"
                   value={editForm.phone}
                   onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                  className={input}
                 />
               </div>
             </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
+            <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setEditingAccount(null)}
                 disabled={saving}
-                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                className={`${btn.outline} ${btnSize.sm}`}
               >
                 Hủy
               </button>
@@ -461,7 +478,7 @@ export default function AccountsPage() {
                 type="button"
                 onClick={() => void handleSaveEdit()}
                 disabled={saving}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                className={`${btn.primary} ${btnSize.sm}`}
               >
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                 Lưu

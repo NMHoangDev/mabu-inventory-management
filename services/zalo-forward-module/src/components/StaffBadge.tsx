@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Hiển thị nhân viên đang đăng nhập + nút đăng xuất — mount trong
- * ForwardRulesDashboard.tsx (header). Ẩn hoàn toàn khi chưa có session
- * (middleware đã chặn truy cập trang khi chưa đăng nhập).
+ * Hiển thị nhân viên đang đăng nhập + nút đăng xuất — mount ở layout.tsx nên
+ * xuất hiện trên mọi trang. Ẩn hoàn toàn khi chưa có session (middleware đã
+ * chặn truy cập trang khi chưa đăng nhập, nên component này chỉ cần lo phần
+ * hiển thị + đăng xuất, không cần tự redirect).
  */
 
 import { useEffect, useState } from "react";
@@ -47,21 +48,32 @@ export default function StaffBadge() {
 
   if (loading || !staff) return null;
 
+  const displayName = staff.full_name || staff.email;
+  const initial = displayName.trim().charAt(0).toUpperCase() || "?";
+
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="text-slate-500">
-        {staff.full_name || staff.email}
-        {staff.role === "admin" ? " · Quản trị viên" : ""}
-      </span>
-      <button
-        type="button"
-        onClick={handleLogout}
-        disabled={busy}
-        className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-      >
-        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
-        Đăng xuất
-      </button>
+    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+      <div className="flex items-center gap-2.5">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand text-xs font-bold text-white">
+          {initial}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-semibold text-slate-900">{displayName}</div>
+          <div className="truncate text-[11px] text-slate-500">
+            {staff.role === "admin" ? "Quản trị viên" : "Nhân viên"}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          disabled={busy}
+          title="Đăng xuất"
+          aria-label="Đăng xuất"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 transition-colors hover:bg-white hover:text-red-600 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+        </button>
+      </div>
     </div>
   );
 }
