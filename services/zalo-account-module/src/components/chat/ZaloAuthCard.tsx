@@ -6,8 +6,16 @@
  * @/lib/zalo-api).
  */
 
-import { CheckCircle2, ExternalLink, Loader2, LogOut, MessageCircle, PlugZap, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { CheckCircle2, Download, ExternalLink, Loader2, LogOut, MessageCircle, PlugZap, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { ZaloLoginStatus } from "@/lib/zaloApiClient";
+
+/**
+ * Cùng file .rar extension mà app chính dùng (app/(dashboard)/zalo/chat/page.tsx)
+ * — chưa có cơ chế tự host file trong repo (extensions/extension-login-zalo.rar
+ * chỉ nằm trong monorepo, module này không serve static file đó), nên dùng
+ * chung link Google Drive đã public sẵn thay vì tự lưu trữ riêng.
+ */
+const ZALO_EXTENSION_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id=10rI_grXfUD8Q4kdDXfdSmdHLS4Ff0iKq";
 
 interface Props {
   status: ZaloLoginStatus | null;
@@ -58,6 +66,17 @@ export function ZaloAuthCard({ status, loading, error, onImport, onLogout, onRef
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
+          <a
+            href={ZALO_EXTENSION_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            download="extension-login-zalo.rar"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:border-blue-500 hover:text-blue-600"
+            title="Tải extension Chrome đăng nhập Zalo về máy"
+          >
+            <Download className="h-3 w-3" />
+            Tải extension
+          </a>
           {isLoggedIn ? (
             <>
               <button
@@ -107,7 +126,17 @@ export function ZaloAuthCard({ status, loading, error, onImport, onLogout, onRef
           </div>
           <ol className="ml-4 list-decimal space-y-0.5">
             <li>
-              Cài extension <code className="rounded bg-slate-200 px-1 font-mono text-[10px]">extension-login-zalo</code> trên Chrome (load unpacked).
+              Bấm{" "}
+              <a
+                href={ZALO_EXTENSION_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                download="extension-login-zalo.rar"
+                className="font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-800"
+              >
+                Tải extension
+              </a>{" "}
+              về máy, giải nén, mở <code className="rounded bg-slate-200 px-1 font-mono text-[10px]">chrome://extensions</code>, bật Developer mode rồi <strong>Load unpacked</strong> trỏ vào thư mục vừa giải nén.
             </li>
             <li>
               Mở tab{" "}

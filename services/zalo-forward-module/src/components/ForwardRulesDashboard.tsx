@@ -16,6 +16,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Download,
   Loader2,
   Plus,
   RefreshCw,
@@ -32,6 +33,12 @@ import type { ZaloForwardRule, ZaloForwardLog } from "@/lib/types";
 type GroupOption = { id: string; name: string };
 
 const DEFAULT_ACCOUNT_ID = "shop-owner";
+
+/**
+ * Cùng file .rar mà app chính dùng (app/(dashboard)/zalo/chat/page.tsx) — link
+ * Google Drive public sẵn, module này không tự host lại file.
+ */
+const ZALO_EXTENSION_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id=10rI_grXfUD8Q4kdDXfdSmdHLS4Ff0iKq";
 
 function statusPillCls(status: string) {
   switch (status) {
@@ -165,6 +172,17 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
         </div>
         <div className="flex items-center gap-2">
           <StaffBadge />
+          <a
+            href={ZALO_EXTENSION_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            download="extension-login-zalo.rar"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            title="Tải extension Chrome đăng nhập Zalo về máy"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Tải extension
+          </a>
           <span className="text-xs text-slate-400">Tài khoản: {accountLabel || accountId}</span>
           <button
             type="button"
