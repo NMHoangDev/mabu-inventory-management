@@ -37,13 +37,16 @@ type GroupOption = { id: string; name: string };
 const DEFAULT_ACCOUNT_ID = "shop-owner";
 
 /**
- * Extension "Markee Zalo Personal Connector" (extensions/extension-login-zalo,
- * manifest.json) — đóng gói .zip, đặt ở public/ của module này. Tải qua route
- * /api/download-extension (không phải link tĩnh trực tiếp) để ép
- * Content-Disposition: attachment tường minh — link tĩnh + thuộc tính HTML
- * `download` từng bị 1 số trình duyệt bỏ qua, cố NAVIGATE thay vì tải file.
+ * Cùng file .rar/.zip mà app chính dùng — quay về link Google Drive public
+ * sẵn (đã thử tự host qua public/ + API route riêng, nhưng phần mềm bảo mật
+ * trên máy user xoá file .zip chứa script xin quyền cookies/tabs ngay sau khi
+ * tải — không phải lỗi server, revert lại cho đơn giản/đỡ vướng). LƯU Ý: file
+ * trên Drive là bản CŨ, KHÔNG có bản vá host_permissions/content_scripts cho
+ * phép extension nhận diện trang chạy ở 10.30.195.41:3002/3003 (xem
+ * extensions/extension-login-zalo/manifest.json ở repo — bản đã vá, cần tự
+ * tay upload đè lên Drive nếu muốn dùng).
  */
-const ZALO_EXTENSION_DOWNLOAD_URL = "/api/download-extension";
+const ZALO_EXTENSION_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id=10rI_grXfUD8Q4kdDXfdSmdHLS4Ff0iKq";
 
 function statusPillCls(status: string) {
   switch (status) {
@@ -232,6 +235,8 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
           <StaffBadge />
           <a
             href={ZALO_EXTENSION_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             download="extension-login-zalo.zip"
             className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             title="Tải extension Chrome đăng nhập Zalo về máy"
