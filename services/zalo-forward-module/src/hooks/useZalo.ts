@@ -94,7 +94,9 @@ async function ensureConversationInSupabase(
   threadType: "user" | "group",
   accountId: string,
   fallbackName?: string,
-  latest?: { ts?: number | null; content?: string | null; senderId?: string | null; isSelf?: boolean }
+  latest?: { ts?: number | null; content?: string | null; senderId?: string | null; isSelf?: boolean },
+  /** Ten chu tai khoan — de tu chua ban ghi da bi dat thanh ten cua chinh minh. */
+  ownName?: string | null
 ): Promise<void> {
   if (typeof window === "undefined" || !threadId) return;
   try {
@@ -108,7 +110,9 @@ async function ensureConversationInSupabase(
     const isFallbackName =
       !existing?.conversation_name ||
       FALLBACK_NAME_RE.test(existing.conversation_name.trim()) ||
-      (!!fallbackName && existing.conversation_name.trim() === fallbackName.trim());
+      (!!fallbackName && existing.conversation_name.trim() === fallbackName.trim()) ||
+      // Ban ghi bi dat thanh ten cua chinh minh -> coi nhu can resolve lai.
+      (!!ownName && threadType === "user" && existing.conversation_name.trim() === ownName.trim());
     const hasWrongType = threadType === "group" && !!existing?.thread_type && existing.thread_type !== "group";
     const needsResolve = isFallbackName || hasWrongType;
     const effectiveThreadType: "user" | "group" = existing?.thread_type === "group" ? "group" : threadType;
@@ -178,6 +182,8 @@ async function saveMessagesToSupabase(threadId: string, list: unknown[], account
 
 export function useZalo(accountId: string) {
   const [loginStatus, setLoginStatus] = useState<ZaloLoginStatus | null>(null);
+  // Ten chu tai khoan — de tu chua hoi thoai bi dat thanh ten cua chinh minh.
+  const ownNameRef = useRef<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -217,6 +223,7 @@ export function useZalo(accountId: string) {
     try {
       const status = await zaloApi.getLoginStatus(accountIdRef.current);
       setLoginStatus(status);
+      ownNameRef.current = status?.display_name ? String(status.display_name) : null;
       setAuthError(null);
     } catch (e) {
       if (e instanceof ZaloApiError) setAuthError(e.message);
@@ -529,6 +536,13 @@ export function useZalo(accountId: string) {
             const tsFromSse = data?.ts ? Number(data.ts) : Date.now();
             const isoNow = Number.isFinite(tsFromSse) && tsFromSse > 0 ? new Date(tsFromSse).toISOString() : new Date().toISOString();
             const isOwn = data?.is_self === true || data?.isSelf === true || data?.is_self === 1;
+            /**
+             * Ten de DAT ten hoi thoai — chi lay tu sender_name khi tin do NGUOI KHAC
+             * gui. Bridge chay selfListen: true nen tin minh vua gui cung quay ve
+             * qua listener, luc do sender_name la ten CHU TAI KHOAN -> dung no se
+             * doi ten hoi thoai thanh ten cua minh.
+             */
+            const nameFromSender = !isOwn && data?.sender_name ? String(data.sender_name) : undefined;
             const latestContent = typeof data?.content === "string" ? data.content : null;
 
             const applyLocalState = () => {
@@ -557,7 +571,7 @@ export function useZalo(accountId: string) {
                       conversation_id: targetThread,
                       thread_id: targetThread,
                       thread_type: sseThreadType,
-                      conversation_name: sseThreadType === "group" ? `Group ${targetThread}` : data?.sender_name || `Zalo ${targetThread}`,
+                      conversation_name: sseThreadType === "group" ? `Group ${targetThread}` : nameFromSender || `Zalo ${targetThread}`,
                       account_id: accountIdRef.current,
                       latest_message_at: isoNow,
                       last_message_ts: tsFromSse,
@@ -581,12 +595,12 @@ export function useZalo(accountId: string) {
 
             if (!messageIdFromSse) {
               // Bridge đã tự persist theo msgId — chỉ ensure conversation row + refetch.
-              void ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, data?.sender_name || undefined, {
+              void ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, nameFromSender, {
                 ts: tsFromSse,
                 content: data?.content || null,
                 senderId: data?.sender_id || null,
                 isSelf: isOwn,
-              }).finally(() => {
+              }, ownNameRef.current).finally(() => {
                 applyLocalState();
                 void refreshConversations();
               });
@@ -610,12 +624,12 @@ export function useZalo(accountId: string) {
             };
 
             const savePromise = saveMessagesToSupabase(targetThread, [messageRow], accountIdRef.current, { insertOnly: true, threadType: sseThreadType });
-            const ensurePromise = ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, data?.sender_name || undefined, {
+            const ensurePromise = ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, nameFromSender, {
               ts: tsFromSse,
               content: data?.content || null,
               senderId: data?.sender_id || null,
               isSelf: isOwn,
-            });
+            }, ownNameRef.current);
 
             Promise.all([savePromise, ensurePromise]).finally(() => {
               applyLocalState();

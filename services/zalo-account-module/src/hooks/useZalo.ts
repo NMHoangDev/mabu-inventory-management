@@ -101,7 +101,14 @@ async function ensureConversationInSupabase(
   accountId: string,
   fallbackName?: string,
   latest?: { ts?: number | null; content?: string | null; senderId?: string | null; isSelf?: boolean },
-  known?: { name?: string | null; avatar?: string | null }
+  known?: { name?: string | null; avatar?: string | null },
+  /**
+   * Tên CHỦ TÀI KHOẢN đang đăng nhập. Dùng để tự chữa các bản ghi đã bị bug cũ
+   * đặt tên hội thoại = tên của chính mình (tin tự gửi quay về qua selfListen
+   * mang sender_name là tên mình). Tên đó không khớp mẫu fallback nên nếu không
+   * xét riêng thì hàm sẽ thoát sớm và không bao giờ sửa lại được.
+   */
+  ownName?: string | null
 ): Promise<void> {
   if (typeof window === "undefined" || !threadId) return;
   try {
@@ -115,7 +122,9 @@ async function ensureConversationInSupabase(
     const isFallbackName =
       !existing?.conversation_name ||
       FALLBACK_NAME_RE.test(existing.conversation_name.trim()) ||
-      (!!fallbackName && existing.conversation_name.trim() === fallbackName.trim());
+      (!!fallbackName && existing.conversation_name.trim() === fallbackName.trim()) ||
+      // Bản ghi bị bug cũ đặt thành tên của chính mình → coi như cần resolve lại.
+      (!!ownName && threadType === "user" && existing.conversation_name.trim() === ownName.trim());
     const hasWrongType = threadType === "group" && !!existing?.thread_type && existing.thread_type !== "group";
     const needsResolve = isFallbackName || hasWrongType;
     const effectiveThreadType: "user" | "group" = existing?.thread_type === "group" ? "group" : threadType;
@@ -187,6 +196,8 @@ async function saveMessagesToSupabase(threadId: string, list: unknown[], account
 
 export function useZalo(accountId: string) {
   const [loginStatus, setLoginStatus] = useState<ZaloLoginStatus | null>(null);
+  // Ten chu tai khoan — dung de tu chua hoi thoai bi bug cu dat thanh ten minh.
+  const ownNameRef = useRef<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -226,6 +237,7 @@ export function useZalo(accountId: string) {
     try {
       const status = await zaloApi.getLoginStatus(accountIdRef.current);
       setLoginStatus(status);
+      ownNameRef.current = status?.display_name ? String(status.display_name) : null;
       setAuthError(null);
     } catch (e) {
       if (e instanceof ZaloApiError) setAuthError(e.message);
@@ -316,7 +328,8 @@ export function useZalo(accountId: string) {
           accountIdRef.current,
           `Zalo ${threadId}`,
           { ts: Date.now(), content: null, isSelf: false },
-          known
+          known,
+          ownNameRef.current
         );
         // Hiện ngay trong danh sách với tên thật (nếu đã biết) thay vì chờ sync
         // — sync từ bridge có thể vẫn trả fallback cho người chưa kết bạn.
@@ -567,6 +580,16 @@ export function useZalo(accountId: string) {
             const isOwn = data?.is_self === true || data?.isSelf === true || data?.is_self === 1;
             const latestContent = typeof data?.content === "string" ? data.content : null;
 
+            /**
+             * Tên để ĐẶT/SỬA tên hội thoại — chỉ lấy từ sender_name khi tin do
+             * NGƯỜI KHÁC gửi. Bridge chạy với selfListen: true nên tin mình vừa
+             * gửi cũng quay về qua listener; lúc đó sender_name chính là tên
+             * CHỦ TÀI KHOẢN, dùng nó sẽ đổi tên hội thoại thành tên của mình.
+             * (Khác với latest_sender_name bên dưới — đó là "ai gửi tin cuối",
+             * hiện tên mình ở đó là đúng.)
+             */
+            const nameFromSender = !isOwn && data?.sender_name ? String(data.sender_name) : undefined;
+
             const applyLocalState = () => {
               setConversations((prev) => {
                 const exists = prev.some((c) => c.conversation_id === targetThread);
@@ -593,7 +616,7 @@ export function useZalo(accountId: string) {
                       conversation_id: targetThread,
                       thread_id: targetThread,
                       thread_type: sseThreadType,
-                      conversation_name: sseThreadType === "group" ? `Group ${targetThread}` : data?.sender_name || `Zalo ${targetThread}`,
+                      conversation_name: sseThreadType === "group" ? `Group ${targetThread}` : nameFromSender || `Zalo ${targetThread}`,
                       account_id: accountIdRef.current,
                       latest_message_at: isoNow,
                       last_message_ts: tsFromSse,
@@ -617,12 +640,12 @@ export function useZalo(accountId: string) {
 
             if (!messageIdFromSse) {
               // Bridge đã tự persist theo msgId — chỉ ensure conversation row + refetch.
-              void ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, data?.sender_name || undefined, {
+              void ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, nameFromSender, {
                 ts: tsFromSse,
                 content: data?.content || null,
                 senderId: data?.sender_id || null,
                 isSelf: isOwn,
-              }).finally(() => {
+              }, undefined, ownNameRef.current).finally(() => {
                 applyLocalState();
                 void refreshConversations();
               });
@@ -646,12 +669,12 @@ export function useZalo(accountId: string) {
             };
 
             const savePromise = saveMessagesToSupabase(targetThread, [messageRow], accountIdRef.current, { insertOnly: true, threadType: sseThreadType });
-            const ensurePromise = ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, data?.sender_name || undefined, {
+            const ensurePromise = ensureConversationInSupabase(targetThread, sseThreadType, accountIdRef.current, nameFromSender, {
               ts: tsFromSse,
               content: data?.content || null,
               senderId: data?.sender_id || null,
               isSelf: isOwn,
-            });
+            }, undefined, ownNameRef.current);
 
             Promise.all([savePromise, ensurePromise]).finally(() => {
               applyLocalState();
