@@ -1,5 +1,15 @@
 # Git đã loại trừ phần lớn rồi — file này chỉ thêm các artifact tạm mà
 # `docker build` không cần, giúp cache layer nhanh hơn và image nhỏ hơn.
+#
+# QUAN TRỌNG: .dockerignore KHÔNG tự đọc .gitignore — node_modules/.git vẫn bị
+# gửi vào build context nếu không loại trừ tường minh ở đây, dù không
+# Dockerfile nào COPY chúng (mỗi Dockerfile chỉ COPY đúng 1 thư mục
+# services/<module>). Trên máy ít RAM, context vài trăm MB-GB thừa này khiến
+# BuildKit hash/transfer chậm và dễ làm Docker Desktop crash giữa build.
+.git/
+node_modules/
+services/*/node_modules/
+zalo-module/
 
 # Dev artifacts (logs, scratch files, build errors)
 *.log

@@ -18,12 +18,14 @@ import {
   ChevronUp,
   Download,
   Loader2,
+  MessageCircle,
   Plus,
   RefreshCw,
   Search,
   Send,
   Trash2
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { forwardRulesApi } from "@/lib/forwardRulesApi";
 import { apiUrl } from "@/lib/basePath";
@@ -35,10 +37,11 @@ type GroupOption = { id: string; name: string };
 const DEFAULT_ACCOUNT_ID = "shop-owner";
 
 /**
- * Cùng file .rar mà app chính dùng (app/(dashboard)/zalo/chat/page.tsx) — link
- * Google Drive public sẵn, module này không tự host lại file.
+ * Extension "Markee Zalo Personal Connector" (extensions/extension-login-zalo,
+ * manifest.json) — đóng gói .zip, đặt ở public/ của module này nên tải thẳng
+ * từ chính domain của module, không qua Google Drive như app chính.
  */
-const ZALO_EXTENSION_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id=10rI_grXfUD8Q4kdDXfdSmdHLS4Ff0iKq";
+const ZALO_EXTENSION_DOWNLOAD_URL = "/extension-login-zalo.zip";
 
 function statusPillCls(status: string) {
   switch (status) {
@@ -229,7 +232,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
             href={ZALO_EXTENSION_DOWNLOAD_URL}
             target="_blank"
             rel="noopener noreferrer"
-            download="extension-login-zalo.rar"
+            download="extension-login-zalo.zip"
             className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             title="Tải extension Chrome đăng nhập Zalo về máy"
           >
@@ -338,6 +341,14 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    <Link
+                      href={`/chat?accountId=${encodeURIComponent(rule.account_id)}&threadId=${encodeURIComponent(rule.master_thread_id)}&threadName=${encodeURIComponent(rule.master_thread_name || rule.master_thread_id)}`}
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                      title="Vào chat với nhóm chính của luật này"
+                    >
+                      <MessageCircle className="h-3 w-3" />
+                      Chat
+                    </Link>
                     <button
                       type="button"
                       onClick={() => void toggleLogs(rule)}
