@@ -1,20 +1,22 @@
 "use client";
 
 /**
- * Login độc lập của module — không còn phụ thuộc cookie set từ app chính.
- * Cùng flow với app/login của app chính: email + password, bootstrap mật
- * khẩu ở lần đăng nhập đầu (xem app/api/auth/login/route.ts).
+ * Login độc lập của module — email+password (bootstrap ở lần đăng nhập đầu,
+ * xem app/api/auth/login/route.ts) + Đăng nhập Google (xem
+ * app/api/auth/google/route.ts, GoogleSignInButton.tsx) — cả 2 cách đều check
+ * theo bảng `staff`, cùng dẫn tới 1 session (cookie current_staff_id).
  */
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Loader2, Lock, LogIn, Mail } from "lucide-react";
+import { AlertTriangle, Loader2, Lock, LogIn, Mail, Send } from "lucide-react";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
 export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="flex min-h-screen items-center justify-center bg-slate-50">
           <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
         </div>
       }
@@ -77,29 +79,46 @@ function LoginPageInner() {
     }
   }
 
+  function handleGoogleSuccess() {
+    setError(null);
+    router.replace(nextPath);
+    router.refresh();
+  }
+
   if (checkingSession) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-emerald-50 to-teal-50 p-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
+          <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg">
+            <Send className="h-7 w-7" />
+          </div>
           <h1 className="text-2xl font-bold text-slate-900">Đăng nhập</h1>
-          <p className="mt-1 text-sm text-slate-600">Chuyển tiếp tin nhắn Zalo — nhập email và mật khẩu nhân viên.</p>
+          <p className="mt-1 text-sm text-slate-600">Chuyển tiếp tin nhắn Zalo</p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           {error ? (
             <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
           ) : null}
+
+          <GoogleSignInButton onSuccess={handleGoogleSuccess} onError={setError} />
+
+          <div className="my-4 flex items-center gap-3 text-[11px] font-medium uppercase text-slate-400">
+            <div className="h-px flex-1 bg-slate-200" />
+            hoặc dùng mật khẩu
+            <div className="h-px flex-1 bg-slate-200" />
+          </div>
 
           <form
             onSubmit={(e) => {
@@ -115,11 +134,10 @@ function LoginPageInner() {
                 <input
                   type="email"
                   autoComplete="username"
-                  autoFocus
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="ten@congty.com"
-                  className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none"
+                  className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -133,7 +151,7 @@ function LoginPageInner() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Nhập mật khẩu"
-                  className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none"
+                  className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:outline-none"
                 />
               </div>
               <p className="mt-1.5 text-[11px] text-slate-400">
@@ -143,7 +161,7 @@ function LoginPageInner() {
             <button
               type="submit"
               disabled={submitting || !email.trim() || password.length < 4}
-              className="flex w-full items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
               Đăng nhập

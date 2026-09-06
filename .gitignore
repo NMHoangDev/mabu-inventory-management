@@ -50,3 +50,9 @@ INTERNAL_HANDBOOK.md
 # Standalone apps directories (not part of the monorepo)
 apps/
 apps.old/
+
+# zalo-module (module chat Zalo độc lập, copy từ scraper-linkedin repo) — backend Python
+zalo-module/backend/.venv
+zalo-module/backend/__pycache__
+zalo-module/backend/**/__pycache__
+zalo-module/docker-compose.override.yml

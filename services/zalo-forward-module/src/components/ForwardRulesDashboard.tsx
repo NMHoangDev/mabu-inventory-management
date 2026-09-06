@@ -12,7 +12,6 @@
 
 import {
   AlertTriangle,
-  ArrowLeft,
   Check,
   ChevronDown,
   ChevronUp,
@@ -29,7 +28,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { forwardRulesApi } from "@/lib/forwardRulesApi";
 import { apiUrl } from "@/lib/basePath";
-import StaffBadge from "@/components/StaffBadge";
 import type { ZaloForwardRule, ZaloForwardLog } from "@/lib/types";
 
 type GroupOption = { id: string; name: string };
@@ -217,15 +215,9 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col gap-3 p-4">
+    <div className="flex flex-col gap-3">
       <header className="flex items-start justify-between gap-2">
         <div>
-          <a
-            href={`${process.env.NEXT_PUBLIC_MAIN_APP_URL || "https://timetech.markeeai.com"}/zalo/chat`}
-            className="mb-1 inline-flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"
-          >
-            <ArrowLeft className="h-4 w-4" /> InvoiceFlow Manager
-          </a>
           <h1 className="text-xl font-bold text-slate-900">Chuyển tiếp tin nhắn tự động</h1>
           <p className="text-xs text-slate-500">
             Module riêng — chọn 1 nhóm chính, mọi tin nhắn (text/ảnh/file/sticker) gửi trong nhóm đó sẽ
@@ -233,7 +225,6 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <StaffBadge />
           <a
             href={ZALO_EXTENSION_DOWNLOAD_URL}
             download="extension-login-zalo.zip"
