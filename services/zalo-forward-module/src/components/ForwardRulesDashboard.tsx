@@ -58,22 +58,75 @@ function statusPillCls(status: string) {
 export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff" }) {
   const [accountId, setAccountId] = useState(DEFAULT_ACCOUNT_ID);
   const [accountLabel, setAccountLabel] = useState<string | null>(null);
+  const [accountStatus, setAccountStatus] = useState<string | null>(null);
+  const [reimporting, setReimporting] = useState(false);
   const canManage = role === "admin";
 
   // Module chỉ vận hành đúng 1 tài khoản Zalo — tự lấy account duy nhất từ
-  // bridge (qua /api/accounts), không cần UI chọn/đổi account.
+  // bridge (qua /api/accounts), không cần UI chọn/đổi account. Poll mỗi 5s để
+  // nút "Đăng nhập lại" tự ẩn/hiện đúng theo trạng thái kết nối thật.
   useEffect(() => {
-    fetch(apiUrl("/api/accounts"), { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data) => {
+    let cancelled = false;
+    async function pollAccount() {
+      try {
+        const res = await fetch(apiUrl("/api/accounts"), { cache: "no-store" });
+        const data = await res.json();
+        if (cancelled) return;
         const first = Array.isArray(data?.accounts) ? data.accounts[0] : null;
         if (first?.account_id) {
           setAccountId(first.account_id);
           setAccountLabel(first.display_name || first.account_id);
+          setAccountStatus(first.status || null);
         }
-      })
-      .catch(() => undefined);
+      } catch {
+        // ignore — giữ nguyên trạng thái cũ, thử lại tick sau
+      }
+    }
+    void pollAccount();
+    const id = setInterval(pollAccount, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
+
+  // Đăng nhập lại Zalo qua extension (cùng cơ chế với ZaloAuthCard của
+  // zalo-account-module) — module này không có chat/QR UI riêng, chỉ cần 1
+  // nút trigger extension lấy cookie session khi tài khoản chưa/đã mất kết nối.
+  async function handleReimport() {
+    const extApi = window as unknown as {
+      __zaloExtension?: {
+        ping: () => Promise<{ installed: boolean; version: string }>;
+        importSession: (opts?: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
+      };
+    };
+    const ext = extApi.__zaloExtension;
+    if (!ext) {
+      setError("Chưa cài extension Zalo. Bấm \"Tải extension\" ở trên để cài.");
+      return;
+    }
+    setReimporting(true);
+    try {
+      await ext.ping().catch(() => undefined);
+      const bridgeUrl = process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL || "http://localhost:3001";
+      const result = await ext.importSession({
+        account_id: accountId,
+        owner_id: accountId,
+        backend_url: bridgeUrl,
+        login_timeout_ms: 90_000
+      });
+      if (result.success) {
+        setNotice("Đăng nhập Zalo thành công!");
+        setError(null);
+      } else {
+        setError(result.error || "Đăng nhập thất bại");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi kết nối extension");
+    } finally {
+      setReimporting(false);
+    }
+  }
 
   const [rules, setRules] = useState<ZaloForwardRule[]>([]);
   const [groups, setGroups] = useState<GroupOption[]>([]);
@@ -184,6 +237,18 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
             Tải extension
           </a>
           <span className="text-xs text-slate-400">Tài khoản: {accountLabel || accountId}</span>
+          {accountStatus && accountStatus !== "connected" ? (
+            <button
+              type="button"
+              onClick={() => void handleReimport()}
+              disabled={reimporting}
+              className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+              title="Tài khoản chưa/mất kết nối Zalo — bấm để đăng nhập lại qua extension"
+            >
+              {reimporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Đăng nhập lại
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void refresh()}
