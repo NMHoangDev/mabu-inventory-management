@@ -1,18 +1,15 @@
 /**
  * Chặn truy cập trực tiếp vào toàn bộ trang admin của module khi chưa đăng
- * nhập ở app chính.
+ * nhập.
  *
- * Module này KHÔNG có login form riêng — nó chỉ được truy cập sau khi staff
- * đã đăng nhập ở app chính (InvoiceFlow Manager) và có cookie
- * `current_staff_id`. Nếu thiếu/hết hạn cookie đó, thay vì redirect tới
- * /login (không tồn tại ở đây), điều hướng tới /login-required — trang tĩnh
- * hướng dẫn quay lại app chính để đăng nhập.
+ * Module này có login form riêng ở /login (app/api/auth/login) — không còn
+ * bắt buộc phải đăng nhập ở app chính trước nữa, tuy vẫn dùng chung bảng
+ * `staff` + cookie `current_staff_id` nên một khi đã đăng nhập ở app chính
+ * VÀ có STAFF_COOKIE_DOMAIN dùng chung, cookie đó vẫn được nhận luôn (không
+ * cần đăng nhập lại).
  *
  * Ported từ middleware.ts của app chính (cùng cách verify: REST fetch trực
  * tiếp tới Supabase, Edge-runtime-safe, không dùng `pg`).
- *
- * Deploy ở subdomain riêng (vd zalo-accounts.timetech.markeeai.com), domain
- * root — không dùng basePath/path-prefix.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -28,10 +25,14 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABAS
 const KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-function redirectToLoginRequired(req: NextRequest, clearCookie = false) {
+function redirectToLogin(req: NextRequest, clearCookie = false) {
   const url = req.nextUrl.clone();
-  url.pathname = "/login-required";
+  const nextPath = `${url.pathname}${url.search}`;
+  url.pathname = "/login";
   url.search = "";
+  if (nextPath && nextPath !== "/login") {
+    url.searchParams.set("next", nextPath);
+  }
   const res = NextResponse.redirect(url);
   if (clearCookie) {
     res.cookies.set(STAFF_COOKIE_NAME, "", {
@@ -51,7 +52,7 @@ export async function middleware(req: NextRequest) {
 
   const staffId = req.cookies.get(STAFF_COOKIE_NAME)?.value;
   if (!staffId) {
-    return redirectToLoginRequired(req);
+    return redirectToLogin(req);
   }
 
   if (!SUPABASE_URL || !KEY) {
@@ -78,9 +79,9 @@ export async function middleware(req: NextRequest) {
     // Lỗi mạng khi verify → fail-safe, coi như chưa đăng nhập.
   }
 
-  return redirectToLoginRequired(req, true);
+  return redirectToLogin(req, true);
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|login-required|favicon.ico).*)"]
+  matcher: ["/((?!api|_next/static|_next/image|login|favicon.ico).*)"]
 };

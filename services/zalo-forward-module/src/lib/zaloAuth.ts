@@ -83,6 +83,19 @@ export async function getCurrentStaff(req: NextRequest): Promise<StaffSession> {
   }
 }
 
+/**
+ * Phiên bản strict: nếu KHÔNG có cookie/header → trả null thay vì fallback
+ * admin. Dùng cho route login (biết rõ "đã đăng nhập hay chưa").
+ */
+export async function getCurrentStaffStrict(req: NextRequest): Promise<StaffSession | null> {
+  const headerId = req.headers.get("x-staff-id") || null;
+  const cookieId = req.cookies.get("current_staff_id")?.value || null;
+  const staffId = cookieId || headerId;
+  if (!staffId) return null;
+  const staff = await getCurrentStaff(req);
+  return staff.id ? staff : null;
+}
+
 export async function requireAdmin(req: NextRequest) {
   const staff = await getCurrentStaff(req);
   if (staff.role !== "admin") {
@@ -102,3 +115,10 @@ export function canBroadcastTo(staff: StaffSession, accountId: string): boolean 
 }
 
 export const STAFF_COOKIE_NAME = "current_staff_id";
+
+export const STAFF_COOKIE_OPTS = {
+  path: "/",
+  sameSite: "lax" as const,
+  httpOnly: false,
+  maxAge: 60 * 60 * 24 * 7 // 7 ngày
+};

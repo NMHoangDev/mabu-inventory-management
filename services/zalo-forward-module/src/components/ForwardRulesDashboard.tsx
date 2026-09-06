@@ -3,10 +3,11 @@
 /**
  * Port từ components/zalo/forward/ZaloForwardRulesDashboard.tsx (app chính) —
  * cùng UI/logic, chỉ đổi: (1) không dùng useApp()/ZaloAccountSwitcher của app
- * chính (module độc lập, không có AppProvider) — thay bằng dropdown chọn
- * account tối giản, persist vào localStorage; (2) gọi API nội bộ module qua
- * apiUrl() (helper no-op, module deploy ở domain root qua subdomain riêng)
- * thay vì /api/zalo/*.
+ * chính (module độc lập, không có AppProvider) — module này chỉ vận hành
+ * đúng 1 tài khoản Zalo nên KHÔNG cần dropdown chọn account, tự lấy account
+ * duy nhất từ /api/accounts (fallback "shop-owner" nếu bridge chưa có account
+ * nào); (2) gọi API nội bộ module qua apiUrl() (helper no-op, module deploy ở
+ * domain root qua subdomain riêng) thay vì /api/zalo/*.
  */
 
 import {
@@ -25,11 +26,11 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { forwardRulesApi } from "@/lib/forwardRulesApi";
 import { apiUrl } from "@/lib/basePath";
-import type { ZaloForwardRule, ZaloForwardLog, ZaloAccountOption } from "@/lib/types";
+import StaffBadge from "@/components/StaffBadge";
+import type { ZaloForwardRule, ZaloForwardLog } from "@/lib/types";
 
 type GroupOption = { id: string; name: string };
 
-const LAST_ACCOUNT_KEY = "zalo-forward-current-account-id";
 const DEFAULT_ACCOUNT_ID = "shop-owner";
 
 function statusPillCls(status: string) {
@@ -47,48 +48,25 @@ function statusPillCls(status: string) {
   }
 }
 
-function AccountPicker({ accountId, onChange }: { accountId: string; onChange: (id: string) => void }) {
-  const [accounts, setAccounts] = useState<ZaloAccountOption[]>([]);
+export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff" }) {
+  const [accountId, setAccountId] = useState(DEFAULT_ACCOUNT_ID);
+  const [accountLabel, setAccountLabel] = useState<string | null>(null);
+  const canManage = role === "admin";
 
+  // Module chỉ vận hành đúng 1 tài khoản Zalo — tự lấy account duy nhất từ
+  // bridge (qua /api/accounts), không cần UI chọn/đổi account.
   useEffect(() => {
     fetch(apiUrl("/api/accounts"), { cache: "no-store" })
       .then((r) => r.json())
-      .then((data) => setAccounts(Array.isArray(data?.accounts) ? data.accounts : []))
-      .catch(() => setAccounts([]));
+      .then((data) => {
+        const first = Array.isArray(data?.accounts) ? data.accounts[0] : null;
+        if (first?.account_id) {
+          setAccountId(first.account_id);
+          setAccountLabel(first.display_name || first.account_id);
+        }
+      })
+      .catch(() => undefined);
   }, []);
-
-  if (accounts.length === 0) {
-    return <span className="text-xs text-slate-400">Tài khoản: {accountId}</span>;
-  }
-
-  return (
-    <select
-      value={accountId}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
-    >
-      {accounts.map((a) => (
-        <option key={a.account_id} value={a.account_id}>
-          {a.display_name || a.account_id}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff" }) {
-  const [accountId, setAccountId] = useState(DEFAULT_ACCOUNT_ID);
-  const canManage = role === "admin";
-
-  useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem(LAST_ACCOUNT_KEY) : null;
-    if (saved) setAccountId(saved);
-  }, []);
-
-  function handleAccountChange(id: string) {
-    setAccountId(id);
-    if (typeof window !== "undefined") window.localStorage.setItem(LAST_ACCOUNT_KEY, id);
-  }
 
   const [rules, setRules] = useState<ZaloForwardRule[]>([]);
   const [groups, setGroups] = useState<GroupOption[]>([]);
@@ -186,7 +164,8 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <AccountPicker accountId={accountId} onChange={handleAccountChange} />
+          <StaffBadge />
+          <span className="text-xs text-slate-400">Tài khoản: {accountLabel || accountId}</span>
           <button
             type="button"
             onClick={() => void refresh()}
