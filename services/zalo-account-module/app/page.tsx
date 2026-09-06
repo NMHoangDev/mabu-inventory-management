@@ -191,19 +191,47 @@ export default function HomePage() {
     }
   }
 
+  /**
+   * "Kết nối lại" — trước đây gọi /api/accounts/[id]/reconnect (proxy tới
+   * bridge POST /auth/reconnect) — route đó KHÔNG TỒN TẠI trên bridge (bridge
+   * chỉ có /api/all-platform/zalo/auth/reconnect, và endpoint đó chỉ restart
+   * WS bằng credential ĐÃ LƯU, không giúp gì khi session thật sự hết hạn) →
+   * luôn 404. Đổi hẳn sang cùng cơ chế "Đăng nhập Zalo" của ZaloAuthCard: gọi
+   * extension lấy cookie mới từ Zalo Web, gửi cho bridge import-session —
+   * bridge tự lưu session (disk + Supabase zalo_accounts) khi import thành
+   * công.
+   */
   async function handleReconnect(acc: ZaloAccountSummary) {
+    const extApi = window as unknown as {
+      __zaloExtension?: {
+        ping: () => Promise<{ installed: boolean; version: string }>;
+        importSession: (opts?: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
+      };
+    };
+    const ext = extApi.__zaloExtension;
+    if (!ext) {
+      setError('Chưa cài extension Zalo. Vào trang Chat để tải extension, cài xong quay lại bấm "Kết nối lại".');
+      return;
+    }
     setReconnectingId(acc.account_id);
     setError(null);
     try {
-      const res = await fetch(apiUrl(`/api/accounts/${encodeURIComponent(acc.account_id)}/reconnect`), {
-        method: "POST"
+      await ext.ping().catch(() => undefined);
+      const bridgeUrl = process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL || "http://localhost:3001";
+      const result = await ext.importSession({
+        account_id: acc.account_id,
+        owner_id: acc.account_id,
+        backend_url: bridgeUrl,
+        login_timeout_ms: 90_000
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setNotice(`Đã yêu cầu kết nối lại "${acc.display_name}".`);
-      await loadAll();
+      if (result.success) {
+        setNotice(`Đã đăng nhập lại "${acc.display_name}".`);
+        await loadAll();
+      } else {
+        setError(result.error || "Đăng nhập lại thất bại");
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không kết nối lại được.");
+      setError(e instanceof Error ? e.message : "Lỗi kết nối extension");
     } finally {
       setReconnectingId(null);
     }
@@ -347,27 +375,31 @@ export default function HomePage() {
                     </td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-end gap-1">
-                        <Link
-                          href={`/chat?accountId=${encodeURIComponent(acc.account_id)}`}
-                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                          title={`Vào chat với tài khoản ${acc.display_name || acc.account_id}`}
-                        >
-                          <MessageCircle className="h-3 w-3" />
-                          Chat
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => void handleReconnect(acc)}
-                          disabled={reconnectingId === acc.account_id}
-                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-                        >
-                          {reconnectingId === acc.account_id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-3 w-3" />
-                          )}
-                          Kết nối lại
-                        </button>
+                        {acc.status === "connected" ? (
+                          <Link
+                            href={`/chat?accountId=${encodeURIComponent(acc.account_id)}`}
+                            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                            title={`Vào chat với tài khoản ${acc.display_name || acc.account_id}`}
+                          >
+                            <MessageCircle className="h-3 w-3" />
+                            Chat
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleReconnect(acc)}
+                            disabled={reconnectingId === acc.account_id}
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                            title="Tài khoản chưa/mất kết nối — bấm để đăng nhập lại qua extension"
+                          >
+                            {reconnectingId === acc.account_id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-3 w-3" />
+                            )}
+                            Kết nối lại
+                          </button>
+                        )}
                         {isAdmin ? (
                           <>
                             <button
