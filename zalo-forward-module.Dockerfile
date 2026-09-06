@@ -35,6 +35,7 @@ COPY --from=builder --chown=forwardmod:nodejs /app/.next ./.next
 COPY --from=builder --chown=forwardmod:nodejs /app/next.config.mjs ./next.config.mjs
 COPY --from=builder --chown=forwardmod:nodejs /app/server.js ./server.js
 COPY --from=builder --chown=forwardmod:nodejs /app/worker ./worker
+COPY --from=builder --chown=forwardmod:nodejs /app/public ./public
 
 USER forwardmod
 

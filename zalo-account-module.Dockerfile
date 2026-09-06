@@ -33,6 +33,7 @@ RUN npm install --omit=dev --no-audit --no-fund \
 
 COPY --from=builder --chown=acctmod:nodejs /app/.next ./.next
 COPY --from=builder --chown=acctmod:nodejs /app/next.config.mjs ./next.config.mjs
+COPY --from=builder --chown=acctmod:nodejs /app/public ./public
 
 USER acctmod
 
