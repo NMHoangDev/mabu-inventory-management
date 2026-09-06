@@ -17,7 +17,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { zaloApi, ZaloApiError, ZaloConversation, ZaloLoginStatus, ZaloMessage } from "@/lib/zaloApiClient";
+import { zaloApi, absoluteBridgeUrl, ZaloApiError, ZaloConversation, ZaloLoginStatus, ZaloMessage } from "@/lib/zaloApiClient";
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -706,7 +706,7 @@ export function useZalo(accountId: string) {
     setAuthLoading(true);
     try {
       await ext.ping().catch(() => undefined);
-      const bridgeUrl = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL) || "http://localhost:3001";
+      const bridgeUrl = absoluteBridgeUrl();
       const result = await ext.importSession({
         account_id: accountIdRef.current,
         owner_id: accountIdRef.current,

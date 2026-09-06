@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2, MessageCircle, Plus, RefreshCw, Smartphone, X, Check, Pencil, Trash2 } from "lucide-react";
 import { apiUrl } from "@/lib/basePath";
+import { absoluteBridgeUrl } from "@/lib/zaloApiClient";
 import type { StaffRecord, ZaloAccountSummary } from "@/lib/types";
 
 function getCookie(name: string): string | null {
@@ -192,7 +193,7 @@ export default function AccountsPage() {
     setError(null);
     try {
       await ext.ping().catch(() => undefined);
-      const bridgeUrl = process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL || "http://localhost:3001";
+      const bridgeUrl = absoluteBridgeUrl();
       const result = await ext.importSession({
         account_id: acc.account_id,
         owner_id: acc.account_id,

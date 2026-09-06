@@ -83,5 +83,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|login|favicon.ico).*)"]
+  matcher: ["/((?!api|zalo-bridge|_next/static|_next/image|login|favicon.ico).*)"]
 };

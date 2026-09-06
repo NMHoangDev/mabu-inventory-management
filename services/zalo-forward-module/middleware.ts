@@ -71,5 +71,5 @@ export async function middleware(req: NextRequest) {
 export const config = {
   // Loại trừ toàn bộ /api — mỗi route API tự check quyền qua src/lib/zaloAuth.ts
   // (canViewAccount/canBroadcastTo), không chặn ở tầng middleware.
-  matcher: ["/((?!api|_next/static|_next/image|login|favicon.ico).*)"]
+  matcher: ["/((?!api|zalo-bridge|_next/static|_next/image|login|favicon.ico).*)"]
 };

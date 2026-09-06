@@ -28,6 +28,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { forwardRulesApi } from "@/lib/forwardRulesApi";
 import { apiUrl } from "@/lib/basePath";
+import { absoluteBridgeUrl } from "@/lib/zaloApiClient";
 import type { ZaloForwardRule, ZaloForwardLog } from "@/lib/types";
 
 type GroupOption = { id: string; name: string };
@@ -115,7 +116,7 @@ export default function ForwardRulesDashboard({ role }: { role: "admin" | "staff
     setReimporting(true);
     try {
       await ext.ping().catch(() => undefined);
-      const bridgeUrl = process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL || "http://localhost:3001";
+      const bridgeUrl = absoluteBridgeUrl();
       const result = await ext.importSession({
         account_id: accountId,
         owner_id: accountId,

@@ -15,6 +15,19 @@ const BRIDGE_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_ZALO_BRIDGE_URL) ||
   "http://localhost:3001";
 
+/**
+ * URL bridge dạng TUYỆT ĐỐI — chỉ dùng khi đưa cho extension (`backend_url`).
+ * BRIDGE_URL có thể là đường dẫn tương đối ("/zalo-bridge") để fetch cùng
+ * origin trong trang, nhưng extension fetch từ service worker của chính nó
+ * (origin chrome-extension://) nên đường dẫn tương đối resolve sai và báo
+ * "Failed to fetch" — phải nối với origin của trang trước khi truyền sang.
+ */
+export function absoluteBridgeUrl(): string {
+  if (/^https?:\/\//i.test(BRIDGE_URL)) return BRIDGE_URL;
+  if (typeof window === "undefined") return BRIDGE_URL;
+  return `${window.location.origin}${BRIDGE_URL.startsWith("/") ? "" : "/"}${BRIDGE_URL}`;
+}
+
 export class ZaloApiError extends Error {
   status: number;
   code?: string;
