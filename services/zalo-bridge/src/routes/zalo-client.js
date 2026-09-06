@@ -423,6 +423,67 @@ router.get('/all-platform/zalo/user-info', async (req, res) => {
   }
 });
 
+// ── Tìm người theo SỐ ĐIỆN THOẠI (kể cả người CHƯA kết bạn) ───────────────────
+//
+// zca-js `findUser` gọi endpoint /api/friend/profile/get của Zalo — trả về hồ
+// sơ công khai kể cả khi 2 bên chưa là bạn bè. Kèm `getFriendRequestStatus` để
+// UI biết trước đây là bạn bè hay người lạ (khác nhau về rủi ro khi nhắn).
+//
+// Gửi tin cho người tìm được thì dùng lại endpoint send có sẵn với id dạng
+// `u:<uid>` (xem parseThreadId) — KHÔNG cần endpoint gửi riêng.
+//
+// Lưu ý: zca-js chỉ tự đổi "0..." → "84..." khi ngôn ngữ session là "vi"
+// (xem zca-js/dist/apis/findUser.js), nên chuẩn hoá ở đây cho chắc, không phụ
+// thuộc vào ngôn ngữ mà tài khoản đang đặt.
+router.get('/all-platform/zalo/find-user', async (req, res) => {
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+
+    let phone = String(req.query.phone || '').replace(/\D/g, '');
+    if (!phone) return res.status(400).json({ error: 'missing phone' });
+    if (phone.startsWith('0')) phone = '84' + phone.slice(1);
+
+    let user;
+    try {
+      user = await ctx.api.findUser(phone);
+    } catch (e) {
+      logger.warn(`[${ctx.accountId}] findUser failed phone=${phone}: ${e.message}`);
+      return res.status(502).json({ error: e.message });
+    }
+
+    // findUser nuốt lỗi code 216 (số không có Zalo / bật ẩn thông tin) và trả
+    // về rỗng thay vì throw → phải tự kiểm tra, nếu không UI sẽ hiện thẻ trống.
+    const uid = user && (user.uid || user.userId);
+    if (!uid) {
+      return res.status(404).json({ error: 'not_found', message: 'Không tìm thấy tài khoản Zalo cho số này' });
+    }
+
+    let isFriend = null;
+    try {
+      const st = await ctx.api.getFriendRequestStatus(String(uid));
+      if (st && typeof st.is_friend !== 'undefined') isFriend = st.is_friend === 1;
+    } catch (_) {
+      // Không lấy được trạng thái bạn bè thì vẫn trả kết quả tìm kiếm.
+    }
+
+    res.json({
+      ok: true,
+      user: {
+        uid: String(uid),
+        conversation_id: `u:${uid}`,
+        display_name: user.display_name || user.zalo_name || `Zalo ${uid}`,
+        avatar: user.avatar || null,
+        phone,
+        is_friend: isFriend
+      }
+    });
+  } catch (err) {
+    logger.error('GET find-user error', { err: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Conversations: sync (force refresh) ────────────────────────────────────────
 //
 // Đơn giản là gọi lại /conversations rồi trả summary. Đếm số bạn + nhóm.

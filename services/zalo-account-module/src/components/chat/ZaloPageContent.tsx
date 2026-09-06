@@ -17,6 +17,15 @@ export function ZaloPageContent({ accountId }: { accountId: string }) {
 
   const currentConv = z.conversations.find((c) => c.conversation_id === z.openConvId) || null;
 
+  // Mở luôn hội thoại vừa nhắn; sync để nó xuất hiện trong danh sách (hội thoại
+  // với người lạ chưa từng có trong list trước đó). Dùng chung cho cả bản
+  // desktop lẫn bản mobile của ZaloConversationList bên dưới.
+  function handleStrangerMessaged(conversationId: string) {
+    void z.openConversation(conversationId);
+    z.showToast('Đã gửi "Hi".', true);
+    void z.syncConversations();
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ZaloAuthCard
@@ -48,7 +57,15 @@ export function ZaloPageContent({ accountId }: { accountId: string }) {
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,3fr)_minmax(0,7fr)] gap-3">
         <div className="hidden min-h-0 lg:block">
-          <ZaloConversationList conversations={z.conversations} loading={z.loadingConvs} openConvId={z.openConvId} onOpen={z.openConversation} onSync={z.syncConversations} />
+          <ZaloConversationList
+            conversations={z.conversations}
+            loading={z.loadingConvs}
+            openConvId={z.openConvId}
+            onOpen={z.openConversation}
+            onSync={z.syncConversations}
+            accountId={accountId}
+            onStrangerMessaged={handleStrangerMessaged}
+          />
         </div>
 
         <div className="min-h-0">
@@ -68,7 +85,15 @@ export function ZaloPageContent({ accountId }: { accountId: string }) {
       </div>
 
       <div className="block min-h-[300px] lg:hidden">
-        <ZaloConversationList conversations={z.conversations} loading={z.loadingConvs} openConvId={z.openConvId} onOpen={z.openConversation} onSync={z.syncConversations} />
+        <ZaloConversationList
+          conversations={z.conversations}
+          loading={z.loadingConvs}
+          openConvId={z.openConvId}
+          onOpen={z.openConversation}
+          onSync={z.syncConversations}
+          accountId={accountId}
+          onStrangerMessaged={handleStrangerMessaged}
+        />
       </div>
 
       {z.toast && (
