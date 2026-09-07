@@ -164,9 +164,9 @@ export default function ForwardRulesDashboard({
     try {
       const [rulesRes, convRes] = await Promise.all([
         forwardRulesApi.list(accountId),
-        fetch(apiUrl(`/api/conversations?account_id=${encodeURIComponent(accountId)}&limit=500`), {
+        fetch(apiUrl(`/api/zalo/conversations?account_id=${encodeURIComponent(accountId)}&limit=500`), {
           cache: "no-store"
-        }).then((r) => r.json())
+        }).then((r) => (r.ok ? r.json() : Promise.resolve({})))
       ]);
       setRules(rulesRes.rules || []);
       type ConvRow = { thread_id: string; thread_type: string; conversation_name: string | null };
