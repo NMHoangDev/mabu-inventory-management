@@ -631,13 +631,21 @@ router.post('/all-platform/zalo/action/invite-group-by-phone', async (req, res) 
     }
 
     try {
-      // addUserToGroup: thêm THẲNG vào nhóm mình đang quản trị (không cần
-      // người kia bấm chấp nhận) — đúng ngữ cảnh "mời vào nhóm MÌNH".
-      const result = await ctx.api.addUserToGroup(resolved.uid, groupId);
-      const errorMembers = Array.isArray(result?.errorMembers) ? result.errorMembers : [];
-      if (errorMembers.includes(resolved.uid)) {
-        const detail = result?.error_data?.[resolved.uid];
-        return res.status(502).json({ error: Array.isArray(detail) ? detail.join(', ') : 'add_to_group_failed', phone, uid: resolved.uid });
+      // inviteUserToGroups (gửi LỜI MỜI, người kia phải bấm chấp nhận) thay vì
+      // addUserToGroup (thêm THẲNG, /api/group/invite/v2) — đổi sau khi phát
+      // hiện addUserToGroup fail hàng loạt với người CHƯA kết bạn: Zalo có cài
+      // đặt riêng tư "ai được thêm mình vào nhóm" (mặc định thường chỉ bạn bè)
+      // chặn add thẳng, trong khi lời mời (invite/multi) không bị giới hạn đó.
+      // Cũng đúng nghĩa "mời" hơn add thẳng không hỏi ý kiến người ta.
+      const result = await ctx.api.inviteUserToGroups(resolved.uid, groupId);
+      const groupResult = result?.grid_message_map?.[groupId];
+      logger.info(`[${ctx.accountId}] inviteUserToGroups phone=${phone} group=${groupId} result=${JSON.stringify(groupResult ?? result)}`);
+      if (groupResult && Number(groupResult.error_code) !== 0) {
+        return res.status(502).json({
+          error: groupResult.error_message || `error_code ${groupResult.error_code}`,
+          phone,
+          uid: resolved.uid
+        });
       }
     } catch (e) {
       return res.status(502).json({ error: e.message, phone, uid: resolved.uid });
