@@ -283,7 +283,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
       ) : null}
 
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden h-screen shrink-0 overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-out lg:flex ${collapsed ? "w-[60px]" : "w-[216px]"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-40 hidden h-screen shrink-0 overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-out lg:flex ${collapsed ? "w-[60px]" : "w-[240px]"}`}>
         {renderSidebar(collapsed)}
       </aside>
 
@@ -302,8 +302,8 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
       ) : null}
 
-      <div className={`flex min-h-screen min-w-0 flex-col transition-[margin-left] duration-200 ease-out ${collapsed ? "lg:ml-[60px]" : "lg:ml-[216px]"}`}>
-        <header className={`fixed inset-x-0 top-0 z-30 border-b bg-card/95 backdrop-blur-xl transition-[left] duration-200 ease-out ${collapsed ? "lg:left-[60px]" : "lg:left-[216px]"}`}>
+      <div className={`flex min-h-screen min-w-0 flex-col transition-[margin-left] duration-200 ease-out ${collapsed ? "lg:ml-[60px]" : "lg:ml-[240px]"}`}>
+        <header className={`fixed inset-x-0 top-0 z-30 border-b bg-card/95 backdrop-blur-xl transition-[left] duration-200 ease-out ${collapsed ? "lg:left-[60px]" : "lg:left-[240px]"}`}>
           <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
             <button
               onClick={() => setMobileOpen(true)}

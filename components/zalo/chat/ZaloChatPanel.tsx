@@ -59,6 +59,38 @@ interface Props {
   onSync: () => void;
 }
 
+/** Avatar thật (nếu có) — fallback về vòng tròn chữ cái đầu khi thiếu ảnh
+ * hoặc ảnh lỗi (onError), không bao giờ để lộ icon "ảnh vỡ". */
+function ConversationAvatar({
+  avatarUrl,
+  label,
+  className,
+}: {
+  avatarUrl?: string | null;
+  label: string;
+  className: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  if (avatarUrl && !imgError) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt={label}
+        onError={() => setImgError(true)}
+        className={`shrink-0 rounded-full object-cover ${className}`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 font-bold text-white ${className}`}
+    >
+      {label?.[0]?.toUpperCase() || "?"}
+    </div>
+  );
+}
+
 function formatTime(dateStr?: string | null): string {
   if (!dateStr) return "";
   const t = new Date(dateStr);
@@ -196,9 +228,11 @@ export function ZaloChatPanel({
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-sm font-bold text-white">
-            {conv.conversation_name?.[0]?.toUpperCase() || "?"}
-          </div>
+          <ConversationAvatar
+            avatarUrl={conv.avatar_url}
+            label={conv.conversation_name || "?"}
+            className="h-10 w-10 text-sm"
+          />
           <div className="min-w-0">
             <div className="truncate text-base font-bold text-slate-800">
               {conv.conversation_name || "Không tên"}

@@ -117,6 +117,19 @@ export type ZaloLoginStatus = {
   inbox_id?: number | string | null;
 };
 
+/** Kết quả tra số điện thoại — có thể là người CHƯA kết bạn. */
+export type ZaloStrangerUser = {
+  uid: string;
+  /** Dạng "u:<uid>" — dùng thẳng làm conversation_id khi gửi tin. */
+  conversation_id: string;
+  display_name: string;
+  avatar: string | null;
+  /** Số đã chuẩn hoá về dạng 84... */
+  phone: string;
+  /** null = không xác định được trạng thái bạn bè. */
+  is_friend: boolean | null;
+};
+
 export type ZaloConversation = {
   conversation_id: string;
   conversation_name: string;
@@ -346,6 +359,24 @@ export const zaloApi = {
         return null;
       }
       return null;
+    }
+  },
+
+  /**
+   * Tìm người theo SỐ ĐIỆN THOẠI — dùng được cả với người CHƯA kết bạn
+   * (bridge gọi zca-js `findUser`, xem GET /all-platform/zalo/find-user).
+   * Trả về null khi số không có tài khoản Zalo hoặc người đó bật ẩn thông tin
+   * (bridge trả 404) — phân biệt với lỗi thật để UI hiện đúng thông báo.
+   */
+  async findUserByPhone(phone: string, accountId: string = ZALO_ACCOUNT_ID): Promise<ZaloStrangerUser | null> {
+    try {
+      const res = await request<{ ok: boolean; user: ZaloStrangerUser }>(
+        `/api/all-platform/zalo/find-user?phone=${encodeURIComponent(phone)}&account_id=${encodeURIComponent(accountId)}`
+      );
+      return res?.user ?? null;
+    } catch (e) {
+      if (e instanceof ZaloApiError && e.status === 404) return null;
+      throw e;
     }
   },
 

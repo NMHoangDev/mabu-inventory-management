@@ -202,7 +202,14 @@ async function ensureConversationInSupabase(
     content?: string | null;
     senderId?: string | null;
     isSelf?: boolean;
-  }
+  },
+  /**
+   * Danh tính ĐÃ BIẾT CHẮC (tên + avatar) — dùng cho luồng tìm người lạ theo
+   * số điện thoại: đã có tên thật từ kết quả tra số, trong khi getUserInfo()
+   * KHÔNG resolve được người chưa kết bạn nên nếu để tự tra lại thì tên hội
+   * thoại rơi về fallback "Zalo <uid>" dù tìm kiếm đúng.
+   */
+  known?: { name?: string | null; avatar?: string | null }
 ): Promise<void> {
   if (typeof window === "undefined" || !threadId) return;
   // eslint-disable-next-line no-console
@@ -278,9 +285,16 @@ async function ensureConversationInSupabase(
     // 2) Row chưa có HOẶC tên là fallback → resolve tên thật:
     //    - Group: gọi bridge /group-info để lấy tên nhóm + avatar
     //    - User: dùng sender_name từ SSE (thường là tên người gửi)
-    let resolvedName: string | undefined = fallbackName;
-    let resolvedAvatar: string | null = existing?.avatar_url ?? null;
-    if (effectiveThreadType === "group") {
+    let resolvedName: string | undefined = known?.name || fallbackName;
+    let resolvedAvatar: string | null = known?.avatar ?? existing?.avatar_url ?? null;
+    if (known?.name) {
+      // Đã biết chắc tên (vd từ kết quả tra số điện thoại) — bỏ qua toàn bộ
+      // bước resolve bên dưới, kể cả DOM-scrape fallback: người này thường
+      // CHƯA từng mở trên Zalo Web nên extension không có gì để scrape, còn
+      // getUserInfo()/getGroupInfo() sẽ chỉ tốn round-trip vô ích.
+      // eslint-disable-next-line no-console
+      console.log(`[ZALO_FE][ENSURE_KNOWN] threadId=${threadId} name="${resolvedName}"`);
+    } else if (effectiveThreadType === "group") {
       try {
         const info = await zaloApi.getGroupInfo(threadId, accountId);
         if (info?.ok) {
@@ -625,7 +639,7 @@ export function useZalo() {
   // Thiết kế mới: UI CHỈ ĐỌC từ Supabase. SSE là signal để refetch.
   // Khi user click thread → load messages từ Supabase, mark read trên Supabase,
   // refetch conversations để reset unread_count.
-  const openConversation = useCallback(async (convId: string) => {
+  const openConversation = useCallback(async (convId: string, known?: { name?: string | null; avatar?: string | null }) => {
     setOpenConvId(convId);
     setMessages([]);
     const threadId = convId.includes(":") ? convId.split(":").slice(1).join(":") : convId;
@@ -657,8 +671,33 @@ export function useZalo() {
           ts: Date.now(),
           content: null,
           isSelf: false,
-        }
+        },
+        known
       );
+      // Hiện ngay trong danh sách với tên thật (nếu đã biết) thay vì chờ sync
+      // — sync từ bridge có thể vẫn trả fallback cho người chưa kết bạn.
+      if (known?.name) {
+        setConversations((prev) =>
+          prev.some((c) => c.thread_id === threadId)
+            ? prev
+            : [
+                {
+                  conversation_id: threadId,
+                  thread_id: threadId,
+                  thread_type: "user",
+                  conversation_name: known.name as string,
+                  account_id: accountIdRef.current,
+                  avatar_url: known.avatar ?? null,
+                  unread_count: 0,
+                  message_count: 0,
+                  has_messages: true,
+                  last_message_ts: Date.now(),
+                  latest_message_at: new Date().toISOString()
+                } as ZaloConversation,
+                ...prev
+              ]
+        );
+      }
     }
 
     setLoadingChat(true);

@@ -2,6 +2,7 @@
 
 import { Loader2, MessageCircle, Radio, X } from "lucide-react";
 import { useState } from "react";
+import { useApp } from "@/components/providers/AppProvider";
 import { useZalo } from "./useZalo";
 import { ZaloAuthCard } from "./ZaloAuthCard";
 import { ZaloBroadcastPanel } from "./ZaloBroadcastPanel";
@@ -10,9 +11,24 @@ import { ZaloConversationList } from "./ZaloConversationList";
 
 export function ZaloPageContent() {
   const z = useZalo();
+  const { currentAccountId } = useApp();
+  // useZalo() tự resolve accountId nội bộ (currentAccountId → fallback
+  // "shop-owner") nhưng không expose ra ngoài — lấy lại y hệt logic đó ở đây
+  // để truyền accountId xuống ZaloConversationList cho tính năng tra số điện thoại.
+  const accountId = currentAccountId || "shop-owner";
   const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   const currentConv = z.conversations.find((c) => c.conversation_id === z.openConvId) || null;
+
+  // Mở luôn hội thoại vừa nhắn; sync để nó xuất hiện trong danh sách (hội thoại
+  // với người lạ chưa từng có trong list trước đó). Dùng chung cho cả bản
+  // desktop lẫn bản mobile của ZaloConversationList bên dưới.
+  function handleStrangerMessaged(conversationId: string, known: { name: string; avatar: string | null }) {
+    // Truyền tên/avatar đã tra được xuống — nếu không, hội thoại với người chưa
+    // kết bạn sẽ hiện "Zalo <uid>" vì getUserInfo() không resolve được họ.
+    void z.openConversation(conversationId, known);
+    z.showToast('Đã gửi "Hi".', true);
+  }
   const isBroadcasting = z.broadcastStatus && z.broadcastStatus.status !== "completed" && z.broadcastStatus.status !== "failed";
   // Trong lúc polling dùng ZaloBroadcastStatus (có total/sent), ngay sau
   // khi send thì status là ZaloBroadcastResponse (có total_targets). Lấy max.
@@ -86,6 +102,8 @@ export function ZaloPageContent() {
             onOpen={z.openConversation}
             onSync={z.syncConversations}
             onSelectBroadcast={() => setBroadcastOpen(true)}
+            accountId={accountId}
+            onStrangerMessaged={handleStrangerMessaged}
           />
         </div>
 
@@ -115,6 +133,8 @@ export function ZaloPageContent() {
           onOpen={z.openConversation}
           onSync={z.syncConversations}
           onSelectBroadcast={() => setBroadcastOpen(true)}
+          accountId={accountId}
+          onStrangerMessaged={handleStrangerMessaged}
         />
       </div>
 
