@@ -1,7 +1,8 @@
 # =============================================================================
-# zalo-account-module — Next.js app thuần (next start, không có worker nền).
-# Build context = repo root (giống zalo-bridge.Dockerfile) để COPY riêng thư
-# mục con.
+# zalo-account-module — Next.js app + custom server (worker nền: gửi hàng loạt
+# theo số điện thoại + chiến dịch tự động, chạy cùng process, xem
+# services/zalo-account-module/server.js). Build context = repo root (giống
+# zalo-bridge.Dockerfile) để COPY riêng thư mục con.
 # =============================================================================
 FROM node:20-alpine AS builder
 
@@ -33,7 +34,14 @@ RUN npm install --omit=dev --no-audit --no-fund \
 
 COPY --from=builder --chown=acctmod:nodejs /app/.next ./.next
 COPY --from=builder --chown=acctmod:nodejs /app/next.config.mjs ./next.config.mjs
+COPY --from=builder --chown=acctmod:nodejs /app/server.js ./server.js
+COPY --from=builder --chown=acctmod:nodejs /app/worker ./worker
 COPY --from=builder --chown=acctmod:nodejs /app/public ./public
+
+# Ảnh upload (gửi hàng loạt/chiến dịch) — volume Docker mount đè lên thư mục
+# này (xem docker-compose.yml); tạo sẵn với đúng chủ sở hữu để process chạy
+# dưới user non-root (acctmod) ghi được, không bị EACCES ngay lần upload đầu.
+RUN mkdir -p /app/uploads && chown acctmod:nodejs /app/uploads
 
 USER acctmod
 
@@ -42,4 +50,4 @@ EXPOSE 3002
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD wget -qO- http://127.0.0.1:3002/api/health >/dev/null 2>&1 || exit 1
 
-CMD ["npm", "run", "start"]
+CMD ["node", "server.js"]

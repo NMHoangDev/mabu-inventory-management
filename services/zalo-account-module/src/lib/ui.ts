@@ -47,6 +47,11 @@ export const inputWithIcon = `${input} pl-9`;
 export const select =
   "h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 shadow-sm " + FOCUS;
 
+/** Textarea nhiều dòng — cùng ngôn ngữ hình ảnh với `input` (viền + focus ring), chỉ khác chiều cao co giãn. */
+export const textarea =
+  "w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-[color,box-shadow] placeholder:text-slate-400 disabled:opacity-50 " +
+  FOCUS;
+
 /** Thẻ/panel — phân định bằng viền, shadow rất nhẹ. */
 export const card = "rounded-xl border border-slate-200 bg-white shadow-sm";
 

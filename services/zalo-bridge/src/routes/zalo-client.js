@@ -484,6 +484,160 @@ router.get('/all-platform/zalo/find-user', async (req, res) => {
   }
 });
 
+// ── Hành động HÀNG LOẠT theo SỐ ĐIỆN THOẠI (gửi hàng loạt / chiến dịch tự động
+// ở zalo-account-module) ────────────────────────────────────────────────────
+//
+// 3 endpoint dưới đây đều nhận `phone`, tự tra ra uid qua findUser rồi thực
+// hiện 1 hành động. Gộp 2 bước (tra + hành động) vào 1 lần gọi để phía runner
+// (worker/*.js ở zalo-account-module) không phải tự quản lý findUser riêng.
+//
+// Rate-limit/giãn cách giữa các lần gọi là trách nhiệm của CALLER (runner) —
+// bridge không tự giới hạn tốc độ ở tầng này, xem cảnh báo trong response.
+
+async function resolvePhoneToUid(api, phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) throw Object.assign(new Error('missing phone'), { statusCode: 400 });
+  const normalized = digits.startsWith('0') ? '84' + digits.slice(1) : digits;
+  const user = await api.findUser(normalized);
+  const uid = user && (user.uid || user.userId);
+  if (!uid) throw Object.assign(new Error('not_found'), { statusCode: 404 });
+  return { uid: String(uid), user, phone: normalized };
+}
+
+// Tải ảnh từ URL (Supabase Storage, CDN...) về file tạm cục bộ trên chính máy
+// bridge — zca-js `uploadAttachment`/`sendMessage({attachments})` CHỈ nhận
+// đường dẫn file local (xem route send-media phía trên), không nhận URL trực
+// tiếp. Giới hạn 15MB/ảnh + timeout 20s để 1 URL hỏng không treo cả job.
+async function downloadImageToTemp(url) {
+  const res = await axios.get(url, {
+    responseType: 'arraybuffer',
+    timeout: 20_000,
+    maxContentLength: 15 * 1024 * 1024,
+    validateStatus: (s) => s >= 200 && s < 300,
+  });
+  const contentType = String(res.headers?.['content-type'] || '');
+  const extFromUrl = path.extname(new URL(url).pathname).replace(/[^a-zA-Z0-9.]/g, '');
+  const ext = extFromUrl || (contentType.includes('png') ? '.png' : contentType.includes('webp') ? '.webp' : '.jpg');
+  const filePath = path.join(UPLOAD_TEMP_DIR, `bulk_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`);
+  fs.writeFileSync(filePath, res.data);
+  return filePath;
+}
+
+router.post('/all-platform/zalo/action/send-by-phone', async (req, res) => {
+  const tempPaths = [];
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+
+    const phone = String(req.body?.phone || '').trim();
+    const text = String(req.body?.message || '').trim();
+    const imageUrls = Array.isArray(req.body?.image_urls) ? req.body.image_urls.filter(Boolean) : [];
+    if (!phone) return res.status(400).json({ error: 'missing phone' });
+    if (!text && imageUrls.length === 0) return res.status(400).json({ error: 'message or image_urls is required' });
+
+    let resolved;
+    try {
+      resolved = await resolvePhoneToUid(ctx.api, phone);
+    } catch (e) {
+      return res.status(e.statusCode || 502).json({ error: e.message, phone });
+    }
+
+    for (const url of imageUrls) {
+      try {
+        tempPaths.push(await downloadImageToTemp(url));
+      } catch (e) {
+        logger.warn(`[${ctx.accountId}] download image failed url=${url}: ${e.message}`);
+      }
+    }
+
+    try {
+      await sessionManager.sendMessage(ctx.accountId, resolved.uid, 'user', {
+        msg: text,
+        ...(tempPaths.length > 0 ? { attachments: tempPaths.length === 1 ? tempPaths[0] : tempPaths } : {}),
+      });
+    } catch (e) {
+      return res.status(502).json({ error: e.message, phone, uid: resolved.uid });
+    }
+
+    res.json({ ok: true, phone: resolved.phone, uid: resolved.uid, display_name: resolved.user.display_name || resolved.user.zalo_name || null });
+  } catch (err) {
+    logger.error('POST action/send-by-phone error', { err: err.message });
+    res.status(500).json({ error: err.message });
+  } finally {
+    for (const p of tempPaths) {
+      try { fs.unlinkSync(p); } catch (_) { /* ignore */ }
+    }
+  }
+});
+
+router.post('/all-platform/zalo/action/add-friend-by-phone', async (req, res) => {
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+
+    const phone = String(req.body?.phone || '').trim();
+    const message = String(req.body?.message || 'Xin chào, kết bạn với mình nhé!').trim();
+    if (!phone) return res.status(400).json({ error: 'missing phone' });
+
+    let resolved;
+    try {
+      resolved = await resolvePhoneToUid(ctx.api, phone);
+    } catch (e) {
+      return res.status(e.statusCode || 502).json({ error: e.message, phone });
+    }
+
+    try {
+      await ctx.api.sendFriendRequest(message, resolved.uid);
+    } catch (e) {
+      // Zalo trả lỗi khi đã là bạn / đã gửi lời mời trước đó — coi là "đã gửi", không phải lỗi cứng.
+      const alreadyDone = /friend|already|exist/i.test(e.message || '');
+      if (!alreadyDone) return res.status(502).json({ error: e.message, phone, uid: resolved.uid });
+    }
+
+    res.json({ ok: true, phone: resolved.phone, uid: resolved.uid, display_name: resolved.user.display_name || resolved.user.zalo_name || null });
+  } catch (err) {
+    logger.error('POST action/add-friend-by-phone error', { err: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/all-platform/zalo/action/invite-group-by-phone', async (req, res) => {
+  try {
+    const ctx = requireLoggedIn(req, res);
+    if (!ctx) return;
+
+    const phone = String(req.body?.phone || '').trim();
+    const groupId = String(req.body?.group_id || '').trim();
+    if (!phone) return res.status(400).json({ error: 'missing phone' });
+    if (!groupId) return res.status(400).json({ error: 'missing group_id' });
+
+    let resolved;
+    try {
+      resolved = await resolvePhoneToUid(ctx.api, phone);
+    } catch (e) {
+      return res.status(e.statusCode || 502).json({ error: e.message, phone });
+    }
+
+    try {
+      // addUserToGroup: thêm THẲNG vào nhóm mình đang quản trị (không cần
+      // người kia bấm chấp nhận) — đúng ngữ cảnh "mời vào nhóm MÌNH".
+      const result = await ctx.api.addUserToGroup(resolved.uid, groupId);
+      const errorMembers = Array.isArray(result?.errorMembers) ? result.errorMembers : [];
+      if (errorMembers.includes(resolved.uid)) {
+        const detail = result?.error_data?.[resolved.uid];
+        return res.status(502).json({ error: Array.isArray(detail) ? detail.join(', ') : 'add_to_group_failed', phone, uid: resolved.uid });
+      }
+    } catch (e) {
+      return res.status(502).json({ error: e.message, phone, uid: resolved.uid });
+    }
+
+    res.json({ ok: true, phone: resolved.phone, uid: resolved.uid, display_name: resolved.user.display_name || resolved.user.zalo_name || null });
+  } catch (err) {
+    logger.error('POST action/invite-group-by-phone error', { err: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Conversations: sync (force refresh) ────────────────────────────────────────
 //
 // Đơn giản là gọi lại /conversations rồi trả summary. Đếm số bạn + nhóm.

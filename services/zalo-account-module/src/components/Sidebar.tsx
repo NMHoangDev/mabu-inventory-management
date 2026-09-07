@@ -8,13 +8,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MessageCircle, Smartphone, Users } from "lucide-react";
+import { Megaphone, MessageCircle, Repeat, Send, Smartphone, Users } from "lucide-react";
 import StaffBadge from "@/components/StaffBadge";
 
 const NAV_ITEMS = [
   { href: "/", label: "Tài khoản Zalo", icon: Smartphone, desc: "Kết nối & quản lý" },
   { href: "/staff", label: "Nhân viên & Phân quyền", icon: Users, desc: "Cấp quyền Gmail" },
-  { href: "/chat", label: "Nhắn tin", icon: MessageCircle, desc: "Gửi & nhận tin" }
+  { href: "/chat", label: "Nhắn tin", icon: MessageCircle, desc: "Gửi & nhận tin" },
+  { href: "/forward-rules", label: "Chuyển tiếp", icon: Send, desc: "Nhóm chính → nhóm đích" },
+  { href: "/bulk-send", label: "Gửi hàng loạt", icon: Megaphone, desc: "Theo danh sách số điện thoại" },
+  { href: "/campaigns", label: "Chiến dịch tự động", icon: Repeat, desc: "Nhắn tin lặp lịch hàng ngày" }
 ];
 
 export default function Sidebar() {

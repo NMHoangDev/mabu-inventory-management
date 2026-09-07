@@ -98,6 +98,10 @@ services:
       HOST: "0.0.0.0"
     ports:
       - "3002:3002"
+    volumes:
+      # Ảnh đính kèm gửi hàng loạt/chiến dịch (app/api/uploads/*) — phải persist
+      # qua các lần rebuild, /app/uploads không nằm trong image.
+      - zalo-account-module-uploads:/app/uploads
     depends_on:
       zalo-bridge:
         condition: service_healthy
@@ -157,6 +161,7 @@ volumes:
   frontend-extensions:
   zalo-sessions:
   zalo-storage:
+  zalo-account-module-uploads:
 
 networks:
   invoiceflow-net:

@@ -18,6 +18,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Send,
   Smartphone,
   Trash2,
   X,
@@ -319,14 +320,24 @@ export default function AccountsPage() {
                     <td className={table.cell}>
                       <div className="flex items-center justify-end gap-1.5">
                         {acc.status === "connected" ? (
-                          <Link
-                            href={`/chat?accountId=${encodeURIComponent(acc.account_id)}`}
-                            className={`${btn.outline} ${btnSize.sm}`}
-                            title={`Vào chat với tài khoản ${acc.display_name || acc.account_id}`}
-                          >
-                            <MessageCircle className="h-3.5 w-3.5" />
-                            Chat
-                          </Link>
+                          <>
+                            <Link
+                              href={`/chat?accountId=${encodeURIComponent(acc.account_id)}`}
+                              className={`${btn.outline} ${btnSize.sm}`}
+                              title={`Vào chat với tài khoản ${acc.display_name || acc.account_id}`}
+                            >
+                              <MessageCircle className="h-3.5 w-3.5" />
+                              Chat
+                            </Link>
+                            <Link
+                              href={`/forward-rules?accountId=${encodeURIComponent(acc.account_id)}`}
+                              className={`${btn.outline} ${btnSize.sm}`}
+                              title={`Cấu hình chuyển tiếp tin nhắn cho tài khoản ${acc.display_name || acc.account_id}`}
+                            >
+                              <Send className="h-3.5 w-3.5" />
+                              Chuyển tiếp
+                            </Link>
+                          </>
                         ) : (
                           <button
                             type="button"
