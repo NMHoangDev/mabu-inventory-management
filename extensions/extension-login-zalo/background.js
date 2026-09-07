@@ -463,9 +463,22 @@ async function handleContentResponse(response) {
       'importZaloInProgress',
       'bridgeUrl',
       'accountId',
-      'ownerId'
+      'ownerId',
+      'startedAt'
     ]);
-    const isImportResumed = sessionData.importZaloInProgress;
+    // State "importZaloInProgress" có thể bị KẸT từ 1 lần thử trước bị ngắt
+    // giữa chừng (đóng tab, service worker bị kill, mất mạng…) mà không kịp
+    // dọn (các nhánh lỗi phía dưới có set về false, nhưng không phải MỌI
+    // đường thoát đều qua đó — vd tab bị đóng thủ công). Nếu state đó đã quá
+    // 10 phút, KHÔNG dùng lại — bridgeUrl lưu từ lúc đó có thể đã lỗi thời
+    // (đổi domain/route), gây gọi nhầm backend và lỗi 400/404 khó hiểu.
+    const STALE_MS = 10 * 60 * 1000;
+    const isStale = !sessionData.startedAt || (Date.now() - sessionData.startedAt) > STALE_MS;
+    if (sessionData.importZaloInProgress && isStale) {
+      log(`handleContentResponse: stale importZaloInProgress (startedAt=${sessionData.startedAt || 'none'}) — bỏ qua, coi như phiên mới`);
+      await chrome.storage.session.set({ importZaloInProgress: false, bridgeUrl: null, accountId: null, ownerId: null, startedAt: null });
+    }
+    const isImportResumed = sessionData.importZaloInProgress && !isStale;
 
     // If IMPORT_ZALO_SESSION handler is managing this session, don't double-sync
     if (importZaloInProgress) {
@@ -749,12 +762,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const importApiKey = params.apiKey || params.api_key || "";
 
           // Persist state to session storage
+          // `startedAt` cho phép flow "resumed" (handleContentResponse) phát
+          // hiện state CŨ bị kẹt (tab đóng giữa chừng, SW bị kill, lỗi mạng…)
+          // và bỏ qua thay vì gọi lại backend_url từ RẤT LÂU trước — bridgeUrl
+          // có thể đã đổi (domain/route đổi) từ lúc đó, gây lỗi 400/404 khó hiểu.
           await chrome.storage.session.set({
             importZaloInProgress: true,
             bridgeUrl,
             accountId,
             chatwootAccountId,
-            ownerId
+            ownerId,
+            startedAt: Date.now()
           });
           if (importApiKey) {
             await chrome.storage.local.set({ apiKey: importApiKey });

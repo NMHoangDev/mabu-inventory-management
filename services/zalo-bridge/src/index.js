@@ -57,7 +57,15 @@ app.use(express.urlencoded({ extended: true }));
 // với cùng giá trị mà request thật sẽ gửi. Header `x-user-id` là non-simple → bắt buộc.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (!origin || allowedOrigins.includes(origin)) {
+  // "chrome-extension://" (bare, không kèm id) trong ALLOWED_ORIGINS là Ý ĐỊNH
+  // cho phép MỌI extension — nhưng Origin header thật luôn kèm id 32 ký tự cụ
+  // thể ("chrome-extension://<id>"), nên so khớp CHÍNH XÁC (includes()) không
+  // bao giờ khớp, khiến CORS bị từ chối âm thầm cho mọi request từ content
+  // script/page-bridge (context KHÔNG được host_permissions miễn CORS như
+  // service worker nền — xem extensions/extension-login-zalo/content-script-bridge.js).
+  const allowAnyExtension = allowedOrigins.includes('chrome-extension://');
+  const isAllowedExtension = allowAnyExtension && typeof origin === 'string' && origin.startsWith('chrome-extension://');
+  if (!origin || allowedOrigins.includes(origin) || isAllowedExtension) {
     res.header('Access-Control-Allow-Origin', origin || allowedOrigins[0]);
   }
   res.header('Vary', 'Origin');

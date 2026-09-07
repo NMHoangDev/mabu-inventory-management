@@ -47,59 +47,69 @@ async function loadCampaign(id: string) {
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  if (!SUPABASE_URL || !KEY) return NextResponse.json({ recipients: [], error: "supabase_unconfigured" });
+  try {
+    const { id } = await ctx.params;
+    if (!SUPABASE_URL || !KEY) return NextResponse.json({ recipients: [], error: "supabase_unconfigured" });
 
-  const campaign = await loadCampaign(id);
-  if (!campaign) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    const campaign = await loadCampaign(id);
+    if (!campaign) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const staff = await getCurrentStaff(req);
-  if (!canViewAccount(staff, campaign.account_id)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const staff = await getCurrentStaff(req);
+    if (!canViewAccount(staff, campaign.account_id)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const status = req.nextUrl.searchParams.get("status") || "";
-  const limitParam = Number(req.nextUrl.searchParams.get("limit")) || 200;
-  const limit = Math.min(Math.max(1, limitParam), 1000);
-  const filter = status ? `&status=eq.${encodeURIComponent(status)}` : "";
+    const status = req.nextUrl.searchParams.get("status") || "";
+    const limitParam = Number(req.nextUrl.searchParams.get("limit")) || 200;
+    const limit = Math.min(Math.max(1, limitParam), 1000);
+    const filter = status ? `&status=eq.${encodeURIComponent(status)}` : "";
 
-  const res = await sb(
-    `/zalo_campaign_recipients?campaign_id=eq.${encodeURIComponent(id)}&select=*&order=id.asc&limit=${limit}${filter}`
-  );
-  const recipients = res.ok ? await res.json() : [];
-  return NextResponse.json({ recipients });
+    const res = await sb(
+      `/zalo_campaign_recipients?campaign_id=eq.${encodeURIComponent(id)}&select=*&order=id.asc&limit=${limit}${filter}`
+    );
+    const recipients = res.ok ? await res.json() : [];
+    return NextResponse.json({ recipients });
+  } catch (e) {
+    const err = e as { message?: string };
+    return NextResponse.json({ recipients: [], error: err?.message || "internal_error" }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
+  try {
+    const { id } = await ctx.params;
+    if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
 
-  const campaign = await loadCampaign(id);
-  if (!campaign) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    const campaign = await loadCampaign(id);
+    if (!campaign) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const staff = await getCurrentStaff(req);
-  if (staff.role !== "admin" && !canBroadcastTo(staff, campaign.account_id)) {
-    return NextResponse.json({ error: "Bạn không có quyền thêm người nhận cho chiến dịch này" }, { status: 403 });
+    const staff = await getCurrentStaff(req);
+    if (staff.role !== "admin" && !canBroadcastTo(staff, campaign.account_id)) {
+      return NextResponse.json({ error: "Bạn không có quyền thêm người nhận cho chiến dịch này" }, { status: 403 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const phones = normalizePhones(body?.phones);
+    if (phones.length === 0) return NextResponse.json({ error: "Danh sách số điện thoại trống hoặc không hợp lệ" }, { status: 400 });
+    if (phones.length > 2000) {
+      return NextResponse.json({ error: "Tối đa 2000 số/lần — chia nhỏ danh sách để an toàn hơn cho tài khoản" }, { status: 400 });
+    }
+
+    const rows = phones.map((phone) => ({ campaign_id: Number(id), phone, status: "pending" }));
+    const res = await sb(`/zalo_campaign_recipients?on_conflict=campaign_id,phone`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify(rows)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return NextResponse.json({ error: text || `supabase ${res.status}` }, { status: 500 });
+    }
+
+    // PostgREST với Prefer: resolution=ignore-duplicates + return=minimal không trả
+    // về danh sách dòng thực sự mới được tạo (số đã tồn tại bị bỏ qua âm thầm) —
+    // trả về số đã chuẩn hoá/khử trùng gửi lên như một ước tính best-effort.
+    return NextResponse.json({ added: phones.length });
+  } catch (e) {
+    const err = e as { message?: string };
+    return NextResponse.json({ error: err?.message || "internal_error" }, { status: 500 });
   }
-
-  const body = await req.json().catch(() => ({}));
-  const phones = normalizePhones(body?.phones);
-  if (phones.length === 0) return NextResponse.json({ error: "Danh sách số điện thoại trống hoặc không hợp lệ" }, { status: 400 });
-  if (phones.length > 2000) {
-    return NextResponse.json({ error: "Tối đa 2000 số/lần — chia nhỏ danh sách để an toàn hơn cho tài khoản" }, { status: 400 });
-  }
-
-  const rows = phones.map((phone) => ({ campaign_id: Number(id), phone, status: "pending" }));
-  const res = await sb(`/zalo_campaign_recipients?on_conflict=campaign_id,phone`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
-    body: JSON.stringify(rows)
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    return NextResponse.json({ error: text || `supabase ${res.status}` }, { status: 500 });
-  }
-
-  // PostgREST với Prefer: resolution=ignore-duplicates + return=minimal không trả
-  // về danh sách dòng thực sự mới được tạo (số đã tồn tại bị bỏ qua âm thầm) —
-  // trả về số đã chuẩn hoá/khử trùng gửi lên như một ước tính best-effort.
-  return NextResponse.json({ added: phones.length });
 }

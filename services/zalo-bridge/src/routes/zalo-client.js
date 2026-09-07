@@ -591,7 +591,19 @@ router.post('/all-platform/zalo/action/add-friend-by-phone', async (req, res) =>
     } catch (e) {
       // Zalo trả lỗi khi đã là bạn / đã gửi lời mời trước đó — coi là "đã gửi", không phải lỗi cứng.
       const alreadyDone = /friend|already|exist/i.test(e.message || '');
-      if (!alreadyDone) return res.status(502).json({ error: e.message, phone, uid: resolved.uid });
+      if (!alreadyDone) logger.warn(`[${ctx.accountId}] sendFriendRequest failed phone=${phone}: ${e.message}`);
+    }
+
+    // QUAN TRỌNG: `message` truyền cho sendFriendRequest() ở trên chỉ là NOTE
+    // đính kèm lời mời kết bạn (Zalo hiển thị trong thẻ lời mời, KHÔNG phải
+    // tin nhắn thật trong hộp thoại) — người nhận không thấy nó như 1 tin
+    // nhắn bình thường. Phải gọi sendMessage() riêng để tin chào thật sự xuất
+    // hiện trong cuộc trò chuyện — giống hệt cơ chế "tìm người lạ, gửi Hi" đã
+    // xác nhận hoạt động với người chưa kết bạn.
+    try {
+      await sessionManager.sendMessage(ctx.accountId, resolved.uid, 'user', { msg: message });
+    } catch (e) {
+      return res.status(502).json({ error: e.message, phone, uid: resolved.uid });
     }
 
     res.json({ ok: true, phone: resolved.phone, uid: resolved.uid, display_name: resolved.user.display_name || resolved.user.zalo_name || null });

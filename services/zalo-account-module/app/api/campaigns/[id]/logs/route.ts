@@ -26,21 +26,26 @@ async function loadCampaign(id: string) {
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  if (!SUPABASE_URL || !KEY) return NextResponse.json({ logs: [], error: "supabase_unconfigured" });
+  try {
+    const { id } = await ctx.params;
+    if (!SUPABASE_URL || !KEY) return NextResponse.json({ logs: [], error: "supabase_unconfigured" });
 
-  const campaign = await loadCampaign(id);
-  if (!campaign) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    const campaign = await loadCampaign(id);
+    if (!campaign) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const staff = await getCurrentStaff(req);
-  if (!canViewAccount(staff, campaign.account_id)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const staff = await getCurrentStaff(req);
+    if (!canViewAccount(staff, campaign.account_id)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const limitParam = Number(req.nextUrl.searchParams.get("limit")) || 50;
-  const limit = Math.min(Math.max(1, limitParam), 200);
+    const limitParam = Number(req.nextUrl.searchParams.get("limit")) || 50;
+    const limit = Math.min(Math.max(1, limitParam), 200);
 
-  const res = await sb(
-    `/zalo_campaign_logs?campaign_id=eq.${encodeURIComponent(id)}&select=*&order=created_at.desc&limit=${limit}`
-  );
-  const logs = res.ok ? await res.json() : [];
-  return NextResponse.json({ logs });
+    const res = await sb(
+      `/zalo_campaign_logs?campaign_id=eq.${encodeURIComponent(id)}&select=*&order=created_at.desc&limit=${limit}`
+    );
+    const logs = res.ok ? await res.json() : [];
+    return NextResponse.json({ logs });
+  } catch (e) {
+    const err = e as { message?: string };
+    return NextResponse.json({ logs: [], error: err?.message || "internal_error" }, { status: 500 });
+  }
 }

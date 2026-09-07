@@ -28,61 +28,76 @@ async function loadJob(id: string) {
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
+  try {
+    const { id } = await ctx.params;
+    if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
 
-  const job = await loadJob(id);
-  if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    const job = await loadJob(id);
+    if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const staff = await getCurrentStaff(req);
-  if (!canBroadcastTo(staff, job.account_id)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const staff = await getCurrentStaff(req);
+    if (!canBroadcastTo(staff, job.account_id)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const itemsRes = await sb(`/zalo_bulk_job_items?job_id=eq.${id}&select=*&order=id.asc&limit=500`);
-  const items = itemsRes.ok ? await itemsRes.json() : [];
-  return NextResponse.json({ job, items });
+    const itemsRes = await sb(`/zalo_bulk_job_items?job_id=eq.${id}&select=*&order=id.asc&limit=500`);
+    const items = itemsRes.ok ? await itemsRes.json() : [];
+    return NextResponse.json({ job, items });
+  } catch (e) {
+    const err = e as { message?: string };
+    return NextResponse.json({ error: err?.message || "internal_error" }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
+  try {
+    const { id } = await ctx.params;
+    if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
 
-  const job = await loadJob(id);
-  if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    const job = await loadJob(id);
+    if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const staff = await getCurrentStaff(req);
-  if (staff.role !== "admin" && !canBroadcastTo(staff, job.account_id)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const staff = await getCurrentStaff(req);
+    if (staff.role !== "admin" && !canBroadcastTo(staff, job.account_id)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const status = String(body?.status || "");
+    if (!["paused", "running", "cancelled"].includes(status)) {
+      return NextResponse.json({ error: "status không hợp lệ" }, { status: 400 });
+    }
+    // Worker chỉ nhặt job status IN ('pending','running') — resume từ 'paused' phải về 'running'.
+    const res = await sb(`/zalo_bulk_jobs?id=eq.${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) return NextResponse.json({ error: await res.text() }, { status: 500 });
+    const [updated] = await res.json();
+    return NextResponse.json({ job: updated });
+  } catch (e) {
+    const err = e as { message?: string };
+    return NextResponse.json({ error: err?.message || "internal_error" }, { status: 500 });
   }
-
-  const body = await req.json().catch(() => ({}));
-  const status = String(body?.status || "");
-  if (!["paused", "running", "cancelled"].includes(status)) {
-    return NextResponse.json({ error: "status không hợp lệ" }, { status: 400 });
-  }
-  // Worker chỉ nhặt job status IN ('pending','running') — resume từ 'paused' phải về 'running'.
-  const res = await sb(`/zalo_bulk_jobs?id=eq.${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", Prefer: "return=representation" },
-    body: JSON.stringify({ status })
-  });
-  if (!res.ok) return NextResponse.json({ error: await res.text() }, { status: 500 });
-  const [updated] = await res.json();
-  return NextResponse.json({ job: updated });
 }
 
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
+  try {
+    const { id } = await ctx.params;
+    if (!SUPABASE_URL || !KEY) return NextResponse.json({ error: "supabase_unconfigured" }, { status: 500 });
 
-  const job = await loadJob(id);
-  if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    const job = await loadJob(id);
+    if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const staff = await getCurrentStaff(req);
-  if (staff.role !== "admin" && !canBroadcastTo(staff, job.account_id)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const staff = await getCurrentStaff(req);
+    if (staff.role !== "admin" && !canBroadcastTo(staff, job.account_id)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const res = await sb(`/zalo_bulk_jobs?id=eq.${id}`, { method: "DELETE" });
+    if (!res.ok) return NextResponse.json({ error: await res.text() }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const err = e as { message?: string };
+    return NextResponse.json({ error: err?.message || "internal_error" }, { status: 500 });
   }
-
-  const res = await sb(`/zalo_bulk_jobs?id=eq.${id}`, { method: "DELETE" });
-  if (!res.ok) return NextResponse.json({ error: await res.text() }, { status: 500 });
-  return NextResponse.json({ ok: true });
 }
